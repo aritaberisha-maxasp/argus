@@ -24,7 +24,8 @@ What constrains us:
 1. **Microsoft Azure, region Germany West Central (Frankfurt), in Max ASP's own Microsoft tenant.** Same sign in as Microsoft 365, managed identity to reach Graph and secrets without stored passwords, immutable blob storage for GoBD. Con: ties us to Azure services.
 2. **AWS, region Frankfurt.** Equally capable, S3 Object Lock covers GoBD. Con: a second identity world next to Microsoft 365, so approver sign in and Graph access need extra setup and extra secrets.
 3. **A German hoster such as Hetzner.** Cheapest. Con: we would run and patch the database, the secrets store and the backups ourselves, and no locked retention storage comes ready made.
-4. **A server inside Max ASP next to DATEV.** Easy DATEV access. Con: Max ASP would carry patching, backups and uptime, and Graph webhooks need a public address anyway.
+4. **A workspace in Max ASP's existing Microsoft Fabric capacity.** Already paid for. Con: Fabric is an analytics platform. It cannot host the approval web app or receive Graph notifications, OneLake has no locked retention for GoBD, and notebooks and pipelines are a poor fit for transactional work such as approvals and payment runs. Fabric stays a good place for reporting on ARGUS data later.
+5. **A server inside Max ASP next to DATEV.** Easy DATEV access. Con: Max ASP would carry patching, backups and uptime, and Graph webhooks need a public address anyway.
 
 ### Language and framework
 
@@ -128,6 +129,8 @@ Not included: the cost of reading documents with AI or OCR (decided in issue #5,
 - How the audit log is made tamper evident inside PostgreSQL is decided in issue #7. It can also write a daily copy into the locked blob store.
 
 ## Questions for Arita (need Max ASP's approval)
+
+Arita answered yes to all four on 15 Oct 2026. Open follow up: whether ARGUS goes in its own resource group in the Azure subscription that already pays for Max ASP's Fabric capacity.
 
 1. **Azure subscription.** May ARGUS run in an Azure subscription owned by Max ASP, in its existing Microsoft tenant, in Germany West Central? Someone with admin rights at Max ASP has to create it and add a payment method.
 2. **Retention.** May we lock original documents for 10 years, so that nobody can delete them before then? Max ASP's tax advisor should confirm the period.
