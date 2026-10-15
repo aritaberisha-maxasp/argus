@@ -5,7 +5,7 @@
 Sprints are one week, Monday to Sunday.
 
 - **Sunday night, sprint review and planning proposal.** The PO posts one thread in the project with what got done, what carries over, the acceptance test results from QA, and a ranked list of proposed issues for the next sprint. Each proposed issue shows its requirement IDs, a size (S, M or L) and what it depends on.
-- **Monday morning, planning.** Arita reorders, drops or adds issues by replying in that thread. Nothing starts until Arita approves the list. The PO then adds the approved issues to the sprint on the board.
+- **Monday morning, planning.** Arita reorders, drops or adds issues by replying in that thread. Nothing starts until Arita approves the list. The PO then adds the approved issues to that sprint's milestone and labels them `status:ready`.
 - **Every morning, daily digest.** The coordinator posts one message: what got done overnight, what is in progress, what is blocked, and what needs Arita today.
 - **Sunday, retro.** A few lines on what to keep, what to change. Lessons go into project memory so the next sprint starts smarter.
 
@@ -26,12 +26,21 @@ If something blocks the issue, add the `blocked` label and say on the issue what
 
 Backlog, Ready, In progress, In review, QA passed, Ready for Arita, Done.
 
+The board is driven by labels, because agents can update labels but cannot move cards on a GitHub Projects board. An open issue with no status label is in the Backlog. The labels `status:ready`, `status:in-progress`, `status:in-review`, `status:qa-passed` and `ready-for-arita` are the columns in between, and a closed issue is Done. An issue carries exactly one status label at a time: whoever moves it removes the old one.
+
+Quick views for Arita:
+- [Ready for Arita](https://github.com/aritaberisha-maxasp/argus/issues?q=is%3Aopen+label%3Aready-for-arita)
+- [Questions for Arita](https://github.com/aritaberisha-maxasp/argus/issues?q=is%3Aopen+label%3Aneeds-arita)
+- [Blocked](https://github.com/aritaberisha-maxasp/argus/issues?q=is%3Aopen+label%3Ablocked)
+- [Current sprint](https://github.com/aritaberisha-maxasp/argus/milestones)
+
 ## Labels
 
 - **Type:** `story`, `spike`, `bug`, `adr`, `chore`
 - **Requirement area:** `req:IN`, `req:PR`, `req:AP`, `req:BK`, `req:PY`, `req:AR`, `req:BA`, `req:VM`, `req:EX`, `req:NF`
 - **Role:** `role:po`, `role:architect`, `role:dev`, `role:qa`, `role:compliance`
-- **Flow:** `ready-for-arita`, `needs-arita`, `blocked`
+- **Status:** `status:ready`, `status:in-progress`, `status:in-review`, `status:qa-passed`, `ready-for-arita`
+- **Flow:** `needs-arita`, `blocked`
 - **Size:** `size:S`, `size:M`, `size:L`
 
 ## How agents talk to each other
