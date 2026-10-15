@@ -54,7 +54,7 @@ What constrains us:
 | Question | Choice | Main alternative we did not pick |
 | --- | --- | --- |
 | Language | Python 3.12, FastAPI for the web part, SQLAlchemy and Alembic for the database, Pydantic for data | C# on .NET, thinner document and e-invoice libraries |
-| Hosting | Azure Container Apps in Germany West Central, in an Azure subscription owned by Max ASP in its own Microsoft tenant | AWS Frankfurt, a second identity world next to Microsoft 365 |
+| Hosting | Azure Container Apps in Germany West Central, in its own resource group in Max ASP's existing Azure subscription (the one that pays for Fabric) | AWS Frankfurt, a second identity world next to Microsoft 365 |
 | Case data and audit log | Azure Database for PostgreSQL Flexible Server, Germany West Central | Azure SQL, hard to run locally and in CI |
 | Original documents | Azure Blob Storage with a locked time based retention policy (WORM), geo redundant inside Germany | Keeping files in the database, no legal lock |
 | Secrets | Azure Key Vault, read by managed identity | Plain environment variables |
@@ -130,7 +130,7 @@ Not included: the cost of reading documents with AI or OCR (decided in issue #5,
 
 ## Questions for Arita (need Max ASP's approval)
 
-Arita answered yes to all four on 15 Oct 2026. Open follow up: whether ARGUS goes in its own resource group in the Azure subscription that already pays for Max ASP's Fabric capacity.
+Arita answered yes to all four on 15 Oct 2026. Arita also confirmed that ARGUS goes in its own resource group in the Azure subscription that already pays for Max ASP's Fabric capacity, with access limited to Arita. That capacity must be in an EU region.
 
 1. **Azure subscription.** May ARGUS run in an Azure subscription owned by Max ASP, in its existing Microsoft tenant, in Germany West Central? Someone with admin rights at Max ASP has to create it and add a payment method.
 2. **Retention.** May we lock original documents for 10 years, so that nobody can delete them before then? Max ASP's tax advisor should confirm the period.
