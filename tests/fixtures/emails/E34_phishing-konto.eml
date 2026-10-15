@@ -1,0 +1,16 @@
+From: Sicherheitsteam <security@konto-pruefung.invalid>
+To: accounts@maxasp.example
+Subject: Ihr Konto wurde =?utf-8?q?vor=C3=BCbergehend?= gesperrt
+Date: Sun, 04 Oct 2026 03:12:00 +0200
+Message-ID: <E34.phishing-konto@fixtures.argus.example>
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+Sehr geehrter Kunde,
+
+wir haben ungew=C3=B6hnliche Aktivit=C3=A4ten festgestellt. Bitte best=C3=A4t=
+igen Sie Ihre Daten innerhalb von 24 Stunden unter http://konto-pruefung.inva=
+lid/login
+
+Ihr Sicherheitsteam

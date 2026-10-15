@@ -1,0 +1,51 @@
+email_id,file,expected_category,expected_route,invoice_count,documents,flags,requirements,note
+E01,E01_buerobedarf-rechnung.eml,incoming_invoice,invoice_processing,1,D01,early_payment_discount,IN-02 IN-04 IN-07 PR-01 PY-05,Plain PDF invoice with early payment discount.
+E02,E02_cloud-hosting-rechnung.eml,incoming_invoice,invoice_processing,1,D02,,IN-02 IN-04 AP-10,"Recurring monthly invoice, still needs normal approval."
+E03,E03_miete-lastschrift.eml,incoming_invoice,invoice_processing,1,D03,direct_debit,IN-04 AP-10 PY-13,"Direct debit vendor: approve and book, never add to a payment run."
+E04,E04_software-uk-invoice-gbp.eml,incoming_invoice,invoice_processing,1,D04,foreign_currency reverse_charge,IN-04 BK-04 PR-01,English invoice in GBP from a UK vendor.
+E05,E05_beratung-ueber-5000.eml,incoming_invoice,invoice_processing,1,D05,second_approval,IN-04 AP-09,"Gross EUR 8,925.00 needs the second approval (AC-3)."
+E06,E06_telekom-neue-bankverbindung.eml,incoming_invoice,invoice_processing,1,D06,iban_mismatch,IN-04 PR-05 VM-04,IBAN on the invoice differs from the vendor master data. Must be blocked (AC-5).
+E07,E07_reinigung-scan.eml,incoming_invoice,invoice_processing,1,D07,scanned,IN-03 IN-04,"Scanned paper invoice as JPEG, slightly rotated with noise."
+E08,E08_cloud-hosting-xrechnung.eml,incoming_invoice,invoice_processing,1,D08,e_invoice,IN-02 IN-04 NF-02,"Structured e-invoice only (XRechnung UBL), no PDF."
+E09,E09_buerobedarf-zugferd.eml,incoming_invoice,invoice_processing,1,D09,e_invoice early_payment_discount,IN-02 IN-04 NF-02,"PDF with embedded factur-x.xml (CII, EN 16931 profile)."
+E10,E10_buerobedarf-gutschrift.eml,incoming_invoice,invoice_processing,1,D10,credit_note,IN-04 BK-05 PY-07,"Incoming credit note, offset in the next payment run."
+E11,E11_software-uk-credit-note.eml,incoming_invoice,invoice_processing,1,D11,credit_note foreign_currency reverse_charge,IN-04 BK-04 BK-05,Credit note in GBP.
+E12,E12_unbekannter-lieferant.eml,incoming_invoice,invoice_processing,1,D12,unknown_vendor,IN-04 VM-03 EX-02,Vendor is not in DATEV. Must land in the exception queue (AC-5).
+E13,E13_lieferant-ohne-freigeber.eml,incoming_invoice,invoice_processing,1,D13,no_approver,IN-04 VM-02 EX-02,Known vendor without an approver in the approver table.
+E14,E14_drei-rechnungen-eine-mail.eml,incoming_invoice,invoice_processing,3,D14 D15 D16,several_invoices,IN-04 IN-08,Three invoices in one email. Must become three cases.
+E15,E15_doppelte-rechnung.eml,incoming_invoice,invoice_processing,1,D01,duplicate,IN-04 IN-10,"Same vendor, number and amount as E01. Must be flagged, not processed twice."
+E16,E16_rechnung-im-mailtext.eml,incoming_invoice,invoice_processing,1,D17,invoice_in_body,IN-02 IN-04,"Invoice data only in the email body, no attachment."
+E17,E17_ausgang-inland.eml,outgoing_invoice,outgoing_booking,1,D21,tax_standard,IN-04 AR-01 AR-02 AR-04,"Domestic customer, 19 % VAT (AC-6)."
+E18,E18_ausgang-eu-reverse-charge.eml,outgoing_invoice,outgoing_booking,1,D22,reverse_charge,IN-04 AR-02 AR-04,"EU business customer, reverse charge (AC-6)."
+E19,E19_ausgang-usa-usd.eml,outgoing_invoice,outgoing_booking,1,D23,foreign_currency not_taxable,IN-04 AR-04 AR-05,"Customer outside the EU, USD, not taxable in Germany."
+E20,E20_ausgang-gutschrift.eml,outgoing_invoice,outgoing_booking,1,D27,credit_note,IN-04 AR-08,Outgoing credit note linked to MA-2026-0101.
+E21,E21_ausgang-xrechnung.eml,outgoing_invoice,outgoing_booking,1,D24,e_invoice,IN-04 AR-01 AR-06 NF-02,"PDF plus XRechnung XML for the same invoice. One case, not two."
+E22,E22_ausgang-unbekannter-kunde.eml,outgoing_invoice,outgoing_booking,1,D25,unknown_customer,IN-04 AR-03 EX-02,Customer not in DATEV. Exception queue.
+E23,E23_ausgang-nummernluecke.eml,outgoing_invoice,outgoing_booking,1,D26,number_gap,IN-04 AR-07,MA-2026-0106 never arrives. The gap must be reported.
+E24,E24_ausgang-storno.eml,outgoing_invoice,outgoing_booking,1,D28,cancellation,IN-04 AR-08,Cancellation linked to MA-2026-0104.
+E25,E25_zahlungserinnerung.eml,payment_reminder,forward_reminder,0,,,IN-04 IN-05 PY-06,"Friendly reminder, PDF letter."
+E26,E26_erste-mahnung.eml,payment_reminder,forward_reminder,0,,,IN-04 IN-05,First dunning letter with a fee.
+E27,E27_payment-reminder-english.eml,payment_reminder,forward_reminder,0,,,IN-04 IN-05,English reminder in the body only.
+E28,E28_letzte-mahnung-scan.eml,payment_reminder,forward_reminder,0,,scanned,IN-03 IN-04 IN-05,"Final dunning letter as a scan. Short body, the content is only in the image."
+E29,E29_inkasso.eml,payment_reminder,forward_reminder,0,,,IN-04 IN-05,"Collection agency, sender is not a known vendor."
+E30,E30_erinnerung-im-mailtext.eml,payment_reminder,forward_reminder,0,,,IN-04 IN-05,German reminder in the body only.
+E31,E31_zweite-mahnung.eml,payment_reminder,forward_reminder,0,,,IN-04 IN-05 PY-06,"Second dunning letter, PDF."
+E32,E32_newsletter-bekannter-lieferant.eml,other,deletion_folder,0,,known_sender,IN-04 IN-06,Newsletter from a known vendor that mentions invoices.
+E33,E33_webinar-e-rechnung.eml,other,deletion_folder,0,,,IN-04 IN-06,Marketing that uses invoice words throughout.
+E34,E34_phishing-konto.eml,other,deletion_folder,0,,spam,IN-04 IN-06,Phishing spam.
+E35,E35_katalog-mit-pdf.eml,other,deletion_folder,0,,known_sender pdf_not_invoice,IN-04 IN-06,"Known vendor, PDF with prices, but it is advertising."
+E36,E36_hausmitteilung.eml,other,deletion_folder,0,,known_sender,IN-04 IN-06,General correspondence from a known vendor.
+E37,E37_angebot-pdf.eml,other,deletion_folder,0,,known_sender pdf_not_invoice,IN-04 IN-06,"Quote with amounts and VAT, not an invoice."
+E38,E38_auftragsbestaetigung.eml,other,deletion_folder,0,,known_sender pdf_not_invoice,IN-04 IN-06,"Order confirmation, not an invoice."
+E39,E39_lieferschein.eml,other,deletion_folder,0,,known_sender pdf_not_invoice,IN-04 IN-06,Delivery note that says it is not an invoice.
+E40,E40_abwesenheitsnotiz.eml,other,deletion_folder,0,,auto_reply,IN-04 IN-06,Out of office reply that quotes an invoice number in the subject.
+E41,E41_interne-einladung.eml,other,deletion_folder,0,,internal,IN-04 IN-06,Internal mail that landed in the accounts inbox.
+E42,E42_steuer-newsletter.eml,other,deletion_folder,0,,,IN-04 IN-06,Tax newsletter full of invoice vocabulary.
+E43,E43_spam-fake-invoice.eml,other,deletion_folder,0,,spam,IN-04 IN-06,"Spam pretending to be an invoice: unknown sender, no document, only a link."
+E44,E44_kundenfrage-rechnung.eml,other,deletion_folder,0,,general_correspondence open_question,IN-04 IN-06,"Customer question about an invoice. Other under IN-04, but deleting it may be wrong. Question raised with Arita on issue #9."
+E45,E45_proforma.eml,uncertain,manual_review,1,D31,proforma,IN-04 IN-09,"Looks like an invoice and asks for payment, but a pro forma is not a VAT invoice."
+E46,E46_unleserlicher-scan.eml,uncertain,manual_review,0,,unreadable,IN-03 IN-09 EX-02,"Empty body, unknown sender, faded and blurred scan that cannot be read."
+E47,E47_erinnerung-und-neue-rechnung.eml,uncertain,manual_review,1,D32,mixed_reminder_and_invoice,IN-04 IN-05 IN-09,Reminder and new invoice in one email. Two categories apply.
+E48,E48_weitergeleitet-von-kollege.eml,uncertain,manual_review,1,D33,forwarded unknown_vendor reduced_vat,IN-04 IN-09,"Employee forward of an already paid invoice. Could be an expense claim, which is out of scope."
+E49,E49_falscher-empfaenger.eml,uncertain,manual_review,1,D34,wrong_recipient,IN-04 IN-09 PR-03,"Invoice is addressed to Max Muster AG, not Max ASP GmbH."
+E50,E50_kunde-schickt-rechnung-zurueck.eml,uncertain,manual_review,1,D21,returned_invoice,IN-04 IN-09 AR-02,A Max ASP invoice sent back by the customer. Not a new outgoing invoice and not an incoming one.

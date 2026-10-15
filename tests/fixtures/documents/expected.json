@@ -1,0 +1,1173 @@
+[
+  {
+    "document_id": "D01",
+    "files": [
+      "D01_Rechnung_BB-2026-1187.pdf"
+    ],
+    "format": "pdf",
+    "direction": "incoming",
+    "kind": "invoice",
+    "issuer_name": "Muster Bürobedarf GmbH",
+    "recipient_name": "Max ASP GmbH",
+    "counterparty_account": "70001",
+    "vendor_vat_id": "DE012345601",
+    "invoice_number": "BB-2026-1187",
+    "invoice_date": "2026-10-02",
+    "service_period": [
+      "2026-09-01",
+      "2026-09-30"
+    ],
+    "net_amount": "297.50",
+    "vat_rate": "19",
+    "vat_amount": "56.53",
+    "gross_amount": "354.03",
+    "currency": "EUR",
+    "tax_treatment": "standard",
+    "due_date": "2026-11-01",
+    "early_payment_discount": {
+      "percent": "2.00",
+      "until": "2026-10-12"
+    },
+    "direct_debit": false,
+    "iban_on_document": "DE44000000020000700001",
+    "refers_to": null,
+    "lines": [
+      {
+        "description": "Druckerpapier A4, 500 Blatt",
+        "quantity": "20",
+        "unit_price": "4.90",
+        "amount": "98.00"
+      },
+      {
+        "description": "Toner schwarz",
+        "quantity": "2",
+        "unit_price": "64.50",
+        "amount": "129.00"
+      },
+      {
+        "description": "Ordner breit",
+        "quantity": "30",
+        "unit_price": "2.35",
+        "amount": "70.50"
+      }
+    ]
+  },
+  {
+    "document_id": "D02",
+    "files": [
+      "D02_Rechnung_BCH-26-10-0042.pdf"
+    ],
+    "format": "pdf",
+    "direction": "incoming",
+    "kind": "invoice",
+    "issuer_name": "Beispiel Cloud Hosting GmbH",
+    "recipient_name": "Max ASP GmbH",
+    "counterparty_account": "70002",
+    "vendor_vat_id": "DE012345602",
+    "invoice_number": "BCH-26-10-0042",
+    "invoice_date": "2026-10-01",
+    "service_period": [
+      "2026-10-01",
+      "2026-10-31"
+    ],
+    "net_amount": "213.90",
+    "vat_rate": "19",
+    "vat_amount": "40.64",
+    "gross_amount": "254.54",
+    "currency": "EUR",
+    "tax_treatment": "standard",
+    "due_date": "2026-10-15",
+    "early_payment_discount": null,
+    "direct_debit": false,
+    "iban_on_document": "DE52000000030000700002",
+    "refers_to": null,
+    "lines": [
+      {
+        "description": "Managed Server L",
+        "quantity": "1",
+        "unit_price": "189.00",
+        "amount": "189.00"
+      },
+      {
+        "description": "Backup Speicher 500 GB",
+        "quantity": "1",
+        "unit_price": "24.90",
+        "amount": "24.90"
+      }
+    ]
+  },
+  {
+    "document_id": "D03",
+    "files": [
+      "D03_Rechnung_MV-2026-11-007.pdf"
+    ],
+    "format": "pdf",
+    "direction": "incoming",
+    "kind": "invoice",
+    "issuer_name": "Muster Immobilien Verwaltung KG",
+    "recipient_name": "Max ASP GmbH",
+    "counterparty_account": "70003",
+    "vendor_vat_id": "DE012345603",
+    "invoice_number": "MV-2026-11-007",
+    "invoice_date": "2026-10-05",
+    "service_period": [
+      "2026-11-01",
+      "2026-11-30"
+    ],
+    "net_amount": "2830.00",
+    "vat_rate": "19",
+    "vat_amount": "537.70",
+    "gross_amount": "3367.70",
+    "currency": "EUR",
+    "tax_treatment": "standard",
+    "due_date": "2026-11-01",
+    "early_payment_discount": null,
+    "direct_debit": true,
+    "iban_on_document": "DE60000000040000700003",
+    "refers_to": null,
+    "lines": [
+      {
+        "description": "Büromiete November 2026",
+        "quantity": "1",
+        "unit_price": "2450.00",
+        "amount": "2450.00"
+      },
+      {
+        "description": "Nebenkostenvorauszahlung November 2026",
+        "quantity": "1",
+        "unit_price": "380.00",
+        "amount": "380.00"
+      }
+    ]
+  },
+  {
+    "document_id": "D04",
+    "files": [
+      "D04_Invoice_ESL-INV-10293.pdf"
+    ],
+    "format": "pdf",
+    "direction": "incoming",
+    "kind": "invoice",
+    "issuer_name": "Example Software Ltd",
+    "recipient_name": "Max ASP GmbH",
+    "counterparty_account": "70004",
+    "vendor_vat_id": "GB000000004",
+    "invoice_number": "ESL-INV-10293",
+    "invoice_date": "2026-10-03",
+    "service_period": [
+      "2026-10-01",
+      "2027-09-30"
+    ],
+    "net_amount": "390.00",
+    "vat_rate": "0",
+    "vat_amount": "0.00",
+    "gross_amount": "390.00",
+    "currency": "GBP",
+    "tax_treatment": "reverse_charge",
+    "due_date": "2026-11-02",
+    "early_payment_discount": null,
+    "direct_debit": false,
+    "iban_on_document": "GB83TEST00000070000004",
+    "refers_to": null,
+    "lines": [
+      {
+        "description": "Team licence, 12 months, per seat",
+        "quantity": "10",
+        "unit_price": "39.00",
+        "amount": "390.00"
+      }
+    ]
+  },
+  {
+    "document_id": "D05",
+    "files": [
+      "D05_Rechnung_BBP-2026-0318.pdf"
+    ],
+    "format": "pdf",
+    "direction": "incoming",
+    "kind": "invoice",
+    "issuer_name": "Beispiel Beratung Partner mbB",
+    "recipient_name": "Max ASP GmbH",
+    "counterparty_account": "70005",
+    "vendor_vat_id": "DE012345605",
+    "invoice_number": "BBP-2026-0318",
+    "invoice_date": "2026-10-06",
+    "service_period": [
+      "2026-09-01",
+      "2026-09-30"
+    ],
+    "net_amount": "7500.00",
+    "vat_rate": "19",
+    "vat_amount": "1425.00",
+    "gross_amount": "8925.00",
+    "currency": "EUR",
+    "tax_treatment": "standard",
+    "due_date": "2026-10-20",
+    "early_payment_discount": null,
+    "direct_debit": false,
+    "iban_on_document": "DE41000000050000700005",
+    "refers_to": null,
+    "lines": [
+      {
+        "description": "Beratung Prozessdigitalisierung (Stunden)",
+        "quantity": "42",
+        "unit_price": "175.00",
+        "amount": "7350.00"
+      },
+      {
+        "description": "Reisekosten pauschal",
+        "quantity": "1",
+        "unit_price": "150.00",
+        "amount": "150.00"
+      }
+    ]
+  },
+  {
+    "document_id": "D06",
+    "files": [
+      "D06_Rechnung_MTS-2026-558201.pdf"
+    ],
+    "format": "pdf",
+    "direction": "incoming",
+    "kind": "invoice",
+    "issuer_name": "Muster Telekom Service GmbH",
+    "recipient_name": "Max ASP GmbH",
+    "counterparty_account": "70006",
+    "vendor_vat_id": "DE012345606",
+    "invoice_number": "MTS-2026-558201",
+    "invoice_date": "2026-10-07",
+    "service_period": [
+      "2026-09-01",
+      "2026-09-30"
+    ],
+    "net_amount": "329.50",
+    "vat_rate": "19",
+    "vat_amount": "62.61",
+    "gross_amount": "392.11",
+    "currency": "EUR",
+    "tax_treatment": "standard",
+    "due_date": "2026-10-21",
+    "early_payment_discount": null,
+    "direct_debit": false,
+    "iban_on_document": "DE33000000660000706666",
+    "refers_to": null,
+    "lines": [
+      {
+        "description": "Mobilfunk Business Tarif",
+        "quantity": "8",
+        "unit_price": "29.95",
+        "amount": "239.60"
+      },
+      {
+        "description": "Festnetz und Internet",
+        "quantity": "1",
+        "unit_price": "89.90",
+        "amount": "89.90"
+      }
+    ]
+  },
+  {
+    "document_id": "D07",
+    "files": [
+      "D07_Scan_2026-10-01.jpg"
+    ],
+    "format": "scan",
+    "direction": "incoming",
+    "kind": "invoice",
+    "issuer_name": "Beispiel Reinigung GmbH",
+    "recipient_name": "Max ASP GmbH",
+    "counterparty_account": "70007",
+    "vendor_vat_id": "DE012345607",
+    "invoice_number": "R-2026-0931",
+    "invoice_date": "2026-10-01",
+    "service_period": [
+      "2026-09-01",
+      "2026-09-30"
+    ],
+    "net_amount": "820.00",
+    "vat_rate": "19",
+    "vat_amount": "155.80",
+    "gross_amount": "975.80",
+    "currency": "EUR",
+    "tax_treatment": "standard",
+    "due_date": "2026-10-15",
+    "early_payment_discount": null,
+    "direct_debit": false,
+    "iban_on_document": "DE57000000070000700007",
+    "refers_to": null,
+    "lines": [
+      {
+        "description": "Unterhaltsreinigung Büro September",
+        "quantity": "1",
+        "unit_price": "640.00",
+        "amount": "640.00"
+      },
+      {
+        "description": "Fensterreinigung",
+        "quantity": "1",
+        "unit_price": "180.00",
+        "amount": "180.00"
+      }
+    ]
+  },
+  {
+    "document_id": "D08",
+    "files": [
+      "D08_Rechnung_BCH-26-10-0057_xrechnung.xml",
+      "D08_Rechnung_BCH-26-10-0057.pdf"
+    ],
+    "format": "xrechnung",
+    "direction": "incoming",
+    "kind": "invoice",
+    "issuer_name": "Beispiel Cloud Hosting GmbH",
+    "recipient_name": "Max ASP GmbH",
+    "counterparty_account": "70002",
+    "vendor_vat_id": "DE012345602",
+    "invoice_number": "BCH-26-10-0057",
+    "invoice_date": "2026-10-08",
+    "service_period": [
+      "2026-10-01",
+      "2026-10-31"
+    ],
+    "net_amount": "124.00",
+    "vat_rate": "19",
+    "vat_amount": "23.56",
+    "gross_amount": "147.56",
+    "currency": "EUR",
+    "tax_treatment": "standard",
+    "due_date": "2026-10-22",
+    "early_payment_discount": null,
+    "direct_debit": false,
+    "iban_on_document": "DE52000000030000700002",
+    "refers_to": null,
+    "lines": [
+      {
+        "description": "Domain Verlängerung",
+        "quantity": "3",
+        "unit_price": "15.00",
+        "amount": "45.00"
+      },
+      {
+        "description": "SSL Zertifikat",
+        "quantity": "1",
+        "unit_price": "79.00",
+        "amount": "79.00"
+      }
+    ]
+  },
+  {
+    "document_id": "D09",
+    "files": [
+      "D09_Rechnung_BB-2026-1243_zugferd.pdf"
+    ],
+    "format": "zugferd",
+    "direction": "incoming",
+    "kind": "invoice",
+    "issuer_name": "Muster Bürobedarf GmbH",
+    "recipient_name": "Max ASP GmbH",
+    "counterparty_account": "70001",
+    "vendor_vat_id": "DE012345601",
+    "invoice_number": "BB-2026-1243",
+    "invoice_date": "2026-10-09",
+    "service_period": [
+      "2026-10-09",
+      "2026-10-09"
+    ],
+    "net_amount": "578.00",
+    "vat_rate": "19",
+    "vat_amount": "109.82",
+    "gross_amount": "687.82",
+    "currency": "EUR",
+    "tax_treatment": "standard",
+    "due_date": "2026-11-08",
+    "early_payment_discount": {
+      "percent": "2.00",
+      "until": "2026-10-19"
+    },
+    "direct_debit": false,
+    "iban_on_document": "DE44000000020000700001",
+    "refers_to": null,
+    "lines": [
+      {
+        "description": "Bürostuhl ergonomisch",
+        "quantity": "2",
+        "unit_price": "289.00",
+        "amount": "578.00"
+      }
+    ]
+  },
+  {
+    "document_id": "D10",
+    "files": [
+      "D10_Gutschrift_GS-BB-2026-0057.pdf"
+    ],
+    "format": "pdf",
+    "direction": "incoming",
+    "kind": "credit_note",
+    "issuer_name": "Muster Bürobedarf GmbH",
+    "recipient_name": "Max ASP GmbH",
+    "counterparty_account": "70001",
+    "vendor_vat_id": "DE012345601",
+    "invoice_number": "GS-BB-2026-0057",
+    "invoice_date": "2026-10-10",
+    "service_period": [
+      "2026-10-10",
+      "2026-10-10"
+    ],
+    "net_amount": "23.50",
+    "vat_rate": "19",
+    "vat_amount": "4.47",
+    "gross_amount": "27.97",
+    "currency": "EUR",
+    "tax_treatment": "standard",
+    "due_date": null,
+    "early_payment_discount": null,
+    "direct_debit": false,
+    "iban_on_document": "DE44000000020000700001",
+    "refers_to": "BB-2026-1187",
+    "lines": [
+      {
+        "description": "Rückgabe Ordner breit",
+        "quantity": "10",
+        "unit_price": "2.35",
+        "amount": "23.50"
+      }
+    ]
+  },
+  {
+    "document_id": "D11",
+    "files": [
+      "D11_Credit_note_ESL-CN-00412.pdf"
+    ],
+    "format": "pdf",
+    "direction": "incoming",
+    "kind": "credit_note",
+    "issuer_name": "Example Software Ltd",
+    "recipient_name": "Max ASP GmbH",
+    "counterparty_account": "70004",
+    "vendor_vat_id": "GB000000004",
+    "invoice_number": "ESL-CN-00412",
+    "invoice_date": "2026-10-11",
+    "service_period": [
+      "2026-10-01",
+      "2027-09-30"
+    ],
+    "net_amount": "78.00",
+    "vat_rate": "0",
+    "vat_amount": "0.00",
+    "gross_amount": "78.00",
+    "currency": "GBP",
+    "tax_treatment": "reverse_charge",
+    "due_date": null,
+    "early_payment_discount": null,
+    "direct_debit": false,
+    "iban_on_document": "GB83TEST00000070000004",
+    "refers_to": "ESL-INV-10293",
+    "lines": [
+      {
+        "description": "Licence reduction, 2 seats",
+        "quantity": "2",
+        "unit_price": "39.00",
+        "amount": "78.00"
+      }
+    ]
+  },
+  {
+    "document_id": "D12",
+    "files": [
+      "D12_Rechnung_DR-2026-0815.pdf"
+    ],
+    "format": "pdf",
+    "direction": "incoming",
+    "kind": "invoice",
+    "issuer_name": "Beispiel Druckerei GmbH",
+    "recipient_name": "Max ASP GmbH",
+    "counterparty_account": null,
+    "vendor_vat_id": "DE012345609",
+    "invoice_number": "DR-2026-0815",
+    "invoice_date": "2026-10-08",
+    "service_period": [
+      "2026-10-08",
+      "2026-10-08"
+    ],
+    "net_amount": "150.00",
+    "vat_rate": "19",
+    "vat_amount": "28.50",
+    "gross_amount": "178.50",
+    "currency": "EUR",
+    "tax_treatment": "standard",
+    "due_date": "2026-10-22",
+    "early_payment_discount": null,
+    "direct_debit": false,
+    "iban_on_document": "DE73000000090000700009",
+    "refers_to": null,
+    "lines": [
+      {
+        "description": "Flyer DIN A5, 4/4 farbig",
+        "quantity": "1000",
+        "unit_price": "0.09",
+        "amount": "90.00"
+      },
+      {
+        "description": "Visitenkarten",
+        "quantity": "500",
+        "unit_price": "0.12",
+        "amount": "60.00"
+      }
+    ]
+  },
+  {
+    "document_id": "D13",
+    "files": [
+      "D13_Rechnung_ML-2026-30412.pdf"
+    ],
+    "format": "pdf",
+    "direction": "incoming",
+    "kind": "invoice",
+    "issuer_name": "Muster Logistik GmbH",
+    "recipient_name": "Max ASP GmbH",
+    "counterparty_account": "70008",
+    "vendor_vat_id": "DE012345608",
+    "invoice_number": "ML-2026-30412",
+    "invoice_date": "2026-10-09",
+    "service_period": [
+      "2026-09-01",
+      "2026-09-30"
+    ],
+    "net_amount": "255.30",
+    "vat_rate": "19",
+    "vat_amount": "48.51",
+    "gross_amount": "303.81",
+    "currency": "EUR",
+    "tax_treatment": "standard",
+    "due_date": "2026-10-30",
+    "early_payment_discount": null,
+    "direct_debit": false,
+    "iban_on_document": "DE65000000080000700008",
+    "refers_to": null,
+    "lines": [
+      {
+        "description": "Paketversand national",
+        "quantity": "37",
+        "unit_price": "6.90",
+        "amount": "255.30"
+      }
+    ]
+  },
+  {
+    "document_id": "D14",
+    "files": [
+      "D14_Rechnung_R-2026-0932.pdf"
+    ],
+    "format": "pdf",
+    "direction": "incoming",
+    "kind": "invoice",
+    "issuer_name": "Beispiel Reinigung GmbH",
+    "recipient_name": "Max ASP GmbH",
+    "counterparty_account": "70007",
+    "vendor_vat_id": "DE012345607",
+    "invoice_number": "R-2026-0932",
+    "invoice_date": "2026-10-12",
+    "service_period": [
+      "2026-10-05",
+      "2026-10-05"
+    ],
+    "net_amount": "260.00",
+    "vat_rate": "19",
+    "vat_amount": "49.40",
+    "gross_amount": "309.40",
+    "currency": "EUR",
+    "tax_treatment": "standard",
+    "due_date": "2026-10-26",
+    "early_payment_discount": null,
+    "direct_debit": false,
+    "iban_on_document": "DE57000000070000700007",
+    "refers_to": null,
+    "lines": [
+      {
+        "description": "Sonderreinigung Teppichboden",
+        "quantity": "1",
+        "unit_price": "260.00",
+        "amount": "260.00"
+      }
+    ]
+  },
+  {
+    "document_id": "D15",
+    "files": [
+      "D15_Rechnung_R-2026-0933.pdf"
+    ],
+    "format": "pdf",
+    "direction": "incoming",
+    "kind": "invoice",
+    "issuer_name": "Beispiel Reinigung GmbH",
+    "recipient_name": "Max ASP GmbH",
+    "counterparty_account": "70007",
+    "vendor_vat_id": "DE012345607",
+    "invoice_number": "R-2026-0933",
+    "invoice_date": "2026-10-12",
+    "service_period": [
+      "2026-10-07",
+      "2026-10-07"
+    ],
+    "net_amount": "145.00",
+    "vat_rate": "19",
+    "vat_amount": "27.55",
+    "gross_amount": "172.55",
+    "currency": "EUR",
+    "tax_treatment": "standard",
+    "due_date": "2026-10-26",
+    "early_payment_discount": null,
+    "direct_debit": false,
+    "iban_on_document": "DE57000000070000700007",
+    "refers_to": null,
+    "lines": [
+      {
+        "description": "Grundreinigung Küche",
+        "quantity": "1",
+        "unit_price": "145.00",
+        "amount": "145.00"
+      }
+    ]
+  },
+  {
+    "document_id": "D16",
+    "files": [
+      "D16_Rechnung_R-2026-0934.pdf"
+    ],
+    "format": "pdf",
+    "direction": "incoming",
+    "kind": "invoice",
+    "issuer_name": "Beispiel Reinigung GmbH",
+    "recipient_name": "Max ASP GmbH",
+    "counterparty_account": "70007",
+    "vendor_vat_id": "DE012345607",
+    "invoice_number": "R-2026-0934",
+    "invoice_date": "2026-10-12",
+    "service_period": [
+      "2026-10-01",
+      "2026-10-31"
+    ],
+    "net_amount": "86.40",
+    "vat_rate": "19",
+    "vat_amount": "16.42",
+    "gross_amount": "102.82",
+    "currency": "EUR",
+    "tax_treatment": "standard",
+    "due_date": "2026-10-26",
+    "early_payment_discount": null,
+    "direct_debit": false,
+    "iban_on_document": "DE57000000070000700007",
+    "refers_to": null,
+    "lines": [
+      {
+        "description": "Hygieneartikel Nachfüllung",
+        "quantity": "1",
+        "unit_price": "86.40",
+        "amount": "86.40"
+      }
+    ]
+  },
+  {
+    "document_id": "D17",
+    "files": [],
+    "format": "body",
+    "direction": "incoming",
+    "kind": "invoice",
+    "issuer_name": "Muster Telekom Service GmbH",
+    "recipient_name": "Max ASP GmbH",
+    "counterparty_account": "70006",
+    "vendor_vat_id": "DE012345606",
+    "invoice_number": "MTS-2026-560017",
+    "invoice_date": "2026-10-13",
+    "service_period": [
+      "2026-10-01",
+      "2026-10-31"
+    ],
+    "net_amount": "19.90",
+    "vat_rate": "19",
+    "vat_amount": "3.78",
+    "gross_amount": "23.68",
+    "currency": "EUR",
+    "tax_treatment": "standard",
+    "due_date": "2026-10-27",
+    "early_payment_discount": null,
+    "direct_debit": false,
+    "iban_on_document": "DE49000000060000700006",
+    "refers_to": null,
+    "lines": [
+      {
+        "description": "Zusatzoption Roaming EU",
+        "quantity": "1",
+        "unit_price": "19.90",
+        "amount": "19.90"
+      }
+    ]
+  },
+  {
+    "document_id": "D21",
+    "files": [
+      "D21_Rechnung_MA-2026-0101.pdf"
+    ],
+    "format": "pdf",
+    "direction": "outgoing",
+    "kind": "invoice",
+    "issuer_name": "Max ASP GmbH",
+    "recipient_name": "Beispiel Handel GmbH",
+    "counterparty_account": "10001",
+    "vendor_vat_id": "DE099000001",
+    "invoice_number": "MA-2026-0101",
+    "invoice_date": "2026-10-01",
+    "service_period": [
+      "2026-09-01",
+      "2026-09-30"
+    ],
+    "net_amount": "1770.00",
+    "vat_rate": "19",
+    "vat_amount": "336.30",
+    "gross_amount": "2106.30",
+    "currency": "EUR",
+    "tax_treatment": "standard",
+    "due_date": "2026-10-15",
+    "early_payment_discount": null,
+    "direct_debit": false,
+    "iban_on_document": "DE43000000010000990001",
+    "refers_to": null,
+    "lines": [
+      {
+        "description": "Hosting und Wartung Webshop September",
+        "quantity": "1",
+        "unit_price": "1200.00",
+        "amount": "1200.00"
+      },
+      {
+        "description": "Supportstunden",
+        "quantity": "6",
+        "unit_price": "95.00",
+        "amount": "570.00"
+      }
+    ]
+  },
+  {
+    "document_id": "D22",
+    "files": [
+      "D22_Invoice_MA-2026-0102.pdf"
+    ],
+    "format": "pdf",
+    "direction": "outgoing",
+    "kind": "invoice",
+    "issuer_name": "Max ASP GmbH",
+    "recipient_name": "Example Retail BV",
+    "counterparty_account": "10002",
+    "vendor_vat_id": "DE099000001",
+    "invoice_number": "MA-2026-0102",
+    "invoice_date": "2026-10-01",
+    "service_period": [
+      "2026-09-01",
+      "2026-09-30"
+    ],
+    "net_amount": "2400.00",
+    "vat_rate": "0",
+    "vat_amount": "0.00",
+    "gross_amount": "2400.00",
+    "currency": "EUR",
+    "tax_treatment": "reverse_charge",
+    "due_date": "2026-10-31",
+    "early_payment_discount": null,
+    "direct_debit": false,
+    "iban_on_document": "DE43000000010000990001",
+    "refers_to": null,
+    "lines": [
+      {
+        "description": "Application hosting September",
+        "quantity": "1",
+        "unit_price": "2400.00",
+        "amount": "2400.00"
+      }
+    ]
+  },
+  {
+    "document_id": "D23",
+    "files": [
+      "D23_Invoice_MA-2026-0103.pdf"
+    ],
+    "format": "pdf",
+    "direction": "outgoing",
+    "kind": "invoice",
+    "issuer_name": "Max ASP GmbH",
+    "recipient_name": "Example Tech Inc",
+    "counterparty_account": "10003",
+    "vendor_vat_id": "DE099000001",
+    "invoice_number": "MA-2026-0103",
+    "invoice_date": "2026-10-02",
+    "service_period": [
+      "2026-09-01",
+      "2026-09-30"
+    ],
+    "net_amount": "2400.00",
+    "vat_rate": "0",
+    "vat_amount": "0.00",
+    "gross_amount": "2400.00",
+    "currency": "USD",
+    "tax_treatment": "not_taxable_third_country",
+    "due_date": "2026-11-01",
+    "early_payment_discount": null,
+    "direct_debit": false,
+    "iban_on_document": "DE43000000010000990001",
+    "refers_to": null,
+    "lines": [
+      {
+        "description": "Consulting services September (hours)",
+        "quantity": "16",
+        "unit_price": "150.00",
+        "amount": "2400.00"
+      }
+    ]
+  },
+  {
+    "document_id": "D24",
+    "files": [
+      "D24_Rechnung_MA-2026-0104_xrechnung.xml",
+      "D24_Rechnung_MA-2026-0104.pdf"
+    ],
+    "format": "xrechnung",
+    "direction": "outgoing",
+    "kind": "invoice",
+    "issuer_name": "Max ASP GmbH",
+    "recipient_name": "Muster Stadtwerke GmbH",
+    "counterparty_account": "10004",
+    "vendor_vat_id": "DE099000001",
+    "invoice_number": "MA-2026-0104",
+    "invoice_date": "2026-10-05",
+    "service_period": [
+      "2026-10-01",
+      "2026-10-31"
+    ],
+    "net_amount": "3800.00",
+    "vat_rate": "19",
+    "vat_amount": "722.00",
+    "gross_amount": "4522.00",
+    "currency": "EUR",
+    "tax_treatment": "standard",
+    "due_date": "2026-11-04",
+    "early_payment_discount": null,
+    "direct_debit": false,
+    "iban_on_document": "DE43000000010000990001",
+    "refers_to": null,
+    "lines": [
+      {
+        "description": "Portalbetrieb Oktober 2026",
+        "quantity": "1",
+        "unit_price": "3800.00",
+        "amount": "3800.00"
+      }
+    ]
+  },
+  {
+    "document_id": "D25",
+    "files": [
+      "D25_Rechnung_MA-2026-0105.pdf"
+    ],
+    "format": "pdf",
+    "direction": "outgoing",
+    "kind": "invoice",
+    "issuer_name": "Max ASP GmbH",
+    "recipient_name": "Beispiel Neukunde GmbH",
+    "counterparty_account": null,
+    "vendor_vat_id": "DE099000001",
+    "invoice_number": "MA-2026-0105",
+    "invoice_date": "2026-10-07",
+    "service_period": [
+      "2026-10-07",
+      "2026-10-07"
+    ],
+    "net_amount": "990.00",
+    "vat_rate": "19",
+    "vat_amount": "188.10",
+    "gross_amount": "1178.10",
+    "currency": "EUR",
+    "tax_treatment": "standard",
+    "due_date": "2026-10-21",
+    "early_payment_discount": null,
+    "direct_debit": false,
+    "iban_on_document": "DE43000000010000990001",
+    "refers_to": null,
+    "lines": [
+      {
+        "description": "Einrichtungspauschale Kundenportal",
+        "quantity": "1",
+        "unit_price": "990.00",
+        "amount": "990.00"
+      }
+    ]
+  },
+  {
+    "document_id": "D26",
+    "files": [
+      "D26_Rechnung_MA-2026-0107.pdf"
+    ],
+    "format": "pdf",
+    "direction": "outgoing",
+    "kind": "invoice",
+    "issuer_name": "Max ASP GmbH",
+    "recipient_name": "Beispiel Handel GmbH",
+    "counterparty_account": "10001",
+    "vendor_vat_id": "DE099000001",
+    "invoice_number": "MA-2026-0107",
+    "invoice_date": "2026-10-12",
+    "service_period": [
+      "2026-10-01",
+      "2026-10-12"
+    ],
+    "net_amount": "380.00",
+    "vat_rate": "19",
+    "vat_amount": "72.20",
+    "gross_amount": "452.20",
+    "currency": "EUR",
+    "tax_treatment": "standard",
+    "due_date": "2026-10-26",
+    "early_payment_discount": null,
+    "direct_debit": false,
+    "iban_on_document": "DE43000000010000990001",
+    "refers_to": null,
+    "lines": [
+      {
+        "description": "Supportstunden Oktober",
+        "quantity": "4",
+        "unit_price": "95.00",
+        "amount": "380.00"
+      }
+    ]
+  },
+  {
+    "document_id": "D27",
+    "files": [
+      "D27_Gutschrift_GS-2026-0011.pdf"
+    ],
+    "format": "pdf",
+    "direction": "outgoing",
+    "kind": "credit_note",
+    "issuer_name": "Max ASP GmbH",
+    "recipient_name": "Beispiel Handel GmbH",
+    "counterparty_account": "10001",
+    "vendor_vat_id": "DE099000001",
+    "invoice_number": "GS-2026-0011",
+    "invoice_date": "2026-10-09",
+    "service_period": [
+      "2026-09-01",
+      "2026-09-30"
+    ],
+    "net_amount": "190.00",
+    "vat_rate": "19",
+    "vat_amount": "36.10",
+    "gross_amount": "226.10",
+    "currency": "EUR",
+    "tax_treatment": "standard",
+    "due_date": null,
+    "early_payment_discount": null,
+    "direct_debit": false,
+    "iban_on_document": "DE43000000010000990001",
+    "refers_to": "MA-2026-0101",
+    "lines": [
+      {
+        "description": "Gutschrift Supportstunden, doppelt berechnet",
+        "quantity": "2",
+        "unit_price": "95.00",
+        "amount": "190.00"
+      }
+    ]
+  },
+  {
+    "document_id": "D28",
+    "files": [
+      "D28_Stornorechnung_GS-2026-0012.pdf"
+    ],
+    "format": "pdf",
+    "direction": "outgoing",
+    "kind": "cancellation",
+    "issuer_name": "Max ASP GmbH",
+    "recipient_name": "Muster Stadtwerke GmbH",
+    "counterparty_account": "10004",
+    "vendor_vat_id": "DE099000001",
+    "invoice_number": "GS-2026-0012",
+    "invoice_date": "2026-10-13",
+    "service_period": [
+      "2026-10-01",
+      "2026-10-31"
+    ],
+    "net_amount": "3800.00",
+    "vat_rate": "19",
+    "vat_amount": "722.00",
+    "gross_amount": "4522.00",
+    "currency": "EUR",
+    "tax_treatment": "standard",
+    "due_date": null,
+    "early_payment_discount": null,
+    "direct_debit": false,
+    "iban_on_document": "DE43000000010000990001",
+    "refers_to": "MA-2026-0104",
+    "lines": [
+      {
+        "description": "Storno Portalbetrieb Oktober 2026",
+        "quantity": "1",
+        "unit_price": "3800.00",
+        "amount": "3800.00"
+      }
+    ]
+  },
+  {
+    "document_id": "D31",
+    "files": [
+      "D31_Pro_forma_invoice_PF-2026-0077.pdf"
+    ],
+    "format": "pdf",
+    "direction": "incoming",
+    "kind": "proforma",
+    "issuer_name": "Example Software Ltd",
+    "recipient_name": "Max ASP GmbH",
+    "counterparty_account": "70004",
+    "vendor_vat_id": "GB000000004",
+    "invoice_number": "PF-2026-0077",
+    "invoice_date": "2026-10-12",
+    "service_period": [
+      "2026-11-01",
+      "2027-10-31"
+    ],
+    "net_amount": "480.00",
+    "vat_rate": "0",
+    "vat_amount": "0.00",
+    "gross_amount": "480.00",
+    "currency": "GBP",
+    "tax_treatment": "reverse_charge",
+    "due_date": "2026-10-26",
+    "early_payment_discount": null,
+    "direct_debit": false,
+    "iban_on_document": "GB83TEST00000070000004",
+    "refers_to": null,
+    "lines": [
+      {
+        "description": "Premium support add-on, 12 months",
+        "quantity": "1",
+        "unit_price": "480.00",
+        "amount": "480.00"
+      }
+    ]
+  },
+  {
+    "document_id": "D32",
+    "files": [
+      "D32_Rechnung_BB-2026-1290.pdf"
+    ],
+    "format": "pdf",
+    "direction": "incoming",
+    "kind": "invoice",
+    "issuer_name": "Muster Bürobedarf GmbH",
+    "recipient_name": "Max ASP GmbH",
+    "counterparty_account": "70001",
+    "vendor_vat_id": "DE012345601",
+    "invoice_number": "BB-2026-1290",
+    "invoice_date": "2026-10-13",
+    "service_period": [
+      "2026-10-13",
+      "2026-10-13"
+    ],
+    "net_amount": "49.00",
+    "vat_rate": "19",
+    "vat_amount": "9.31",
+    "gross_amount": "58.31",
+    "currency": "EUR",
+    "tax_treatment": "standard",
+    "due_date": "2026-11-12",
+    "early_payment_discount": {
+      "percent": "2.00",
+      "until": "2026-10-23"
+    },
+    "direct_debit": false,
+    "iban_on_document": "DE44000000020000700001",
+    "refers_to": null,
+    "lines": [
+      {
+        "description": "Kopierpapier A4, 500 Blatt",
+        "quantity": "10",
+        "unit_price": "4.90",
+        "amount": "49.00"
+      }
+    ]
+  },
+  {
+    "document_id": "D33",
+    "files": [
+      "D33_Rechnung_BC-2026-221.pdf"
+    ],
+    "format": "pdf",
+    "direction": "incoming",
+    "kind": "invoice",
+    "issuer_name": "Beispiel Catering GmbH",
+    "recipient_name": "Max ASP GmbH",
+    "counterparty_account": null,
+    "vendor_vat_id": "DE012345610",
+    "invoice_number": "BC-2026-221",
+    "invoice_date": "2026-10-09",
+    "service_period": [
+      "2026-10-08",
+      "2026-10-08"
+    ],
+    "net_amount": "312.00",
+    "vat_rate": "7",
+    "vat_amount": "21.84",
+    "gross_amount": "333.84",
+    "currency": "EUR",
+    "tax_treatment": "standard_reduced_rate",
+    "due_date": "2026-10-23",
+    "early_payment_discount": null,
+    "direct_debit": false,
+    "iban_on_document": "DE81000000100000700010",
+    "refers_to": null,
+    "lines": [
+      {
+        "description": "Catering Teammeeting, Speisen",
+        "quantity": "24",
+        "unit_price": "13.00",
+        "amount": "312.00"
+      }
+    ]
+  },
+  {
+    "document_id": "D34",
+    "files": [
+      "D34_Rechnung_R-2026-0950.pdf"
+    ],
+    "format": "pdf",
+    "direction": "incoming",
+    "kind": "invoice",
+    "issuer_name": "Beispiel Reinigung GmbH",
+    "recipient_name": "Max Muster AG",
+    "counterparty_account": "70007",
+    "vendor_vat_id": "DE012345607",
+    "invoice_number": "R-2026-0950",
+    "invoice_date": "2026-10-13",
+    "service_period": [
+      "2026-10-01",
+      "2026-10-31"
+    ],
+    "net_amount": "410.00",
+    "vat_rate": "19",
+    "vat_amount": "77.90",
+    "gross_amount": "487.90",
+    "currency": "EUR",
+    "tax_treatment": "standard",
+    "due_date": "2026-10-27",
+    "early_payment_discount": null,
+    "direct_debit": false,
+    "iban_on_document": "DE57000000070000700007",
+    "refers_to": null,
+    "lines": [
+      {
+        "description": "Unterhaltsreinigung Oktober",
+        "quantity": "1",
+        "unit_price": "410.00",
+        "amount": "410.00"
+      }
+    ]
+  }
+]

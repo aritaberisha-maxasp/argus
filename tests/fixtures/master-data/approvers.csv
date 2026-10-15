@@ -1,0 +1,8 @@
+vendor_account,vendor_name,approver_name,approver_email,deputy_name,deputy_email,direct_debit
+70001,Muster Bürobedarf GmbH,Anna Muster,anna.muster@maxasp.example,Lea Probe,lea.probe@maxasp.example,no
+70002,Beispiel Cloud Hosting GmbH,Jonas Beispiel,jonas.beispiel@maxasp.example,Tom Test,tom.test@maxasp.example,no
+70003,Muster Immobilien Verwaltung KG,Anna Muster,anna.muster@maxasp.example,Erika Mustermann,erika.mustermann@maxasp.example,yes
+70004,Example Software Ltd,Jonas Beispiel,jonas.beispiel@maxasp.example,Tom Test,tom.test@maxasp.example,no
+70005,Beispiel Beratung Partner mbB,Lea Probe,lea.probe@maxasp.example,Anna Muster,anna.muster@maxasp.example,no
+70006,Muster Telekom Service GmbH,Tom Test,tom.test@maxasp.example,Jonas Beispiel,jonas.beispiel@maxasp.example,no
+70007,Beispiel Reinigung GmbH,Anna Muster,anna.muster@maxasp.example,Lea Probe,lea.probe@maxasp.example,no

@@ -1,0 +1,6 @@
+role,description,name,email
+second_approver,"Approves invoices above EUR 5,000 after the vendor's approver (AP-09)",Erika Mustermann,erika.mustermann@maxasp.example
+reminder_recipient,Receives forwarded payment reminders and dunning letters (IN-05),Erika Mustermann,erika.mustermann@maxasp.example
+escalation_contact,Receives approvals that are 5 working days overdue (AP-05),Erika Mustermann,erika.mustermann@maxasp.example
+exception_owner,"Receives the daily exception digest and exception notices (EX-03, BK-06, AR-03, VM-03)",Erika Mustermann,erika.mustermann@maxasp.example
+payment_releaser,"Releases payment batches manually in Wise; ARGUS never does (PY-08, NF-04)",Erika Mustermann,erika.mustermann@maxasp.example
