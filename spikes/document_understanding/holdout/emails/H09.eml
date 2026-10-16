@@ -4,15 +4,15 @@ Subject: Outgoing invoice MA-2026-0110
 Date: Fri, 16 Oct 2026 09:00:00 +0200
 Message-ID: <h09@holdout.argus.example>
 MIME-Version: 1.0
-Content-Type: multipart/mixed; boundary="===============3707514770623909390=="
+Content-Type: multipart/mixed; boundary="argus-holdout-H09"
 
---===============3707514770623909390==
+--argus-holdout-H09
 Content-Type: text/plain; charset="utf-8"
 Content-Transfer-Encoding: 7bit
 
 Automatisch erzeugt vom Rechnungsagenten.
 
---===============3707514770623909390==
+--argus-holdout-H09
 Content-Type: application/pdf
 Content-Transfer-Encoding: base64
 Content-Disposition: attachment; filename="Invoice_MA-2026-0110.pdf"
@@ -424,4 +424,4 @@ OTk1ZDg5ZDQxMDIwNDM+PDFjMTc4MTk4ZmJkZmE1MWIyNTk5NWQ4OWQ0MTAyMDQzPl0KJSBSZXBv
 cnRMYWIgZ2VuZXJhdGVkIFBERiBkb2N1bWVudCAtLSBkaWdlc3QgKG9wZW5zb3VyY2UpCgovSW5m
 byA5IDAgUgovUm9vdCA4IDAgUgovU2l6ZSAxMgo+PgpzdGFydHhyZWYKMjI2MjgKJSVFT0YK
 
---===============3707514770623909390==--
+--argus-holdout-H09--

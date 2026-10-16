@@ -4,9 +4,9 @@ Subject: Second reminder ED-2026-077
 Date: Fri, 16 Oct 2026 09:00:00 +0200
 Message-ID: <h06@holdout.argus.example>
 MIME-Version: 1.0
-Content-Type: multipart/mixed; boundary="===============5150991918231459449=="
+Content-Type: multipart/mixed; boundary="argus-holdout-H06"
 
---===============5150991918231459449==
+--argus-holdout-H06
 Content-Type: text/plain; charset="utf-8"
 Content-Transfer-Encoding: 7bit
 
@@ -16,7 +16,7 @@ see the attached reminder.
 
 Thanks
 
---===============5150991918231459449==
+--argus-holdout-H06
 Content-Type: application/pdf
 Content-Transfer-Encoding: base64
 Content-Disposition: attachment; filename="reminder.pdf"
@@ -424,4 +424,4 @@ ZmJkZmE1MWIyNTk5NWQ4OWQ0MTAyMDQzPl0KJSBSZXBvcnRMYWIgZ2VuZXJhdGVkIFBERiBkb2N1
 bWVudCAtLSBkaWdlc3QgKG9wZW5zb3VyY2UpCgovSW5mbyA5IDAgUgovUm9vdCA4IDAgUgovU2l6
 ZSAxMgo+PgpzdGFydHhyZWYKMjIzNzYKJSVFT0YK
 
---===============5150991918231459449==--
+--argus-holdout-H06--

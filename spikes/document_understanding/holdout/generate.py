@@ -18,6 +18,7 @@ from __future__ import annotations
 import csv
 import io
 import random
+import time
 from email.message import EmailMessage
 from pathlib import Path
 
@@ -76,7 +77,11 @@ def scanned(pdf_bytes: bytes, as_pdf: bool) -> bytes:
         x, y = rng.randrange(image.width), rng.randrange(image.height)
         pixels[x, y] = rng.choice((0, 160, 255))
     buf = io.BytesIO()
-    image.save(buf, format="PDF" if as_pdf else "JPEG", quality=80, resolution=200)
+    if as_pdf:
+        fixed = time.strptime("2026-10-16 09:00:00", "%Y-%m-%d %H:%M:%S")  # PIL stamps the current time otherwise
+        image.save(buf, format="PDF", quality=80, resolution=200, creationDate=fixed, modDate=fixed)
+    else:
+        image.save(buf, format="JPEG", quality=80)
     return buf.getvalue()
 
 
@@ -262,6 +267,8 @@ def main() -> None:
             for name, data, ctype in item["attachments"]:
                 maintype, subtype = ctype.split("/")
                 msg.add_attachment(data, maintype=maintype, subtype=subtype, filename=name)
+            if msg.is_multipart():
+                msg.set_boundary(f"argus-holdout-{item['id']}")  # same input, same bytes
             file = f"{item['id']}.eml"
             (OUT / file).write_bytes(bytes(msg))
             writer.writerow([item["id"], file, item["route"], item["cases"], item["note"]])

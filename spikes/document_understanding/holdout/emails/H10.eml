@@ -4,9 +4,9 @@ Subject: Credit ED-CM-0012
 Date: Fri, 16 Oct 2026 09:00:00 +0200
 Message-ID: <h10@holdout.argus.example>
 MIME-Version: 1.0
-Content-Type: multipart/mixed; boundary="===============5646469786731454115=="
+Content-Type: multipart/mixed; boundary="argus-holdout-H10"
 
---===============5646469786731454115==
+--argus-holdout-H10
 Content-Type: text/plain; charset="utf-8"
 Content-Transfer-Encoding: 7bit
 
@@ -16,7 +16,7 @@ as discussed, here is the credit for the cancelled day.
 
 Thanks
 
---===============5646469786731454115==
+--argus-holdout-H10
 Content-Type: application/pdf
 Content-Transfer-Encoding: base64
 Content-Disposition: attachment; filename="ED-CM-0012.pdf"
@@ -429,4 +429,4 @@ MjA0Mz5dCiUgUmVwb3J0TGFiIGdlbmVyYXRlZCBQREYgZG9jdW1lbnQgLS0gZGlnZXN0IChvcGVu
 c291cmNlKQoKL0luZm8gOSAwIFIKL1Jvb3QgOCAwIFIKL1NpemUgMTIKPj4Kc3RhcnR4cmVmCjIy
 NjQxCiUlRU9GCg==
 
---===============5646469786731454115==--
+--argus-holdout-H10--

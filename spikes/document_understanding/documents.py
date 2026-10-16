@@ -49,6 +49,7 @@ class Document:
     ocr_confidence: float | None = None
     fields: dict = field(default_factory=dict)
     problems: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)  # could not be read safely: always manual review
 
     @property
     def is_invoice(self) -> bool:
@@ -114,7 +115,7 @@ def read_attachment(name: str, content_type: str, data: bytes) -> list[Document]
     if lower.endswith(".xml") or content_type in ("application/xml", "text/xml"):
         doc = Document(source=name, media="xml")
         if einvoice.detect_syntax(data):
-            doc.einvoice = einvoice.parse(data)
+            _parse_einvoice(doc, data)
         else:
             doc.text = data.decode("utf-8", "replace")
         return [doc]
@@ -126,6 +127,13 @@ def read_attachment(name: str, content_type: str, data: bytes) -> list[Document]
     return []
 
 
+def _parse_einvoice(doc: Document, xml: bytes) -> None:
+    try:
+        doc.einvoice = einvoice.parse(xml)
+    except einvoice.InvalidEInvoice as error:
+        doc.errors.append(f"{doc.source}: {error}")
+
+
 def read_pdf(name: str, data: bytes) -> Document:
     doc = Document(source=name, media="pdf")
     reader = pypdf.PdfReader(io.BytesIO(data))
@@ -133,7 +141,7 @@ def read_pdf(name: str, data: bytes) -> Document:
         if attached_name.lower() in einvoice.EMBEDDED_XML_NAMES and contents:
             xml = contents[0]
             if einvoice.detect_syntax(xml):
-                doc.einvoice = einvoice.parse(xml)
+                _parse_einvoice(doc, xml)
     with pdfplumber.open(io.BytesIO(data)) as pdf:
         doc.text = "\n".join(page.extract_text() or "" for page in pdf.pages)
         if len(doc.text.strip()) < MIN_READABLE_CHARS:
@@ -219,20 +227,31 @@ def finish_documents(documents: list[Document]) -> list[Document]:
 
 
 def merge_same_invoice(documents: list[Document]) -> list[Document]:
-    """An XRechnung plus its PDF copy is one invoice, not two (IN-08, E21)."""
-    by_number: dict[str, Document] = {}
+    """An XRechnung plus its PDF copy is one invoice, not two (IN-08, E21).
+
+    The key is issuer plus number, so two vendors that both use number 1001 stay two cases.
+    """
+    by_key: dict[tuple, Document] = {}
     result: list[Document] = []
     for doc in sorted(documents, key=lambda d: d.einvoice is None):
-        number = doc.fields.get("invoice_number") if doc.is_invoice else None
-        if number and number in by_number:
-            kept = by_number[number]  # the structured copy is already kept
+        key = invoice_key(doc.fields) if doc.is_invoice else None
+        if key and key in by_key:
+            kept = by_key[key]  # the structured copy is already kept
             if kept.einvoice and not doc.einvoice:
                 kept.problems += compare_copies(kept.fields, doc.fields)
             continue
-        if number:
-            by_number[number] = doc
+        if key:
+            by_key[key] = doc
         result.append(doc)
     return result
+
+
+def invoice_key(fields: dict) -> tuple | None:
+    number = fields.get("invoice_number")
+    if not number:
+        return None
+    issuer = fields.get("vendor_vat_id") or re.sub(r"[^a-z0-9]", "", (fields.get("issuer_name") or "").lower())
+    return issuer, number
 
 
 # ---------------------------------------------------------------- field extraction

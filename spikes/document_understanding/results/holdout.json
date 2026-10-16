@@ -9,7 +9,7 @@
   "fields_correct": 0,
   "field_accuracy_by_format": {},
   "field_errors": [],
-  "seconds_total": 2.9,
+  "seconds_total": 2.6,
   "rows": [
     {
       "email_id": "H01",
@@ -47,7 +47,7 @@
       "evidence": [
         "incoming_invoice +3: invoice ? in ED-2026-091.pdf from Example Design Studio Ltd TAX INVOICE"
       ],
-      "seconds": 0.02
+      "seconds": 0.03
     },
     {
       "email_id": "H03",
@@ -99,7 +99,7 @@
       "evidence": [
         "incoming_invoice +3: invoice ? in scan.pdf from Beispiel Hausmeister. GmbH"
       ],
-      "seconds": 2.0
+      "seconds": 1.73
     },
     {
       "email_id": "H06",
@@ -168,7 +168,7 @@
         "incoming_invoice +3: invoice ? in Invoice_MA-2026-0110.pdf from Max ASP GmbH INVOICE",
         "outgoing_invoice +2: sent by the invoicing agent"
       ],
-      "seconds": 0.02
+      "seconds": 0.03
     },
     {
       "email_id": "H10",
@@ -187,7 +187,7 @@
       "evidence": [
         "incoming_invoice +3: invoice ? in ED-CM-0012.pdf from Example Design Studio Ltd CREDIT MEMO"
       ],
-      "seconds": 0.03
+      "seconds": 0.04
     },
     {
       "email_id": "H11",
@@ -235,7 +235,7 @@
       "evidence": [
         "payment_reminder +3: reminder letter in IMG_2041.jpg"
       ],
-      "seconds": 0.59
+      "seconds": 0.56
     },
     {
       "email_id": "H14",
@@ -292,7 +292,7 @@
         "payment_reminder +3: reminder letter in Mahnung.pdf",
         "payment_reminder +2: reminder words in the subject"
       ],
-      "seconds": 0.05
+      "seconds": 0.06
     }
   ]
 }

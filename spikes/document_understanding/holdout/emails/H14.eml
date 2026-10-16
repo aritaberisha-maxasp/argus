@@ -5,15 +5,15 @@ Subject: Rechnung S-0915
 Date: Fri, 16 Oct 2026 09:00:00 +0200
 Message-ID: <h14@holdout.argus.example>
 MIME-Version: 1.0
-Content-Type: multipart/mixed; boundary="===============4404461750233479612=="
+Content-Type: multipart/mixed; boundary="argus-holdout-H14"
 
---===============4404461750233479612==
+--argus-holdout-H14
 Content-Type: text/plain; charset="utf-8"
 Content-Transfer-Encoding: 8bit
 
 Anbei die Rechnung für den Einsatz heute.
 
---===============4404461750233479612==
+--argus-holdout-H14
 Content-Type: application/pdf
 Content-Transfer-Encoding: base64
 Content-Disposition: attachment; filename="S-0915.pdf"
@@ -426,4 +426,4 @@ MjU5OTVkODlkNDEwMjA0Mz48MWMxNzgxOThmYmRmYTUxYjI1OTk1ZDg5ZDQxMDIwNDM+XQolIFJl
 cG9ydExhYiBnZW5lcmF0ZWQgUERGIGRvY3VtZW50IC0tIGRpZ2VzdCAob3BlbnNvdXJjZSkKCi9J
 bmZvIDkgMCBSCi9Sb290IDggMCBSCi9TaXplIDEyCj4+CnN0YXJ0eHJlZgoyMjY4NwolJUVPRgo=
 
---===============4404461750233479612==--
+--argus-holdout-H14--

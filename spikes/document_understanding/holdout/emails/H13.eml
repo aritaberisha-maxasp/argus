@@ -4,15 +4,15 @@ Subject:
 Date: Fri, 16 Oct 2026 09:00:00 +0200
 Message-ID: <h13@holdout.argus.example>
 MIME-Version: 1.0
-Content-Type: multipart/mixed; boundary="===============1716980563783095667=="
+Content-Type: multipart/mixed; boundary="argus-holdout-H13"
 
---===============1716980563783095667==
+--argus-holdout-H13
 Content-Type: text/plain; charset="utf-8"
 Content-Transfer-Encoding: 7bit
 
 
 
---===============1716980563783095667==
+--argus-holdout-H13
 Content-Type: image/jpeg
 Content-Transfer-Encoding: base64
 Content-Disposition: attachment; filename="IMG_2041.jpg"
@@ -4014,4 +4014,4 @@ gDlTxjBMtFNjQIpCliMk/MxPU57/AF6dqdRRRRRRRRRRRRRRRRRRRRTWQMyElsqcjDEdiOfXr0P9
 KdRRRUV2062szWccUtyEYxRyyGNGfHAZgrFQTjJCnHoelS0UUUUUUUUUUUUUUUUUUUUUUUUUUUU0
 KRIzb2IIAC8YHXn15z+g96dRRX//2Q==
 
---===============1716980563783095667==--
+--argus-holdout-H13--

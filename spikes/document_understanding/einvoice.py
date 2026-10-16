@@ -9,7 +9,7 @@ human readable copy.
 
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from lxml import etree
 
@@ -39,6 +39,10 @@ TYPE_CODES = {
 EMBEDDED_XML_NAMES = ("factur-x.xml", "zugferd-invoice.xml", "xrechnung.xml", "zugferd.xml")
 
 
+class InvalidEInvoice(ValueError):
+    """The XML looks like an e-invoice but cannot be trusted. The email goes to manual review."""
+
+
 def detect_syntax(xml_bytes: bytes) -> str | None:
     """Return "ubl", "cii" or None if the bytes are not an e-invoice."""
     try:
@@ -54,8 +58,19 @@ def detect_syntax(xml_bytes: bytes) -> str | None:
 
 
 def parse(xml_bytes: bytes) -> dict:
-    """Parse an e-invoice into the PR-01 field set. Amounts are strings with two decimals."""
-    root = etree.fromstring(xml_bytes, parser=_safe_parser())
+    """Parse an e-invoice into the PR-01 field set. Amounts are strings with two decimals.
+
+    Raises InvalidEInvoice for anything ARGUS must not book from without a person looking.
+    """
+    try:
+        root = etree.fromstring(xml_bytes, parser=_safe_parser())
+    except etree.XMLSyntaxError as error:
+        raise InvalidEInvoice(f"e-invoice XML cannot be read: {error}") from error
+    docinfo = root.getroottree().docinfo
+    if docinfo.internalDTD is not None or docinfo.doctype:
+        # XRechnung and ZUGFeRD never need a DTD. Entities could make the value
+        # ARGUS reads differ from what a viewer shows.
+        raise InvalidEInvoice("e-invoice contains a DTD")
     syntax = detect_syntax(xml_bytes)
     if syntax == "ubl":
         return _parse_ubl(root)
@@ -73,20 +88,28 @@ def _text(node, path: str) -> str | None:
     found = node.xpath(path, namespaces=NS)
     if not found:
         return None
-    value = found[0] if isinstance(found[0], str) else found[0].text
+    # itertext joins the whole value, so a comment inside it cannot cut it short.
+    value = found[0] if isinstance(found[0], str) else "".join(found[0].itertext())
     return value.strip() if value else None
 
 
 def _money(value: str | None) -> str | None:
     if value is None:
         return None
-    return str(Decimal(value).quantize(Decimal("0.01")))
+    try:
+        amount = Decimal(value)
+    except InvalidOperation as error:
+        raise InvalidEInvoice(f"e-invoice amount {value!r} is not a number") from error
+    if not amount.is_finite():
+        raise InvalidEInvoice(f"e-invoice amount {value!r} is not a number")
+    return str(amount.quantize(Decimal("0.01")))
 
 
 def _rate(value: str | None) -> str | None:
     if value is None:
         return None
-    return str(Decimal(value).normalize()) if Decimal(value) != 0 else "0"
+    rate = Decimal(_money(value))
+    return str(rate.normalize()) if rate != 0 else "0"
 
 
 def _cii_date(value: str | None) -> str | None:

@@ -4,9 +4,9 @@ Subject: Rechnung K-2026-118
 Date: Fri, 16 Oct 2026 09:00:00 +0200
 Message-ID: <h03@holdout.argus.example>
 MIME-Version: 1.0
-Content-Type: multipart/mixed; boundary="===============2610736500297956526=="
+Content-Type: multipart/mixed; boundary="argus-holdout-H03"
 
---===============2610736500297956526==
+--argus-holdout-H03
 Content-Type: text/plain; charset="utf-8"
 Content-Transfer-Encoding: 8bit
 
@@ -16,7 +16,7 @@ anbei die Rechnung für das Teamessen.
 
 Beispiel Kantine
 
---===============2610736500297956526==
+--argus-holdout-H03
 Content-Type: application/pdf
 Content-Transfer-Encoding: base64
 Content-Disposition: attachment; filename="K-2026-118.pdf"
@@ -431,4 +431,4 @@ NTk5NWQ4OWQ0MTAyMDQzPl0KJSBSZXBvcnRMYWIgZ2VuZXJhdGVkIFBERiBkb2N1bWVudCAtLSBk
 aWdlc3QgKG9wZW5zb3VyY2UpCgovSW5mbyA5IDAgUgovUm9vdCA4IDAgUgovU2l6ZSAxMgo+Pgpz
 dGFydHhyZWYKMjI3NjYKJSVFT0YK
 
---===============2610736500297956526==--
+--argus-holdout-H03--

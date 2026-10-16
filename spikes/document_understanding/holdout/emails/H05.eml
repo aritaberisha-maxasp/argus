@@ -4,15 +4,15 @@ Subject: Rechnung HM-2026-301
 Date: Fri, 16 Oct 2026 09:00:00 +0200
 Message-ID: <h05@holdout.argus.example>
 MIME-Version: 1.0
-Content-Type: multipart/mixed; boundary="===============8090519954075743140=="
+Content-Type: multipart/mixed; boundary="argus-holdout-H05"
 
---===============8090519954075743140==
+--argus-holdout-H05
 Content-Type: text/plain; charset="utf-8"
 Content-Transfer-Encoding: 7bit
 
 Anbei die Rechnung.
 
---===============8090519954075743140==
+--argus-holdout-H05
 Content-Type: application/pdf
 Content-Transfer-Encoding: base64
 Content-Disposition: attachment; filename="scan.pdf"
@@ -4289,11 +4289,11 @@ U2V0IFsgL1BERiAvSW1hZ2VCIF0KL1hPYmplY3QgPDwKL2ltYWdlIDEgMCBSCj4+Cj4+Ci9NZWRp
 YUJveCBbIDAgMCA2MTMuNDQgODU1LjAgXQovQ29udGVudHMgMyAwIFIKL1R5cGUgL1BhZ2UKL1Bh
 cmVudCA1IDAgUgo+PmVuZG9iagozIDAgb2JqPDwKL0xlbmd0aCA0Nwo+PnN0cmVhbQpxIDYxMy40
 NDAwMDAgMCAwIDg1NS4wMDAwMDAgMCAwIGNtIC9pbWFnZSBEbyBRCgplbmRzdHJlYW0KZW5kb2Jq
-CjYgMCBvYmo8PAovQ3JlYXRpb25EYXRlIChEOjIwMjYxMDE2MTU0NDA0WikKL01vZERhdGUgKEQ6
-MjAyNjEwMTYxNTQ0MDRaKQo+PmVuZG9iagp4cmVmCjAgNwowMDAwMDAwMDAwIDY1NTM2IGYgCjAw
+CjYgMCBvYmo8PAovQ3JlYXRpb25EYXRlIChEOjIwMjYxMDE2MDkwMDAwWikKL01vZERhdGUgKEQ6
+MjAyNjEwMTYwOTAwMDBaKQo+PmVuZG9iagp4cmVmCjAgNwowMDAwMDAwMDAwIDY1NTM2IGYgCjAw
 MDAwMDAxNDQgMDAwMDAgbiAKMDAwMDI0MzE5MCAwMDAwMCBuIAowMDAwMjQzMzUzIDAwMDAwIG4g
 CjAwMDAwMDAwNDAgMDAwMDAgbiAKMDAwMDAwMDA4NyAwMDAwMCBuIAowMDAwMjQzNDQ4IDAwMDAw
 IG4gCnRyYWlsZXIKPDwKL1Jvb3QgNCAwIFIKL1NpemUgNwovSW5mbyA2IDAgUgo+PgpzdGFydHhy
 ZWYKMjQzNTMwCiUlRU9G
 
---===============8090519954075743140==--
+--argus-holdout-H05--

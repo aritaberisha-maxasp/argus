@@ -4,9 +4,9 @@ Subject: Mahnung und neue Rechnung
 Date: Fri, 16 Oct 2026 09:00:00 +0200
 Message-ID: <h16@holdout.argus.example>
 MIME-Version: 1.0
-Content-Type: multipart/mixed; boundary="===============5305324160465774486=="
+Content-Type: multipart/mixed; boundary="argus-holdout-H16"
 
---===============5305324160465774486==
+--argus-holdout-H16
 Content-Type: text/plain; charset="utf-8"
 Content-Transfer-Encoding: 8bit
 
@@ -16,7 +16,7 @@ anbei unsere Mahnung und die neue Rechnung für Oktober.
 
 Viele Grüße
 
---===============5305324160465774486==
+--argus-holdout-H16
 Content-Type: application/pdf
 Content-Transfer-Encoding: base64
 Content-Disposition: attachment; filename="Mahnung.pdf"
@@ -427,7 +427,7 @@ ZmJkZmE1MWIyNTk5NWQ4OWQ0MTAyMDQzPl0KJSBSZXBvcnRMYWIgZ2VuZXJhdGVkIFBERiBkb2N1
 bWVudCAtLSBkaWdlc3QgKG9wZW5zb3VyY2UpCgovSW5mbyA5IDAgUgovUm9vdCA4IDAgUgovU2l6
 ZSAxMgo+PgpzdGFydHhyZWYKMjI1NDcKJSVFT0YK
 
---===============5305324160465774486==
+--argus-holdout-H16
 Content-Type: application/pdf
 Content-Transfer-Encoding: base64
 Content-Disposition: attachment; filename="Rechnung_2026-4471.pdf"
@@ -850,4 +850,4 @@ NTFiMjU5OTVkODlkNDEwMjA0Mz5dCiUgUmVwb3J0TGFiIGdlbmVyYXRlZCBQREYgZG9jdW1lbnQg
 LS0gZGlnZXN0IChvcGVuc291cmNlKQoKL0luZm8gOSAwIFIKL1Jvb3QgOCAwIFIKL1NpemUgMTIK
 Pj4Kc3RhcnR4cmVmCjIzMjI2CiUlRU9GCg==
 
---===============5305324160465774486==--
+--argus-holdout-H16--

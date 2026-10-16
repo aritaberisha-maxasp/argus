@@ -161,7 +161,8 @@ def classify(mail: ParsedEmail, config: Config) -> Decision:
     for doc in mail.documents:
         if doc.kind == "proforma":
             gates.append(f"pro forma invoice in {doc.source}: asks for payment but is not a VAT invoice")
-        if not doc.readable:
+        gates.extend(doc.errors)
+        if not doc.readable and not doc.errors:
             gates.append(f"{doc.source} cannot be read (OCR confidence {doc.ocr_confidence or 0:.0f})")
 
     # Evidence from wording.

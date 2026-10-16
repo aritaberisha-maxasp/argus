@@ -4,9 +4,9 @@ Subject: Ihre Rechnung 2026-4471
 Date: Fri, 16 Oct 2026 09:00:00 +0200
 Message-ID: <h01@holdout.argus.example>
 MIME-Version: 1.0
-Content-Type: multipart/mixed; boundary="===============1122874386449429875=="
+Content-Type: multipart/mixed; boundary="argus-holdout-H01"
 
---===============1122874386449429875==
+--argus-holdout-H01
 Content-Type: text/plain; charset="utf-8"
 Content-Transfer-Encoding: 8bit
 
@@ -17,7 +17,7 @@ anbei unsere Rechnung für die Gartenpflege im Oktober.
 Viele Grüße
 Beispiel Gartenbau
 
---===============1122874386449429875==
+--argus-holdout-H01
 Content-Type: application/pdf
 Content-Transfer-Encoding: base64
 Content-Disposition: attachment; filename="Rechnung_2026-4471.pdf"
@@ -440,4 +440,4 @@ NTFiMjU5OTVkODlkNDEwMjA0Mz5dCiUgUmVwb3J0TGFiIGdlbmVyYXRlZCBQREYgZG9jdW1lbnQg
 LS0gZGlnZXN0IChvcGVuc291cmNlKQoKL0luZm8gOSAwIFIKL1Jvb3QgOCAwIFIKL1NpemUgMTIK
 Pj4Kc3RhcnR4cmVmCjIzMjI2CiUlRU9GCg==
 
---===============1122874386449429875==--
+--argus-holdout-H01--

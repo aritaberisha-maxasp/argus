@@ -5,9 +5,9 @@ Subject: Rechnungen Oktober
 Date: Fri, 16 Oct 2026 09:00:00 +0200
 Message-ID: <h04@holdout.argus.example>
 MIME-Version: 1.0
-Content-Type: multipart/mixed; boundary="===============7878500789352430418=="
+Content-Type: multipart/mixed; boundary="argus-holdout-H04"
 
---===============7878500789352430418==
+--argus-holdout-H04
 Content-Type: text/plain; charset="utf-8"
 Content-Transfer-Encoding: 8bit
 
@@ -17,7 +17,7 @@ anbei beide Rechnungen in einer Datei.
 
 Gruß
 
---===============7878500789352430418==
+--argus-holdout-H04
 Content-Type: application/pdf
 Content-Transfer-Encoding: base64
 Content-Disposition: attachment; filename="Rechnungen_Oktober.pdf"
@@ -452,4 +452,4 @@ OThmYmRmYTUxYjI1OTk1ZDg5ZDQxMDIwNDM+XQolIFJlcG9ydExhYiBnZW5lcmF0ZWQgUERGIGRv
 Y3VtZW50IC0tIGRpZ2VzdCAob3BlbnNvdXJjZSkKCi9JbmZvIDEwIDAgUgovUm9vdCA5IDAgUgov
 U2l6ZSAxNAo+PgpzdGFydHhyZWYKMjM4NzcKJSVFT0YK
 
---===============7878500789352430418==--
+--argus-holdout-H04--
