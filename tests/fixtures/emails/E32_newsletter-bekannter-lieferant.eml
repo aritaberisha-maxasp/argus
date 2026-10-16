@@ -1,0 +1,35 @@
+From: Example Software <news@example-software.example>
+To: accounts@maxasp.example
+Subject: What's new in October: faster sync and a new billing dashboard
+Date: Fri, 02 Oct 2026 15:00:00 +0200
+Message-ID: <E32.newsletter-bekannter-lieferant@fixtures.argus.example>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="argus-fixture-E32-0"
+
+--argus-fixture-E32-0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+
+Hi there,
+
+This month we shipped faster sync, a new billing dashboard where you can down=
+load every invoice, and dark mode.
+
+Read more on our blog.
+
+You receive this email because you are a customer of Example Software Ltd. Un=
+subscribe any time.
+
+--argus-fixture-E32-0
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+<!DOCTYPE html><html><body style=3D"font-family: sans-serif"><p>Hi there,</p>=
+<p>This month we shipped faster sync, a new billing dashboard where you can d=
+ownload every invoice, and dark mode.</p><p>Read more on our blog.</p><p>You =
+receive this email because you are a customer of Example Software Ltd. Unsubs=
+cribe any time.</p><p style=3D"font-size: 11px; color: #777">Synthetic test e=
+mail for ARGUS.</p></body></html>
+
+--argus-fixture-E32-0--

@@ -1,0 +1,9 @@
+vendor_account,name,street,postcode,city,country,vat_id,iban,currency,payment_terms
+70001,Muster Bürobedarf GmbH,Papierweg 12,70001,Musterstadt,DE,DE012345601,DE44000000020000700001,EUR,"30 Tage netto, 2 % Skonto bei Zahlung innerhalb von 10 Tagen"
+70002,Beispiel Cloud Hosting GmbH,Serverstraße 3,70002,Beispielstadt,DE,DE012345602,DE52000000030000700002,EUR,Zahlbar innerhalb von 14 Tagen ohne Abzug
+70003,Muster Immobilien Verwaltung KG,Am Musterplatz 7,70003,Musterstadt,DE,DE012345603,DE60000000040000700003,EUR,Einzug per SEPA-Lastschrift zum Monatsersten
+70004,Example Software Ltd,1 Sample Street,XX1 1XX,Exampleton,GB,GB000000004,GB83TEST00000070000004,GBP,Payment due within 30 days
+70005,Beispiel Beratung Partner mbB,Ratgeberweg 5,70005,Beispielstadt,DE,DE012345605,DE41000000050000700005,EUR,Zahlbar innerhalb von 14 Tagen ohne Abzug
+70006,Muster Telekom Service GmbH,Funkturmstraße 9,70006,Musterstadt,DE,DE012345606,DE49000000060000700006,EUR,Zahlbar innerhalb von 14 Tagen ohne Abzug
+70007,Beispiel Reinigung GmbH,Glanzgasse 2,70007,Beispielstadt,DE,DE012345607,DE57000000070000700007,EUR,Zahlbar innerhalb von 14 Tagen ohne Abzug
+70008,Muster Logistik GmbH,Paketring 40,70008,Musterstadt,DE,DE012345608,DE65000000080000700008,EUR,Zahlbar innerhalb von 21 Tagen ohne Abzug

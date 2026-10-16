@@ -1,0 +1,127 @@
+%PDF-1.3
+%“Œ‹ž ReportLab Generated PDF document (opensource)
+1 0 obj
+<<
+/F1 2 0 R /F2 3 0 R
+>>
+endobj
+2 0 obj
+<<
+/BaseFont /Helvetica /Encoding /WinAnsiEncoding /Name /F1 /Subtype /Type1 /Type /Font
+>>
+endobj
+3 0 obj
+<<
+/BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding /Name /F2 /Subtype /Type1 /Type /Font
+>>
+endobj
+4 0 obj
+<<
+/Contents 8 0 R /MediaBox [ 0 0 595.2756 841.8898 ] /Parent 7 0 R /Resources <<
+/Font 1 0 R /ProcSet [ /PDF /Text /ImageB /ImageC /ImageI ]
+>> /Rotate 0 /Trans <<
+
+>> 
+  /Type /Page
+>>
+endobj
+5 0 obj
+<<
+/PageMode /UseNone /Pages 7 0 R /Type /Catalog
+>>
+endobj
+6 0 obj
+<<
+/Author (ARGUS synthetic test fixture) /CreationDate (D:20000101000000+00'00') /Creator (anonymous) /Keywords () /ModDate (D:20000101000000+00'00') /Producer (ReportLab PDF Library - \(opensource\)) 
+  /Subject (unspecified) /Title (Invoice ESL-INV-10293) /Trapped /False
+>>
+endobj
+7 0 obj
+<<
+/Count 1 /Kids [ 4 0 R ] /Type /Pages
+>>
+endobj
+8 0 obj
+<<
+/Length 2382
+>>
+stream
+1 0 0 1 0 0 cm  BT /F1 12 Tf 14.4 TL ET
+BT /F2 14 Tf 16.8 TL ET
+BT 1 0 0 1 56.69291 785.1969 Tm (Example Software Ltd) Tj T* ET
+BT /F1 8 Tf 9.6 TL ET
+BT 1 0 0 1 56.69291 771.0236 Tm (1 Sample Street, XX1 1XX Exampleton, GB) Tj T* ET
+BT /F1 8 Tf 9.6 TL ET
+BT 1 0 0 1 56.69291 756.8504 Tm (VAT ID GB000000004) Tj T* ET
+BT /F1 10 Tf 12 TL ET
+BT 1 0 0 1 56.69291 731.3386 Tm (Max ASP GmbH) Tj T* ET
+BT /F1 10 Tf 12 TL ET
+BT 1 0 0 1 56.69291 717.1654 Tm (Testallee 1) Tj T* ET
+BT /F1 10 Tf 12 TL ET
+BT 1 0 0 1 56.69291 702.9921 Tm (70000 Musterstadt) Tj T* ET
+BT /F1 10 Tf 12 TL ET
+BT 1 0 0 1 56.69291 688.8189 Tm (DE) Tj T* ET
+BT /F2 16 Tf 19.2 TL ET
+BT 1 0 0 1 56.69291 663.3071 Tm (Invoice) Tj T* ET
+BT /F1 10 Tf 12 TL ET
+BT 1 0 0 1 56.69291 640.6299 Tm (Number: ESL-INV-10293) Tj T* ET
+BT /F1 10 Tf 12 TL ET
+BT 1 0 0 1 56.69291 626.4567 Tm (Date: 03 Oct 2026) Tj T* ET
+BT /F1 10 Tf 12 TL ET
+BT 1 0 0 1 56.69291 612.2835 Tm (Service period: 01 Oct 2026 - 30 Sep 2027) Tj T* ET
+BT /F2 9 Tf 10.8 TL ET
+BT 1 0 0 1 56.69291 586.7717 Tm (No.) Tj T* ET
+BT 1 0 0 1 90.70866 586.7717 Tm (Description) Tj T* ET
+BT 1 0 0 1 340.1575 586.7717 Tm (Qty) Tj T* ET
+BT 1 0 0 1 396.8504 586.7717 Tm (Unit price) Tj T* ET
+BT 1 0 0 1 481.8898 586.7717 Tm (Amount) Tj T* ET
+BT /F1 9 Tf 10.8 TL ET
+BT 1 0 0 1 56.69291 572.5984 Tm (1) Tj T* ET
+BT 1 0 0 1 90.70866 572.5984 Tm (Team licence, 12 months, per seat) Tj T* ET
+BT 1 0 0 1 340.1575 572.5984 Tm (10) Tj T* ET
+BT 1 0 0 1 396.8504 572.5984 Tm (39.00 GBP) Tj T* ET
+BT 1 0 0 1 481.8898 572.5984 Tm (390.00 GBP) Tj T* ET
+BT /F1 9 Tf 10.8 TL ET
+BT 1 0 0 1 340.1575 547.0866 Tm (Net amount) Tj T* ET
+BT 1 0 0 1 489.5507 547.0866 Tm (390.00 GBP) Tj T* ET
+BT /F1 9 Tf 10.8 TL ET
+BT 1 0 0 1 340.1575 532.9134 Tm (VAT 0 %) Tj T* ET
+BT 1 0 0 1 499.5587 532.9134 Tm (0.00 GBP) Tj T* ET
+BT /F2 9 Tf 10.8 TL ET
+BT 1 0 0 1 340.1575 518.7402 Tm (Total) Tj T* ET
+BT 1 0 0 1 489.0557 518.7402 Tm (390.00 GBP) Tj T* ET
+BT /F1 10 Tf 12 TL ET
+BT 1 0 0 1 56.69291 493.2283 Tm (Reverse charge: VAT to be accounted for by the recipient.) Tj T* ET
+BT /F1 10 Tf 12 TL ET
+BT 1 0 0 1 56.69291 479.0551 Tm (Payment due by 02 Nov 2026.) Tj T* ET
+BT /F1 10 Tf 12 TL ET
+BT 1 0 0 1 56.69291 464.8819 Tm (Bank details: IBAN GB83 TEST 0000 0070 0000 04) Tj T* ET
+BT /F1 7 Tf 8.4 TL ET
+BT 1 0 0 1 56.69291 34.01575 Tm (Synthetic test document for ARGUS. Not a real invoice.) Tj T* ET
+ 
+endstream
+endobj
+xref
+0 9
+0000000000 65535 f 
+0000000061 00000 n 
+0000000102 00000 n 
+0000000209 00000 n 
+0000000321 00000 n 
+0000000524 00000 n 
+0000000592 00000 n 
+0000000885 00000 n 
+0000000944 00000 n 
+trailer
+<<
+/ID 
+[<a9ca9cccd1762e71811f9ff84fb55e5d><a9ca9cccd1762e71811f9ff84fb55e5d>]
+% ReportLab generated PDF document -- digest (opensource)
+
+/Info 6 0 R
+/Root 5 0 R
+/Size 9
+>>
+startxref
+3377
+%%EOF

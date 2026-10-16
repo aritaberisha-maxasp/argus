@@ -1,0 +1,34 @@
+From: Beispiel Steuerberatung <newsletter@beispiel-steuer.example>
+To: accounts@maxasp.example
+Subject: Steuer-News Oktober: Vorsteuerabzug und Rechnungsanforderungen
+Date: Sun, 11 Oct 2026 07:00:00 +0200
+Message-ID: <E42.steuer-newsletter@fixtures.argus.example>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="argus-fixture-E42-0"
+
+--argus-fixture-E42-0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+
+Liebe Leserinnen und Leser,
+
+in dieser Ausgabe: Welche Angaben eine Rechnung nach =C2=A7 14 UStG enthalten=
+ muss, damit der Vorsteuerabzug sicher ist, und was sich bei Kleinbetragsrech=
+nungen =C3=A4ndert.
+
+Ihre Beispiel Steuerberatung
+Newsletter abbestellen
+
+--argus-fixture-E42-0
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+<!DOCTYPE html><html><body style=3D"font-family: sans-serif"><p>Liebe Leserin=
+nen und Leser,</p><p>in dieser Ausgabe: Welche Angaben eine Rechnung nach =C2=
+=A7 14 UStG enthalten muss, damit der Vorsteuerabzug sicher ist, und was sich=
+ bei Kleinbetragsrechnungen =C3=A4ndert.</p><p>Ihre Beispiel Steuerberatung<b=
+r>Newsletter abbestellen</p><p style=3D"font-size: 11px; color: #777">Synthet=
+ic test email for ARGUS.</p></body></html>
+
+--argus-fixture-E42-0--

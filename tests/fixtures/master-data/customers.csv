@@ -1,0 +1,5 @@
+customer_account,name,street,postcode,city,country,vat_id,tax_treatment
+10001,Beispiel Handel GmbH,Marktstraße 10,70101,Beispielstadt,DE,DE012345701,standard
+10002,Example Retail BV,Voorbeeldstraat 1,0000 XX,Voorbeeldstad,NL,NL000000000B01,reverse_charge_eu
+10003,Example Tech Inc,100 Sample Avenue,00000,Example City,US,,not_taxable_third_country
+10004,Muster Stadtwerke GmbH,Energieweg 1,70104,Musterstadt,DE,DE012345704,standard

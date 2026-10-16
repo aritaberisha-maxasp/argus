@@ -1,0 +1,17 @@
+From: Muster Telekom Service GmbH <rechnung@muster-telekom.example>
+To: accounts@maxasp.example
+Subject: Zahlungserinnerung Kundennummer 4471203
+Date: Sat, 10 Oct 2026 07:30:00 +0200
+Message-ID: <E30.erinnerung-im-mailtext@fixtures.argus.example>
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+Sehr geehrte Damen und Herren,
+
+f=C3=BCr Ihre Kundennummer 4471203 ist die Rechnung MTS-2026-541977 vom 07.09=
+.2026 =C3=BCber 392,11 EUR noch offen.
+Bitte =C3=BCberweisen Sie den Betrag in den n=C3=A4chsten Tagen.
+
+Mit freundlichen Gr=C3=BC=C3=9Fen
+Muster Telekom Service GmbH
