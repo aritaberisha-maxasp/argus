@@ -113,7 +113,7 @@ Until question 5 and the approval rule check are done, layers 1 and 2 are expect
 
 ## Audit trail (NF-01)
 
-ARGUS writes an audit entry for every step: hand over (batch group ID, transfer IDs, quote ID and rate, time, the request and Wise's answer without the token), every status change it reads, every cancel and what Benjamin decided, every recipient check and its result, and every statement file received (sender, time, SHA-256 hash). Statement files are kept unaltered.
+ARGUS writes an audit entry for every step: hand over (batch group ID, transfer IDs, quote ID and rate, time, the request and Wise's answer without the token and with IBANs masked), every status change it reads, every cancel and what Benjamin decided, every recipient check and its result, and every statement file received (sender, time, SHA-256 hash). Statement files are kept unaltered.
 
 ## Personal data and the EU (NF-03)
 
@@ -121,7 +121,7 @@ Wise statements and transfers hold counterparty names, IBANs and, through BA-05,
 
 ## Token handling (NF-06)
 
-The token lives only in the secret store of the hosting chosen in ADR 0001, read as `WISE_API_TOKEN`. The sandbox uses a separate token. ARGUS never logs the Authorization header. The token is rotated once a year and at once when someone with access leaves, and Benjamin as Wise admin revokes it in the web app if it ever leaks.
+The token lives only in the secret store of the hosting proposed in PR #11 (ADR 0001), read as `WISE_API_TOKEN`. The sandbox uses a separate token. ARGUS never logs the Authorization header. The token is rotated once a year and at once when someone with access leaves, and Benjamin as Wise admin revokes it in the web app if it ever leaks.
 
 ## Sandbox
 
@@ -135,7 +135,7 @@ The token lives only in the secret store of the hosting chosen in ADR 0001, read
 
 Posted on issue #4. On 16 Oct 2026 Arita said to go ahead with the assumptions below for now and revisit them when they matter.
 
-Working assumptions: yes to 1, 2, 3 and 6, and the rate at booking time for 4. Question 5 stays open until the Wise token exists. Question 7 was added after review, with the assumption that no extra authentication is needed, because Wise lists only funding and statements as protected.
+Working assumptions: yes to 1, 2, 3 and 6, and the rate at booking time for 4. Question 5 stays open until the Wise token exists. Question 7 was added after review, with the assumption that no extra authentication is needed, because Wise's SCA page names funding and statements as examples of protected calls.
 
 1. **Dedicated Wise user.** Can Benjamin add a Wise team member just for ARGUS, which may set up payments, with approval required for all its payments? (yes or no)
 2. **Monthly statement.** Until Wise allows statements through the API, is it fine if Benjamin downloads each balance's statement once a month and sends it to ARGUS? (yes or no)
