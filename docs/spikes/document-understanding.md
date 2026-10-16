@@ -177,9 +177,9 @@ E-invoices cost almost nothing: they skip OCR and need only a short model call.
 
 ## 7. Questions for Arita
 
-Posted on issue #5 with the label `needs-arita`:
+Arita answered **yes to both** on issue #5 on 16 Oct 2026:
 
 1. May ARGUS send email and invoice content to Azure OpenAI and Azure AI Document Intelligence in Max ASP's own Azure tenant, processed only in the EU? Microsoft may keep prompts and answers for up to 30 days to detect abuse, and authorised Microsoft staff may look at flagged content, unless Max ASP is granted the exemption. Max ASP may also need to add these services to its GDPR record of processing.
 2. May we run ARGUS for two weeks in shadow mode on real mail before it routes anything on its own?
 
-Until the answers come in we build against fakes, as for the other integrations, so nothing waits on them.
+The build stories still start against fakes, as for the other integrations. The abuse monitoring check and the record of processing are settled before shadow mode starts.
