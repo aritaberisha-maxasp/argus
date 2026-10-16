@@ -83,7 +83,7 @@ stateDiagram-v2
     Closed --> [*]
 ```
 
-An exception always returns the case to the status it left, so the step that failed runs again. The diagram shows only "back to Received" to keep it readable.
+An exception returns the case to the status it left, so the step that failed runs again. The diagram shows only "back to Received" to keep it readable. The one listed exception is **payment failed**: a case that was In payment run or Paid goes back to Booked, so it waits for the next run. Exits like this live in a small table (`exception_exit`), reason by reason, so nobody can add one in code.
 
 ### Which kinds use which statuses
 
@@ -101,11 +101,14 @@ A partial customer payment (BA-04) leaves an outgoing invoice in Booked with the
 These live in the database, so no bug in the application can get round them.
 
 1. **Only listed moves are possible.** The table `case_status_transition` lists every allowed move per kind. A trigger refuses anything else, for example Approved straight to Paid.
-2. **Every move names who made it.** Each transaction sets `argus.actor` to `system:<job>` or `user:<Entra object ID>`. Without it the change is refused.
-3. **Every move is logged in the same transaction.** A trigger writes the audit event. If the audit write fails, the status change is undone too.
-4. **Exception needs a reason.** A case can only move to Exception while it has an open exception in the queue, and can only leave it once that exception is resolved.
-5. **An exception goes back to where it came from.** The exception remembers `resume_status`, and the case may only return there (or be closed).
-6. **Two workers cannot move the same case at once.** Moves are written as `update ... where id = :id and status = :expected`. If another worker moved it first, nothing changes and the worker starts over.
+2. **Every change names who made it.** Each transaction sets `argus.actor` to `system:<job>` or `user:<Entra object ID>`. Without it the change is refused.
+3. **Every change is logged in the same transaction.** A trigger writes the audit event for every new case, every move and every change to booking data (account, number, amounts, currency, duplicate fields, payment hold, direct debit, reminder, DATEV reference, closed reason), with old and new value. If the audit write fails, the change is undone too.
+4. **The kind never changes**, and a closed case never changes again.
+5. **Booking data is frozen after approval.** Once a case is Approved (or Booked, for kinds without approval), its account, number, amount and currency cannot change. A correction then means rejecting it and starting a new approval. The DATEV booking reference can be set once.
+6. **An open exception stops the case.** While a case has an open exception it cannot move anywhere except into Exception. At commit the database checks both ways: a case with an open exception is in Exception, and a case in Exception has an open exception. So a job that opens an exception and dies before moving the case cannot leave it running.
+7. **An exception goes back to where it came from.** The database itself records the status the case left (`resume_status`) when it enters Exception. The application cannot write it. The case may only return there, be closed, or take an exit listed in `exception_exit`.
+8. **The application can only write what it must.** It connects as `argus_app`, which has column level rights: it cannot set `kind` after insert, `resume_status`, any time stamp, or who resolved an exception.
+9. **Two workers cannot move the same case at once.** Moves are written as `update ... where id = :id and status = :expected`. If another worker moved it first, nothing changes and the worker starts over.
 
 ## 3. The audit log
 
@@ -126,17 +129,18 @@ The audit log answers "what happened to this invoice, when, and who did it" for 
 | Bank transaction imported, matched, cleared, booked by a rule, Benjamin's answer applied (BA-02 to BA-06) | Bank import |
 | Payment reminder matched to a case (PY-06) | Intake |
 
-Each event has: a running number, the time from the database clock, the case, email, statement, exception or payment run it belongs to, the event type, who did it (`system` plus job name, or `user` plus Entra object ID), the status before and after when it changed, and a small JSON with the details.
+Each event has: a running number, the time from the database clock (always, the application cannot give one), the case, email, statement, exception or payment run it belongs to, the event type, who did it (`system` plus job name, or `user` plus Entra object ID, always taken from `argus.actor`, so an approval decision is recorded under the person whose sign in made the request), the status before and after when it changed, and a small JSON with the details.
 
-**What does not go in:** document content, full IBANs (only the last four characters and whether it matched), passwords, tokens or anything from Key Vault. The log is kept for ten years, so it holds only what the trace needs (GDPR, NF-03).
+**What does not go in:** document content, full IBANs (only the last four characters and whether it matched), passwords, tokens or anything from Key Vault, and no free text written for people. The text of an exception and the comment on its resolution stay on the exception itself. The log gets the reason, structured facts (such as `iban_last4`) and a fixed outcome code. The log is kept for ten years, so it holds only what the trace needs (GDPR, NF-03).
 
 ### Why nobody can change it
 
 1. **The application cannot change history.** ARGUS connects as `argus_app`, which may only add and read audit events. `UPDATE`, `DELETE` and `TRUNCATE` are not granted, and a trigger refuses them even for roles that have the right.
-2. **Changes behind the triggers are visible.** Each event carries the SHA-256 of the previous event plus its own content (a hash chain). Changing or deleting any old event breaks every link after it. `audit_verify()` walks the chain and names the first broken link. A daily job runs it and alerts Arita if it fails.
-3. **A copy sits in the locked store.** Every night a job writes the previous day's events as a JSON lines file, plus the last hash of the day, into the locked blob store from ADR 0001. From then on, even someone with full database rights cannot rewrite that day without the difference showing.
+2. **The application cannot fake an event.** Time and actor are always filled in by the database. Event types that describe a case or exception change (`case_created`, `status_changed`, `case_changed`, `exception_opened`, `exception_resolved`) can only come from the database triggers.
+3. **Changes behind the triggers are visible.** Each event carries the SHA-256 of the previous event's hash plus its own content (a hash chain). The content is hashed in one canonical form: every field named, nulls kept, and the time as seconds since 1970, so the session time zone does not matter and a value moved to another column is noticed. One function builds that form for writing and for checking, and each event stores a `hash_version` so the form can change later without breaking old links. Changing or deleting any old event breaks every link after it. `audit_verify()` walks the chain and names the first broken link. A daily job runs it and alerts Arita if it fails.
+4. **A copy sits in the locked store.** Every night a job writes the previous day's events as a JSON lines file, plus the last hash of the day, into the locked blob store from ADR 0001. From then on, even someone with full database rights cannot rewrite that day without the difference showing.
 
-Events are numbered one at a time under a short database lock, so the chain has no forks. At a few thousand events a day this costs nothing. The check in [checks.sql](checks.sql) and a load test with 8 parallel writers and 1,600 events kept the chain intact.
+Events are numbered one at a time under a short database lock, so the chain has no forks. At a few thousand events a day this costs nothing. [checks.sql](checks.sql) proves each of these, and a load test with 8 parallel writers creating 1,600 cases kept the chain intact.
 
 ### Reading a trace (AC-8)
 
@@ -164,17 +168,17 @@ The ten reasons from EX-02, plus three that other requirements need:
 | Unmatched bank transaction | BA-06 | Case | Benjamin's reply names the account. ARGUS books it and may save a rule |
 | Bank balance difference | BA-08 | Statement | A person finds the difference. The import of that statement stays blocked until then |
 | Number sequence gap or duplicate *(added)* | AR-07 | Case | A person confirms the gap is explained or fixes the numbering |
-| Payment failed *(added)* | PY-11 | Case | A person checks the vendor's bank details in DATEV and puts the invoice back in the pool |
+| Payment failed *(added)* | PY-11 | Case | A person checks the vendor's bank details in DATEV and puts the invoice back in the pool. This is the one reason that may leave Exception somewhere other than where it came from: from Paid or In payment run back to Booked |
 | Customer query *(added)* | Decision on #9 (E44) | Email | A person answers the customer and closes it |
 
 ### How an exception works
 
-- An exception records the reason, a plain text detail a person can act on, when it was opened, the status the case was in (`resume_status`), and later who resolved it, when, and how.
+- An exception records the reason, a plain text detail a person can act on, structured facts without personal data, and when it was opened. When it is resolved the application sets an outcome code (for example `fixed_in_datev`, `rejected`, `confirmed_duplicate`) and an optional comment, and the database adds who and when. A resolved exception can no longer change.
 - The same thing cannot have the same open reason twice. A unique index prevents it, so a job that runs again does not pile up copies.
 - Opening an exception and moving the case to Exception happen in one transaction. Resolving it and moving the case back also happen in one transaction.
 - Benjamin is told at once for the reasons the requirements name (BK-06, AR-03, VM-03, BA-06, BA-08) and gets the daily digest of everything still open (EX-03), grouped by reason, oldest first.
 - Benjamin and Arita can resolve exceptions. Approvers cannot. Roles come from Entra groups (ADR 0001).
-- An IBAN mismatch keeps the case out of every payment run until it is resolved, whatever its status was before. This is the fraud guard of PR-05 and must not have a shortcut.
+- An IBAN mismatch keeps the case out of every payment run until it is resolved, whatever its status was before, because an open exception stops every move. It can only end with the outcome `fixed_in_datev` (the IBAN was changed in DATEV and ARGUS checks again) or `rejected`. The database refuses any other outcome. This is the fraud guard of PR-05 and VM-04 and has no shortcut.
 
 ## 5. Duplicate protection
 

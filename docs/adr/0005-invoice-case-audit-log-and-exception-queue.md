@@ -5,7 +5,7 @@ Requirements: NF-01, NF-05, EX-01, EX-02, AP-08, BK-07, IN-10, BA-07 (also touch
 
 The detail, the status diagram and a working database sketch are in the [design note](../design/invoice-case/README.md).
 
-Numbering: 0002 is the DATEV ADR (PR #12). The Wise ADR (PR #14) is numbered 0003 today, which clashes with the mailbox ADR, so it needs 0004. This one takes 0005.
+Numbering: 0004 is the Wise ADR and 0006 the document understanding ADR (#55).
 
 ## Context
 
@@ -36,8 +36,8 @@ ADR 0001 put the data in PostgreSQL and the original files in a locked blob stor
 
 - **One case per invoice, credit note or bank transaction**, in one table with a kind field. The email stays its own record (ADR 0003), so one email can create several cases (IN-08).
 - **Statuses: the seven from NF-05 plus Closed** (rejected, duplicate, withdrawn). Outgoing invoices skip approval and payment runs. Bank transactions only go from Received to Booked.
-- **The database enforces the rules:** only listed moves, each one names its actor, each one writes an audit event in the same transaction, a case enters Exception only with an open exception and goes back to the status it left.
-- **Audit log:** append only for the application, a SHA-256 hash chain checked daily, and a nightly copy into the locked blob store. No document content, full IBANs or secrets in it.
+- **The database enforces the rules**, and the application role can only write the columns it needs: only listed moves, the kind never changes, booking data is frozen after approval, every change names its actor and writes an audit event with old and new values in the same transaction, an open exception stops the case, and the case goes back to the status the database recorded when it entered Exception (payment failed is the one listed other exit).
+- **Audit log:** append only for the application, time and actor always set by the database, a SHA-256 hash chain over a canonical form that does not depend on the time zone, checked daily, and a nightly copy into the locked blob store. No document content, full IBANs, secrets or free text in it.
 - **Exception queue:** one table, the ten reasons from EX-02 plus three that other requirements need (number sequence gap AR-07, payment failed PY-11, customer query from the decision on #9). Some reasons end by themselves when the missing data appears in DATEV. An IBAN mismatch can only end by fixing the IBAN in DATEV or rejecting the invoice.
 - **Duplicates:** a unique key of vendor, normalised invoice number, gross amount and currency for invoices; the Wise transaction ID with the balance currency for bank transactions; idempotency keys for DATEV bookings and Wise transfers. The database refuses the second copy, so a race cannot slip through.
 
@@ -53,6 +53,7 @@ Why: putting the rules in the database means the parts that matter for GoBD and 
 **Harder**
 - Every database transaction that changes a case must set the actor first. The skeleton (#8) wraps this in one helper.
 - Adding a new move means adding a row to the allowed moves table in a migration, on purpose.
+- A wrong amount or vendor found after approval cannot be edited. The invoice is rejected and goes through approval again, which is the safe way round.
 - All audit writes share one short lock to keep the chain in order. Fine at a few thousand events a day, to watch if volume grows a lot.
 
 **To watch**
