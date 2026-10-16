@@ -7,6 +7,8 @@ Requirements: PY-07, PY-08, PY-11, BK-04, AR-05, BA-01, BA-08, NF-04, NF-06
 
 Twice a month ARGUS must hand approved invoices to Wise as a batch in the right currency, without funding or releasing it (PY-08, NF-04). It also needs the payment status (PY-11), Wise's exchange rate (BK-04, AR-05) and a monthly statement of every balance (BA-01, BA-08). Only interfaces Wise supports are allowed (NF-06). Max ASP is a German company with one Wise Business account. Details are in the [spike report](../spikes/wise-payments.md).
 
+Arita agreed on 16 Oct 2026 to go ahead with the working assumptions from the spike report: a dedicated Wise user with approval required, a monthly statement download by Benjamin for now, a request to Wise about statement access, the Wise rate at booking time, and paying from a matching currency balance if Max ASP holds one, otherwise from EUR.
+
 ## Options
 
 1. **Personal API token on a dedicated Wise team member.** Supported by Wise for small businesses automating their own account. Covers recipients, quotes, transfers, batch groups, transfer status and rates. For German accounts Wise refuses funding and statements through this token. Con: no statement through the API.

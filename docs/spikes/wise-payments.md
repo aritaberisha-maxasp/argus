@@ -114,7 +114,9 @@ Three layers, each enough on its own:
 
 ## Questions for Arita
 
-Posted on issue #4 with the label `needs-arita`.
+Posted on issue #4. On 16 Oct 2026 Arita said to go ahead with the assumptions below for now and revisit them when they matter.
+
+Working assumptions: yes to 1, 2, 3 and 6, and the rate at booking time for 4. Question 5 stays open until the Wise token exists.
 
 1. **Dedicated Wise user.** Can Benjamin add a Wise team member just for ARGUS, which may set up payments, with approval required for all its payments? (yes or no)
 2. **Monthly statement.** Until Wise allows statements through the API, is it fine if Benjamin downloads each balance's statement once a month and sends it to ARGUS? (yes or no)
