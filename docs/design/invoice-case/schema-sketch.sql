@@ -179,6 +179,8 @@ create trigger audit_no_truncate before truncate on audit_event execute function
 create function case_guard() returns trigger language plpgsql as $$
 declare
   effective case_status := case when old.status = 'exception' then old.resume_status else old.status end;
+  ends_rejected boolean;
+  ends_duplicate boolean;
 begin
   -- Fields only the database writes.
   new.resume_status := old.resume_status;
@@ -215,6 +217,15 @@ begin
       new.resume_status := old.status;
       new.exception_since := clock_timestamp();
     elsif old.status = 'exception' then
+      -- Some outcomes end the case: a rejected invoice and a confirmed duplicate can only be closed.
+      select bool_or(outcome = 'rejected'), bool_or(outcome = 'confirmed_duplicate') into ends_rejected, ends_duplicate
+      from exception_item where case_id = old.id and resolved_at >= old.exception_since;
+      if ends_rejected and (new.status <> 'closed' or new.closed_reason is distinct from 'rejected') then
+        raise exception 'case % was rejected and can only be closed as rejected', old.id;
+      end if;
+      if ends_duplicate and not coalesce(ends_rejected, false) and (new.status <> 'closed' or new.closed_reason is distinct from 'duplicate') then
+        raise exception 'case % is a confirmed duplicate and can only be closed as duplicate', old.id;
+      end if;
       if new.status <> old.resume_status and new.status <> 'closed' and not exists (
            select 1 from exception_item ei join exception_exit x on x.reason = ei.reason
            where ei.case_id = old.id and ei.resolved_at >= old.exception_since

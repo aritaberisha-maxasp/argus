@@ -57,5 +57,5 @@ Why: putting the rules in the database means the parts that matter for GoBD and 
 - All audit writes share one short lock to keep the chain in order. Fine at a few thousand events a day, to watch if volume grows a lot.
 
 **To watch**
-- The two open questions in section 7 of the design note (payment of invoices whose booking failed, approval of credit notes).
+- The two open questions in section 8 of the design note (payment of invoices whose booking failed, approval of credit notes).
 - The DATEV and Wise ADRs (#2, #4) may name the exact booking reference and transfer statuses. The model stores them as text, so either answer fits.

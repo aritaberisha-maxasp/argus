@@ -162,6 +162,44 @@ update exception_item set outcome = 'put_back_in_pool' where case_id = :c and re
 update invoice_case set status = 'booked' where id = :c;
 commit;
 
+\echo '24a. a rejected IBAN mismatch going back to booked is refused, it can only be closed as rejected'
+begin; set local argus.actor = 'system:intake';
+insert into invoice_case (kind, partner_account, gross_minor, currency) values ('incoming_invoice', '70004', 20000, 'EUR') returning id as r \gset
+update invoice_case set status = 'awaiting_approval' where id = :r;
+update invoice_case set status = 'approved' where id = :r;
+update invoice_case set status = 'booked' where id = :r;
+insert into exception_item (case_id, reason, detail, facts) values (:r, 'iban_mismatch', 'IBAN on invoice differs from DATEV', '{"iban_last4": "9876", "matches_datev": false}');
+update invoice_case set status = 'exception' where id = :r;
+commit;
+begin; set local argus.actor = 'user:benjamin-entra-id';
+update exception_item set outcome = 'rejected' where case_id = :r;
+update invoice_case set status = 'booked' where id = :r;
+rollback;
+begin; set local argus.actor = 'user:benjamin-entra-id';
+update exception_item set outcome = 'rejected' where case_id = :r;
+update invoice_case set status = 'closed', closed_reason = 'withdrawn' where id = :r;
+rollback;
+begin; set local argus.actor = 'user:benjamin-entra-id';
+update exception_item set outcome = 'rejected' where case_id = :r;
+update invoice_case set status = 'closed', closed_reason = 'rejected' where id = :r;
+commit;
+
+\echo '24b. a confirmed duplicate going on to approval is refused, it can only be closed as duplicate'
+begin; set local argus.actor = 'system:intake';
+insert into invoice_case (kind, partner_account, gross_minor, currency) values ('incoming_invoice', '70001', 892500, 'EUR') returning id as d \gset
+insert into exception_item (case_id, reason, detail, facts) values (:d, 'duplicate', 'same as an earlier case', jsonb_build_object('duplicate_of', :c));
+update invoice_case set status = 'exception' where id = :d;
+commit;
+begin; set local argus.actor = 'user:benjamin-entra-id';
+update exception_item set outcome = 'confirmed_duplicate' where case_id = :d;
+update invoice_case set status = 'received' where id = :d;
+rollback;
+begin; set local argus.actor = 'user:benjamin-entra-id';
+update exception_item set outcome = 'confirmed_duplicate' where case_id = :d;
+update invoice_case set status = 'closed', closed_reason = 'duplicate' where id = :d;
+commit;
+select id, status, closed_reason from invoice_case where id in (:r, :d) order by id;
+
 \echo '25. a correction while awaiting approval is allowed and logged with old and new values'
 begin; set local argus.actor = 'system:intake';
 insert into invoice_case (kind, partner_account, gross_minor, currency) values ('incoming_invoice', '70003', 10000, 'EUR') returning id as w \gset

@@ -106,7 +106,7 @@ These live in the database, so no bug in the application can get round them.
 4. **The kind never changes**, and a closed case never changes again.
 5. **Booking data is frozen after approval.** Once a case is Approved (or Booked, for kinds without approval), its account, number, amount and currency cannot change. A correction then means rejecting it and starting a new approval. The DATEV booking reference can be set once.
 6. **An open exception stops the case.** While a case has an open exception it cannot move anywhere except into Exception. At commit the database checks both ways: a case with an open exception is in Exception, and a case in Exception has an open exception. So a job that opens an exception and dies before moving the case cannot leave it running.
-7. **An exception goes back to where it came from.** The database itself records the status the case left (`resume_status`) when it enters Exception. The application cannot write it. The case may only return there, be closed, or take an exit listed in `exception_exit`.
+7. **An exception goes back to where it came from.** The database itself records the status the case left (`resume_status`) when it enters Exception. The application cannot write it. The case may only return there, be closed, or take an exit listed in `exception_exit`. Two outcomes end the case instead: an exception resolved as `rejected` can only be closed as rejected, and one resolved as `confirmed_duplicate` can only be closed as duplicate. So a rejected IBAN mismatch or a confirmed duplicate can never go on to approval, booking or payment.
 8. **The application can only write what it must.** It connects as `argus_app`, which has column level rights: it cannot set `kind` after insert, `resume_status`, any time stamp, or who resolved an exception.
 9. **Two workers cannot move the same case at once.** Moves are written as `update ... where id = :id and status = :expected`. If another worker moved it first, nothing changes and the worker starts over.
 
@@ -225,7 +225,11 @@ The payment run story owns the detail. The case model only needs:
 
 When a payment is created the cases move to In payment run. When Wise reports it sent, they move to Paid. When Wise cancels an unfunded transfer, they move back to Booked and wait for the next run.
 
-## 7. Open questions
+## 7. Left for the approval story
+
+A change to account, number, amount or currency while a case is Awaiting approval is allowed and logged with old and new value. The approval story must then ask for approval again, because an approval given for one amount must not count for another. The approval table it builds is the natural place to enforce that.
+
+## 8. Open questions
 
 Posted on issue #7 for Arita. ARGUS is designed on the default in brackets until the answer comes.
 
