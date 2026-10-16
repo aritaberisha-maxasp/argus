@@ -58,9 +58,9 @@ Sprint 1 has seven shifts (five weeknights, Saturday and Sunday) and at most thr
 | 12 | [#29](https://github.com/aritaberisha-maxasp/argus/issues/29) | Read the invoice data from PDFs, images and scanned paper invoices | Intake | M | #24 |  |
 | 13 | [#28](https://github.com/aritaberisha-maxasp/argus/issues/28) | Read XRechnung and ZUGFeRD e-invoices | Intake | M | #24 |  |
 | 14 | [#70](https://github.com/aritaberisha-maxasp/argus/issues/70) | Trust a sender only when the email really comes from their domain | Intake | S | #25 |  |
-| 15 | [#71](https://github.com/aritaberisha-maxasp/argus/issues/71) | Send doubtful emails to a person instead of routing them | Intake | S | #25, #29, #70 |  |
-| 16 | [#72](https://github.com/aritaberisha-maxasp/argus/issues/72) | Run ARGUS for two weeks in shadow mode before it routes anything | Intake | S | #25, #26, #27 |  |
-| 17 | [#23](https://github.com/aritaberisha-maxasp/argus/issues/23) | Let approvers and Benjamin sign in with their Microsoft account and see only what their role allows | Foundation | M | #8 |  |
+| 15 | [#71](https://github.com/aritaberisha-maxasp/argus/issues/71) | Send doubtful emails to a person instead of routing them | Intake | M | #25, #29, #28, #70 |  |
+| 16 | [#23](https://github.com/aritaberisha-maxasp/argus/issues/23) | Let approvers and Benjamin sign in with their Microsoft account and see only what their role allows | Foundation | M | #8 |  |
+| 17 | [#72](https://github.com/aritaberisha-maxasp/argus/issues/72) | Run ARGUS for two weeks in shadow mode before it routes anything | Intake | S | #25, #26, #27, #23 |  |
 | 18 | [#30](https://github.com/aritaberisha-maxasp/argus/issues/30) | Split an email with several invoices into one case per invoice | Intake | S | #29 |  |
 | 19 | [#31](https://github.com/aritaberisha-maxasp/argus/issues/31) | Catch invoices that arrive twice | Intake | S | #29, #21 |  |
 | 20 | [#32](https://github.com/aritaberisha-maxasp/argus/issues/32) | Check incoming invoices for the formal requirements of §14 UStG | Intake | S | #29, #21 |  |
