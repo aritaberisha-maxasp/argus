@@ -37,7 +37,7 @@ ADR 0001 (proposed) puts ARGUS on Azure in Max ASP's own tenant, with a 5 minute
 - **Sign in:** no client secrets. The app registration trusts the Azure managed identity as a federated credential; a certificate in Key Vault is the fallback (ADR 0001).
 - **New emails:** a sweep every 5 minutes lists the Inbox and is the only thing that decides what to process. Graph change notifications (without email content, renewed before their 7 day limit, with lifecycle events) only trigger an early sweep. The first story may ship the sweep alone.
 - **No loss, no doubles:** one database record per email keyed by the immutable ID with a unique constraint; one sweep at a time through a PostgreSQL advisory lock; each step (`seen`, `stored`, `classified`, `routed`, `filed`) recorded before the next starts and safe to repeat. Forwarding goes through a saved draft so a crash can never send two forwards.
-- **Folders:** ARGUS files every processed email out of the Inbox into its own folder tree, so the Inbox is the work queue. Other goes to `ARGUS/Removed`, and a daily ARGUS job deletes it 30 days after ARGUS moved it there. Exchange still keeps deleted items recoverable for at least 14 days.
+- **Folders:** ARGUS files every processed email out of the Inbox into its own folder tree, so the Inbox is the work queue. Arita confirmed this on 16 Oct 2026. Other goes to `ARGUS/Removed`, and a daily ARGUS job deletes it 30 days after ARGUS moved it there. Exchange still keeps deleted items recoverable for at least 14 days.
 - **Testing:** a fake Graph in Docker for CI, checked against recorded real answers, and a separate shared sandbox mailbox reached only by a separate test app for end to end tests.
 
 ## Consequences
@@ -54,10 +54,9 @@ ADR 0001 (proposed) puts ARGUS on Azure in Max ASP's own tenant, with a 5 minute
 - People working in the mailbox will see emails move into ARGUS folders within minutes.
 
 **To watch**
-- If Max ASP does not want emails moved out of the Inbox, the sweep switches to a Graph delta query and stores the delta link. The rest stays.
 - Inbox rules or people moving emails before ARGUS sees them would bypass ARGUS. Question 5 in the spike note.
 - The webhook needs the public HTTPS address ADR 0001 already accepts; it only accepts calls carrying our `clientState` secret.
 
 ## Questions for Arita
 
-See section 5 of the spike note. The one that shapes the design most: may ARGUS move processed emails out of the Inbox into its own subfolders?
+See section 5 of the spike note. The folder question is answered (yes, 16 Oct 2026); the other five are still open.

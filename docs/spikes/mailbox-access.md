@@ -82,7 +82,7 @@ This means the first story can ship the sweep alone, without any public address,
 
 ### Why the Inbox works as a queue
 
-ARGUS moves every email out of the Inbox once it is done with it, into its own folders (see section 3). So "what is in the Inbox" is always "what still needs work", and the sweep needs no delta token or other bookmark that could get lost. If Max ASP prefers processed emails to stay in the Inbox, we switch the sweep to a delta query on the Inbox and keep the delta link in the database. That works as well, but adds one more piece of state to look after. This is question 3 for Arita.
+ARGUS moves every email out of the Inbox once it is done with it, into its own folders (see section 3). So "what is in the Inbox" is always "what still needs work", and the sweep needs no delta token or other bookmark that could get lost. Arita confirmed on 16 Oct 2026 that ARGUS may move processed emails into its own subfolders, so we do not need a delta query.
 
 ### Never twice, never lost
 
@@ -152,7 +152,7 @@ Options for the sandbox mailbox:
 
 1. **Mailbox type.** Is accounts@maxasp.com a shared mailbox, or a normal user mailbox with its own licence? Both work; it changes the admin script slightly.
 2. **Admin.** Who at Max ASP can do the one time setup (app registrations and the Exchange PowerShell scoping)? We provide the script.
-3. **Folders.** May ARGUS move processed emails out of the Inbox into its own subfolders, so the Inbox only holds what is still waiting? Yes keeps the design simplest.
+3. **Folders.** Answered by Arita on 16 Oct 2026: yes, ARGUS may move emails into its own subfolders once it has processed them.
 4. **Sandbox.** May we have a shared mailbox `argus-sandbox@maxasp.com` for testing, reachable only by a separate test app?
 5. **People in the mailbox today.** Does anyone work in accounts@ by hand today, and are there Inbox rules or other tools on it? They could move emails before ARGUS sees them.
 6. **Purge.** Is it fine that ARGUS deletes emails in its Removed folder after 30 days, with Exchange keeping them recoverable for another 14 days (or 30 if Max ASP raises it)?
