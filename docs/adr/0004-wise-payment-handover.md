@@ -1,4 +1,4 @@
-# 0003: Hand payment runs to Wise as unfunded batch groups
+# 0004: Hand payment runs to Wise as unfunded batch groups
 
 Status: proposed
 Requirements: PY-07, PY-08, PY-11, BK-04, AR-05, BA-01, BA-08, NF-04, NF-06
