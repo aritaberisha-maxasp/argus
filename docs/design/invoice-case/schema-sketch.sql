@@ -206,6 +206,10 @@ begin
     if not exists (select 1 from case_status_transition where kind = new.kind and from_status = old.status and to_status = new.status) then
       raise exception 'status change % -> % not allowed for %', old.status, new.status, new.kind;
     end if;
+    -- Direct debit (PY-13) and held invoices (PY-10) never go into a payment run.
+    if new.status = 'in_payment_run' and (new.direct_debit or new.payment_hold) then
+      raise exception 'case % is paid by direct debit or held back and cannot go into a payment run', old.id;
+    end if;
     -- An open exception stops every move except into exception.
     if new.status <> 'exception' and exists (select 1 from exception_item where case_id = old.id and resolved_at is null) then
       raise exception 'case % has an open exception', old.id;
@@ -285,6 +289,11 @@ begin
     raise exception 'exception % is resolved and cannot change', old.id;
   end if;
   if new.outcome is not null then
+    -- A case exception can only be resolved while its case is stopped, so the outcome always
+    -- decides where the case goes next (see case_guard). Email and statement exceptions have no case.
+    if old.case_id is not null and (select status from invoice_case where id = old.case_id) <> 'exception' then
+      raise exception 'case % must be in exception before exception % can be resolved', old.case_id, old.id;
+    end if;
     -- PR-05, VM-04: an IBAN mismatch ends only by fixing the IBAN in DATEV or rejecting the invoice.
     if old.reason = 'iban_mismatch' and new.outcome not in ('fixed_in_datev','rejected') then
       raise exception 'an IBAN mismatch can only end as fixed_in_datev or rejected';

@@ -1,7 +1,7 @@
 -- Checks for schema-sketch.sql. Run against an empty database:
 --   psql -d argus -f schema-sketch.sql && psql -d argus -f checks.sql
 -- Every line marked "refused" must print an ERROR. Every other step must not.
--- Covers: NF-01, NF-03, NF-05, EX-01, AP-08, PR-05, VM-04, IN-10, BA-07, AC-8
+-- Covers: NF-01, NF-03, NF-05, EX-01, AP-08, PR-05, VM-04, IN-10, BA-07, PY-10, PY-13, AC-8
 \set ON_ERROR_STOP 0
 set role argus_app;
 
@@ -199,6 +199,35 @@ update exception_item set outcome = 'confirmed_duplicate' where case_id = :d;
 update invoice_case set status = 'closed', closed_reason = 'duplicate' where id = :d;
 commit;
 select id, status, closed_reason from invoice_case where id in (:r, :d) order by id;
+
+\echo '24c. opening and resolving an IBAN mismatch as rejected in one step without stopping the case is refused'
+begin; set local argus.actor = 'system:intake';
+insert into invoice_case (kind, partner_account, gross_minor, currency) values ('incoming_invoice', '70005', 30000, 'EUR') returning id as p1 \gset
+update invoice_case set status = 'awaiting_approval' where id = :p1;
+update invoice_case set status = 'approved' where id = :p1;
+update invoice_case set status = 'booked' where id = :p1;
+commit;
+begin; set local argus.actor = 'system:iban-check';
+insert into exception_item (case_id, reason, detail) values (:p1, 'iban_mismatch', 'IBAN differs');
+update exception_item set outcome = 'rejected' where case_id = :p1 and resolved_at is null;
+rollback;
+
+\echo '24d. the same with a confirmed duplicate is refused'
+begin; set local argus.actor = 'system:intake';
+insert into invoice_case (kind) values ('incoming_invoice') returning id as d2 \gset
+insert into exception_item (case_id, reason, detail) values (:d2, 'duplicate', 'same as an earlier case');
+update exception_item set outcome = 'confirmed_duplicate' where case_id = :d2 and resolved_at is null;
+rollback;
+
+\echo '24e. a direct debit or held invoice going into a payment run is refused (PY-13, PY-10)'
+begin; set local argus.actor = 'system:payment-run';
+update invoice_case set direct_debit = true where id = :p1;
+update invoice_case set status = 'in_payment_run' where id = :p1;
+rollback;
+begin; set local argus.actor = 'system:payment-run';
+update invoice_case set payment_hold = true where id = :p1;
+update invoice_case set status = 'in_payment_run' where id = :p1;
+rollback;
 
 \echo '25. a correction while awaiting approval is allowed and logged with old and new values'
 begin; set local argus.actor = 'system:intake';
