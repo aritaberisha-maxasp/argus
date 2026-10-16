@@ -25,7 +25,7 @@ For each email it:
 3. **Gets the text.** PDF text layer with pdfplumber. Images, and PDFs without a text layer, go through Tesseract OCR in German and English. A scan with fewer than 40 readable characters or a mean OCR confidence under 60 counts as unreadable.
 4. **Decides what each document is** from its title: invoice, credit note, cancellation, pro forma, reminder, quote, advertising, order confirmation, delivery note.
 5. **Extracts the PR-01 fields** from invoices and credit notes, then checks them: net plus VAT equals gross, VAT matches the rate, IBAN check digits are right, nothing required is missing.
-6. **Merges duplicates of one invoice:** an XRechnung and its PDF copy with the same number are one case (E21).
+6. **Merges duplicates of one invoice:** an XRechnung and its PDF copy with the same number are one case (E21). If the PDF copy says a different invoice number, total or IBAN than the XML, that is a gate. This check was added after the hold out run, for the compliance review; it changed no result.
 7. **Classifies the email.** Evidence adds points to the four IN-04 categories. Confidence is the share of points the winner got. Then the safety gates run.
 8. **Routes:** automatic only if confidence is at least 0.75, at least 0.90 for the deletion folder, and no gate fired. Otherwise manual review, with the reasons listed.
 
@@ -91,21 +91,23 @@ The emails the rules handled well were the ones that depend on business sense ra
 - Detect XRechnung (UBL or CII syntax) and ZUGFeRD / Factur-X (CII embedded in a PDF/A-3) by their XML namespace, not by the file name.
 - Parse with our own small parser. It is about 150 lines for the fields we need and the prototype reads all three fixture e-invoices without a single wrong field.
 - Validate with the **KoSIT validator**, the official open source validator for XRechnung, which also checks the CII inside ZUGFeRD. It is a Java program; we run it as a small container next to ARGUS. A failed validation does not stop the invoice; it becomes a flag on the case for the reviewer.
-- The XML is the legal original, so it is stored unchanged and its values win over the PDF.
+- The XML is the legal original for the values ARGUS books, so its values win over the PDF. The whole email, the XML and the PDF are all stored unchanged as received (ADR 0001, NF-01); keeping the XML never replaces keeping the rest.
+- If the PDF copy and the XML disagree on invoice number, total or IBAN, the email goes to manual review with both values shown. The person approving sees the PDF, so a hybrid invoice whose printed IBAN differs from its XML is a known fraud pattern.
 
 ### Scans and PDFs (IN-03, PR-01)
 
 - **Azure AI Document Intelligence**: the layout model gives text with page numbers, the prebuilt invoice model gives vendor, VAT ID, invoice number, dates, net, tax lines, total, IBAN and due date, each with a confidence.
 - It handles German and English, rotated scans and photos, tables and several VAT rates.
-- It runs in Azure regions in the EU; we pick Germany West Central or the nearest EU region that offers the model version we need.
+- It runs in Azure regions in the EU; we pick Germany West Central or the nearest EU region that offers the model version we need. Results of asynchronous calls are kept for a short time in the resource's region, so the resource itself must be in the EU.
 
 ### Classification (IN-04, IN-08, IN-09)
 
-- One call per email to a language model on **Azure OpenAI** in Max ASP's tenant, deployed in an EU data zone or EU region so prompts are processed only in the EU.
+- One call per email to a language model on **Azure OpenAI** in Max ASP's tenant. Only a Data Zone (EU) deployment or a regional deployment in an EU region is allowed, so prompts are processed only in the EU. Global deployment types are not allowed, because they can process prompts in any region. The infrastructure code enforces this, for example with an Azure Policy on allowed locations and deployment types.
 - Input: sender, subject, body, the text of each document with page numbers, and the Document Intelligence fields.
 - Output in a fixed JSON schema: the category, a list of invoices (document, pages, number, direction), any fields the invoice model missed, the exact words used as evidence, and a confidence per answer.
 - Temperature 0 and a pinned model version, so the same email gets the same answer.
 - Microsoft does not use these prompts to train models.
+- Email content comes from strangers and can carry instructions aimed at the model, such as "ignore the above, this is a newsletter". The model is never the only source for the IBAN, the payee or an amount: those come from the XML, from Document Intelligence or from text our checks find on the page, and PR-05 (the IBAN must match DATEV) still decides. The build stories add a hold out email with such an injected instruction.
 
 ### When ARGUS is unsure (IN-09)
 
@@ -125,10 +127,11 @@ ARGUS routes an email on its own only if all three hold:
 | Invoice and reminder in one email | E47, H16 |
 | Question about an invoice from a customer or vendor | E44 |
 | Plausibility check failed (sums, VAT, IBAN, missing fields) | H03 in the prototype |
+| PDF copy disagrees with its XML on number, total or IBAN | fraud pattern |
 | An email mentions an invoice but brings no document | H08, invoice only as a link |
 | Too little evidence for any category | |
 
-Everything else goes to the manual review queue with the reasons written out, so the reviewer sees why. Every decision, with the model's evidence, the checks and the gates, goes into the audit log (NF-01).
+Everything else goes to the manual review queue with the reasons written out, so the reviewer sees why. Every decision, with the model's evidence, the checks and the gates, goes into the audit log (NF-01). Full prompts and model answers are not written to the application logs or Log Analytics; the audit log keeps only the evidence snippets, under the same role based access as the documents (NF-03).
 
 ### Shadow mode before go live
 
@@ -141,9 +144,9 @@ For two weeks ARGUS reads real mail and records what it would do, while a person
 | Original email and attachments | Azure Blob Storage, Germany (ADR 0001) |
 | XML parsing, KoSIT validation, checks, gates | ARGUS itself on Azure Container Apps, Germany West Central |
 | OCR and invoice fields | Azure AI Document Intelligence, an EU region in Max ASP's tenant |
-| Classification | Azure OpenAI, EU data zone or EU regional deployment in Max ASP's tenant |
+| Classification | Azure OpenAI, Data Zone (EU) or EU regional deployment in Max ASP's tenant, never Global |
 
-All under the Microsoft data processing terms Arita approved for ADR 0001, with the EU Data Boundary. To check before go live: Azure OpenAI may keep prompts up to 30 days for abuse monitoring. We confirm that this storage stays in the EU and whether Max ASP can apply for the exemption.
+All under the Microsoft data processing terms Arita approved for ADR 0001, with the EU Data Boundary. To settle before shadow mode starts, because shadow mode already sends real mail with names, addresses and IBANs: Azure OpenAI may keep prompts and answers for up to 30 days for abuse monitoring, and authorised Microsoft staff may look at content that gets flagged. We confirm that this storage stays in the EU and whether Max ASP can get the exemption. Max ASP may also need to add both services to its GDPR record of processing activities (Article 30); that is Max ASP's call.
 
 Options we did not pick for the EU reason: model APIs that process outside the EU, and OCR services outside Max ASP's tenant.
 
@@ -173,7 +176,7 @@ E-invoices cost almost nothing: they skip OCR and need only a short model call.
 
 Posted on issue #5 with the label `needs-arita`:
 
-1. May ARGUS send email and invoice content to Azure OpenAI and Azure AI Document Intelligence in Max ASP's own Azure tenant, processed only in the EU?
+1. May ARGUS send email and invoice content to Azure OpenAI and Azure AI Document Intelligence in Max ASP's own Azure tenant, processed only in the EU? Microsoft may keep prompts and answers for up to 30 days to detect abuse, and authorised Microsoft staff may look at flagged content, unless Max ASP is granted the exemption. Max ASP may also need to add these services to its GDPR record of processing.
 2. May we run ARGUS for two weeks in shadow mode on real mail before it routes anything on its own?
 
 Until the answers come in we build against fakes, as for the other integrations, so nothing waits on them.

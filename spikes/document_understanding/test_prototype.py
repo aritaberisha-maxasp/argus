@@ -14,7 +14,7 @@ sys.path.insert(0, str(HERE))
 import pytest  # noqa: E402
 
 import einvoice  # noqa: E402
-from documents import check_fields, document_kind, iban_valid, parse_amount  # noqa: E402
+from documents import check_fields, compare_copies, document_kind, iban_valid, parse_amount  # noqa: E402
 from evaluate import FIXTURES, run  # noqa: E402
 
 pytestmark = pytest.mark.req("IN-04", "IN-08", "IN-09", "PR-01", "NF-02")
@@ -61,3 +61,10 @@ def test_amounts_and_checks():
     problems = check_fields({"issuer_name": "A", "invoice_number": "1", "invoice_date": "2026-10-01", "currency": "EUR",
                              "net_amount": "100.00", "vat_rate": "19", "vat_amount": "19.00", "gross_amount": "120.00"})
     assert problems == ["net plus VAT does not equal gross"]
+
+
+def test_pdf_copy_that_differs_from_its_xml_is_flagged():
+    xml = {"invoice_number": "R-1", "gross_amount": "100.00", "iban_on_document": "DE44000000020000700001"}
+    pdf = {"invoice_number": "R-1", "gross_amount": "100.00", "iban_on_document": "DE33000000660000706666"}
+    assert compare_copies(xml, pdf) == ["PDF copy and XML differ on iban_on_document: PDF DE33000000660000706666, XML DE44000000020000700001"]
+    assert compare_copies(xml, dict(xml)) == []

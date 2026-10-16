@@ -9,7 +9,7 @@
   "fields_correct": 0,
   "field_accuracy_by_format": {},
   "field_errors": [],
-  "seconds_total": 3.0,
+  "seconds_total": 2.9,
   "rows": [
     {
       "email_id": "H01",
@@ -28,7 +28,7 @@
       "evidence": [
         "incoming_invoice +3: invoice 2026-4471 in Rechnung_2026-4471.pdf from An: Beispiel Gartenbau GmbH"
       ],
-      "seconds": 0.05
+      "seconds": 0.03
     },
     {
       "email_id": "H02",
@@ -47,7 +47,7 @@
       "evidence": [
         "incoming_invoice +3: invoice ? in ED-2026-091.pdf from Example Design Studio Ltd TAX INVOICE"
       ],
-      "seconds": 0.03
+      "seconds": 0.02
     },
     {
       "email_id": "H03",
@@ -65,7 +65,7 @@
       "evidence": [
         "incoming_invoice +3: invoice K-2026-118 in K-2026-118.pdf from Beispiel Kantine GmbH"
       ],
-      "seconds": 0.04
+      "seconds": 0.03
     },
     {
       "email_id": "H04",
@@ -81,7 +81,7 @@
       "evidence": [
         "incoming_invoice +3: invoice BM-7781 in Rechnungen_Oktober.pdf from Beispiel Mietgeräte GmbH"
       ],
-      "seconds": 0.04
+      "seconds": 0.03
     },
     {
       "email_id": "H05",
@@ -99,7 +99,7 @@
       "evidence": [
         "incoming_invoice +3: invoice ? in scan.pdf from Beispiel Hausmeister. GmbH"
       ],
-      "seconds": 2.23
+      "seconds": 2.0
     },
     {
       "email_id": "H06",
@@ -235,7 +235,7 @@
       "evidence": [
         "payment_reminder +3: reminder letter in IMG_2041.jpg"
       ],
-      "seconds": 0.49
+      "seconds": 0.59
     },
     {
       "email_id": "H14",
@@ -253,7 +253,7 @@
       "evidence": [
         "incoming_invoice +3: invoice S-0915 in S-0915.pdf from Beispiel Schlüsseldienst"
       ],
-      "seconds": 0.02
+      "seconds": 0.03
     },
     {
       "email_id": "H15",
@@ -292,7 +292,7 @@
         "payment_reminder +3: reminder letter in Mahnung.pdf",
         "payment_reminder +2: reminder words in the subject"
       ],
-      "seconds": 0.04
+      "seconds": 0.05
     }
   ]
 }

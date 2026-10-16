@@ -206,13 +206,15 @@ def finish_documents(documents: list[Document]) -> list[Document]:
         if doc.einvoice:
             doc.kind = doc.einvoice["kind"]
             doc.fields = normalise_einvoice(doc.einvoice)
+            if doc.text.strip():  # ZUGFeRD: the printed PDF must say the same as its XML
+                doc.problems += compare_copies(doc.fields, extract_fields(doc.text))
         else:
             if doc.kind == "unknown":
                 doc.kind = document_kind(doc.text)
             if doc.is_invoice or doc.kind == "proforma":
                 doc.fields = extract_fields(doc.text)
         if doc.is_invoice:
-            doc.problems = check_fields(doc.fields)
+            doc.problems = check_fields(doc.fields) + doc.problems
     return merge_same_invoice(documents)
 
 
@@ -223,7 +225,10 @@ def merge_same_invoice(documents: list[Document]) -> list[Document]:
     for doc in sorted(documents, key=lambda d: d.einvoice is None):
         number = doc.fields.get("invoice_number") if doc.is_invoice else None
         if number and number in by_number:
-            continue  # the structured copy is already kept
+            kept = by_number[number]  # the structured copy is already kept
+            if kept.einvoice and not doc.einvoice:
+                kept.problems += compare_copies(kept.fields, doc.fields)
+            continue
         if number:
             by_number[number] = doc
         result.append(doc)
@@ -361,6 +366,17 @@ def normalise_einvoice(data: dict) -> dict:
 
 
 # ---------------------------------------------------------------- checks
+
+COMPARED_FIELDS = ("invoice_number", "gross_amount", "iban_on_document")
+
+
+def compare_copies(xml_fields: dict, pdf_fields: dict) -> list[str]:
+    """The person approving sees the PDF, so a PDF that differs from its XML is a fraud signal."""
+    return [
+        f"PDF copy and XML differ on {name}: PDF {pdf_fields.get(name)}, XML {xml_fields.get(name)}"
+        for name in COMPARED_FIELDS
+        if pdf_fields.get(name) and xml_fields.get(name) and pdf_fields[name] != xml_fields[name]
+    ]
 
 REQUIRED_FIELDS = ("issuer_name", "invoice_number", "invoice_date", "net_amount", "vat_amount", "gross_amount", "currency")
 
