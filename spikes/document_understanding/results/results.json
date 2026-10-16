@@ -1,0 +1,852 @@
+{
+  "emails": 50,
+  "routes_correct": 50,
+  "route_accuracy": 1.0,
+  "ac1_passed": true,
+  "invoices_sent_to_deletion": [],
+  "cases_correct": 50,
+  "fields_checked": 496,
+  "fields_correct": 496,
+  "field_accuracy_by_format": {
+    "body": "16/16",
+    "pdf": "416/416",
+    "scan": "16/16",
+    "xrechnung": "32/32",
+    "zugferd": "16/16"
+  },
+  "field_errors": [],
+  "seconds_total": 4.6,
+  "rows": [
+    {
+      "email_id": "E01",
+      "expected_route": "invoice_processing",
+      "route": "invoice_processing",
+      "route_ok": true,
+      "expected_cases": 1,
+      "cases": 1,
+      "cases_ok": true,
+      "proposed": "incoming_invoice",
+      "confidence": 1.0,
+      "gates": [],
+      "evidence": [
+        "incoming_invoice +3: invoice BB-2026-1187 in Rechnung_BB-2026-1187.pdf from Muster Bürobedarf GmbH"
+      ],
+      "seconds": 0.05
+    },
+    {
+      "email_id": "E02",
+      "expected_route": "invoice_processing",
+      "route": "invoice_processing",
+      "route_ok": true,
+      "expected_cases": 1,
+      "cases": 1,
+      "cases_ok": true,
+      "proposed": "incoming_invoice",
+      "confidence": 1.0,
+      "gates": [],
+      "evidence": [
+        "incoming_invoice +3: invoice BCH-26-10-0042 in Rechnung_BCH-26-10-0042.pdf from Beispiel Cloud Hosting GmbH"
+      ],
+      "seconds": 0.03
+    },
+    {
+      "email_id": "E03",
+      "expected_route": "invoice_processing",
+      "route": "invoice_processing",
+      "route_ok": true,
+      "expected_cases": 1,
+      "cases": 1,
+      "cases_ok": true,
+      "proposed": "incoming_invoice",
+      "confidence": 1.0,
+      "gates": [],
+      "evidence": [
+        "incoming_invoice +3: invoice MV-2026-11-007 in Rechnung_MV-2026-11-007.pdf from Muster Immobilien Verwaltung KG"
+      ],
+      "seconds": 0.04
+    },
+    {
+      "email_id": "E04",
+      "expected_route": "invoice_processing",
+      "route": "invoice_processing",
+      "route_ok": true,
+      "expected_cases": 1,
+      "cases": 1,
+      "cases_ok": true,
+      "proposed": "incoming_invoice",
+      "confidence": 1.0,
+      "gates": [],
+      "evidence": [
+        "incoming_invoice +3: invoice ESL-INV-10293 in Invoice_ESL-INV-10293.pdf from Example Software Ltd"
+      ],
+      "seconds": 0.04
+    },
+    {
+      "email_id": "E05",
+      "expected_route": "invoice_processing",
+      "route": "invoice_processing",
+      "route_ok": true,
+      "expected_cases": 1,
+      "cases": 1,
+      "cases_ok": true,
+      "proposed": "incoming_invoice",
+      "confidence": 1.0,
+      "gates": [],
+      "evidence": [
+        "incoming_invoice +3: invoice BBP-2026-0318 in Rechnung_BBP-2026-0318.pdf from Beispiel Beratung Partner mbB"
+      ],
+      "seconds": 0.04
+    },
+    {
+      "email_id": "E06",
+      "expected_route": "invoice_processing",
+      "route": "invoice_processing",
+      "route_ok": true,
+      "expected_cases": 1,
+      "cases": 1,
+      "cases_ok": true,
+      "proposed": "incoming_invoice",
+      "confidence": 1.0,
+      "gates": [],
+      "evidence": [
+        "incoming_invoice +3: invoice MTS-2026-558201 in Rechnung_MTS-2026-558201.pdf from Muster Telekom Service GmbH"
+      ],
+      "seconds": 0.04
+    },
+    {
+      "email_id": "E07",
+      "expected_route": "invoice_processing",
+      "route": "invoice_processing",
+      "route_ok": true,
+      "expected_cases": 1,
+      "cases": 1,
+      "cases_ok": true,
+      "proposed": "incoming_invoice",
+      "confidence": 1.0,
+      "gates": [],
+      "evidence": [
+        "incoming_invoice +3: invoice R-2026-0931 in Scan_2026-10-01.jpg from Beispiel Reinigung GmbH"
+      ],
+      "seconds": 0.73
+    },
+    {
+      "email_id": "E08",
+      "expected_route": "invoice_processing",
+      "route": "invoice_processing",
+      "route_ok": true,
+      "expected_cases": 1,
+      "cases": 1,
+      "cases_ok": true,
+      "proposed": "incoming_invoice",
+      "confidence": 1.0,
+      "gates": [],
+      "evidence": [
+        "incoming_invoice +3: invoice BCH-26-10-0057 in Rechnung_BCH-26-10-0057_xrechnung.xml from Beispiel Cloud Hosting GmbH",
+        "incoming_invoice +1: structured e-invoice (UBL)"
+      ],
+      "seconds": 0.01
+    },
+    {
+      "email_id": "E09",
+      "expected_route": "invoice_processing",
+      "route": "invoice_processing",
+      "route_ok": true,
+      "expected_cases": 1,
+      "cases": 1,
+      "cases_ok": true,
+      "proposed": "incoming_invoice",
+      "confidence": 1.0,
+      "gates": [],
+      "evidence": [
+        "incoming_invoice +3: invoice BB-2026-1243 in Rechnung_BB-2026-1243_zugferd.pdf from Muster Bürobedarf GmbH",
+        "incoming_invoice +1: structured e-invoice (CII)"
+      ],
+      "seconds": 0.04
+    },
+    {
+      "email_id": "E10",
+      "expected_route": "invoice_processing",
+      "route": "invoice_processing",
+      "route_ok": true,
+      "expected_cases": 1,
+      "cases": 1,
+      "cases_ok": true,
+      "proposed": "incoming_invoice",
+      "confidence": 1.0,
+      "gates": [],
+      "evidence": [
+        "incoming_invoice +3: credit_note GS-BB-2026-0057 in Gutschrift_GS-BB-2026-0057.pdf from Muster Bürobedarf GmbH"
+      ],
+      "seconds": 0.04
+    },
+    {
+      "email_id": "E11",
+      "expected_route": "invoice_processing",
+      "route": "invoice_processing",
+      "route_ok": true,
+      "expected_cases": 1,
+      "cases": 1,
+      "cases_ok": true,
+      "proposed": "incoming_invoice",
+      "confidence": 1.0,
+      "gates": [],
+      "evidence": [
+        "incoming_invoice +3: credit_note ESL-CN-00412 in Credit_note_ESL-CN-00412.pdf from Example Software Ltd"
+      ],
+      "seconds": 0.03
+    },
+    {
+      "email_id": "E12",
+      "expected_route": "invoice_processing",
+      "route": "invoice_processing",
+      "route_ok": true,
+      "expected_cases": 1,
+      "cases": 1,
+      "cases_ok": true,
+      "proposed": "incoming_invoice",
+      "confidence": 1.0,
+      "gates": [],
+      "evidence": [
+        "incoming_invoice +3: invoice DR-2026-0815 in Rechnung_DR-2026-0815.pdf from Beispiel Druckerei GmbH"
+      ],
+      "seconds": 0.02
+    },
+    {
+      "email_id": "E13",
+      "expected_route": "invoice_processing",
+      "route": "invoice_processing",
+      "route_ok": true,
+      "expected_cases": 1,
+      "cases": 1,
+      "cases_ok": true,
+      "proposed": "incoming_invoice",
+      "confidence": 1.0,
+      "gates": [],
+      "evidence": [
+        "incoming_invoice +3: invoice ML-2026-30412 in Rechnung_ML-2026-30412.pdf from Muster Logistik GmbH"
+      ],
+      "seconds": 0.02
+    },
+    {
+      "email_id": "E14",
+      "expected_route": "invoice_processing",
+      "route": "invoice_processing",
+      "route_ok": true,
+      "expected_cases": 3,
+      "cases": 3,
+      "cases_ok": true,
+      "proposed": "incoming_invoice",
+      "confidence": 1.0,
+      "gates": [],
+      "evidence": [
+        "incoming_invoice +3: invoice R-2026-0932 in Rechnung_R-2026-0932.pdf from Beispiel Reinigung GmbH",
+        "incoming_invoice +3: invoice R-2026-0933 in Rechnung_R-2026-0933.pdf from Beispiel Reinigung GmbH",
+        "incoming_invoice +3: invoice R-2026-0934 in Rechnung_R-2026-0934.pdf from Beispiel Reinigung GmbH"
+      ],
+      "seconds": 0.08
+    },
+    {
+      "email_id": "E15",
+      "expected_route": "invoice_processing",
+      "route": "invoice_processing",
+      "route_ok": true,
+      "expected_cases": 1,
+      "cases": 1,
+      "cases_ok": true,
+      "proposed": "incoming_invoice",
+      "confidence": 1.0,
+      "gates": [],
+      "evidence": [
+        "incoming_invoice +3: invoice BB-2026-1187 in Rechnung_BB-2026-1187.pdf from Muster Bürobedarf GmbH"
+      ],
+      "seconds": 0.04
+    },
+    {
+      "email_id": "E16",
+      "expected_route": "invoice_processing",
+      "route": "invoice_processing",
+      "route_ok": true,
+      "expected_cases": 1,
+      "cases": 1,
+      "cases_ok": true,
+      "proposed": "incoming_invoice",
+      "confidence": 1.0,
+      "gates": [],
+      "evidence": [
+        "incoming_invoice +3: invoice MTS-2026-560017 in body from Muster Telekom Service GmbH"
+      ],
+      "seconds": 0.0
+    },
+    {
+      "email_id": "E17",
+      "expected_route": "outgoing_booking",
+      "route": "outgoing_booking",
+      "route_ok": true,
+      "expected_cases": 1,
+      "cases": 1,
+      "cases_ok": true,
+      "proposed": "outgoing_invoice",
+      "confidence": 1.0,
+      "gates": [],
+      "evidence": [
+        "outgoing_invoice +3: invoice MA-2026-0101 in Rechnung_MA-2026-0101.pdf issued by Max ASP GmbH",
+        "outgoing_invoice +2: sent by the invoicing agent"
+      ],
+      "seconds": 0.04
+    },
+    {
+      "email_id": "E18",
+      "expected_route": "outgoing_booking",
+      "route": "outgoing_booking",
+      "route_ok": true,
+      "expected_cases": 1,
+      "cases": 1,
+      "cases_ok": true,
+      "proposed": "outgoing_invoice",
+      "confidence": 1.0,
+      "gates": [],
+      "evidence": [
+        "outgoing_invoice +3: invoice MA-2026-0102 in Invoice_MA-2026-0102.pdf issued by Max ASP GmbH",
+        "outgoing_invoice +2: sent by the invoicing agent"
+      ],
+      "seconds": 0.02
+    },
+    {
+      "email_id": "E19",
+      "expected_route": "outgoing_booking",
+      "route": "outgoing_booking",
+      "route_ok": true,
+      "expected_cases": 1,
+      "cases": 1,
+      "cases_ok": true,
+      "proposed": "outgoing_invoice",
+      "confidence": 1.0,
+      "gates": [],
+      "evidence": [
+        "outgoing_invoice +3: invoice MA-2026-0103 in Invoice_MA-2026-0103.pdf issued by Max ASP GmbH",
+        "outgoing_invoice +2: sent by the invoicing agent"
+      ],
+      "seconds": 0.02
+    },
+    {
+      "email_id": "E20",
+      "expected_route": "outgoing_booking",
+      "route": "outgoing_booking",
+      "route_ok": true,
+      "expected_cases": 1,
+      "cases": 1,
+      "cases_ok": true,
+      "proposed": "outgoing_invoice",
+      "confidence": 1.0,
+      "gates": [],
+      "evidence": [
+        "outgoing_invoice +3: credit_note GS-2026-0011 in Gutschrift_GS-2026-0011.pdf issued by Max ASP GmbH",
+        "outgoing_invoice +2: sent by the invoicing agent"
+      ],
+      "seconds": 0.02
+    },
+    {
+      "email_id": "E21",
+      "expected_route": "outgoing_booking",
+      "route": "outgoing_booking",
+      "route_ok": true,
+      "expected_cases": 1,
+      "cases": 1,
+      "cases_ok": true,
+      "proposed": "outgoing_invoice",
+      "confidence": 1.0,
+      "gates": [],
+      "evidence": [
+        "outgoing_invoice +3: invoice MA-2026-0104 in Rechnung_MA-2026-0104_xrechnung.xml issued by Max ASP GmbH",
+        "outgoing_invoice +1: structured e-invoice (UBL)",
+        "outgoing_invoice +2: sent by the invoicing agent"
+      ],
+      "seconds": 0.02
+    },
+    {
+      "email_id": "E22",
+      "expected_route": "outgoing_booking",
+      "route": "outgoing_booking",
+      "route_ok": true,
+      "expected_cases": 1,
+      "cases": 1,
+      "cases_ok": true,
+      "proposed": "outgoing_invoice",
+      "confidence": 1.0,
+      "gates": [],
+      "evidence": [
+        "outgoing_invoice +3: invoice MA-2026-0105 in Rechnung_MA-2026-0105.pdf issued by Max ASP GmbH",
+        "outgoing_invoice +2: sent by the invoicing agent"
+      ],
+      "seconds": 0.03
+    },
+    {
+      "email_id": "E23",
+      "expected_route": "outgoing_booking",
+      "route": "outgoing_booking",
+      "route_ok": true,
+      "expected_cases": 1,
+      "cases": 1,
+      "cases_ok": true,
+      "proposed": "outgoing_invoice",
+      "confidence": 1.0,
+      "gates": [],
+      "evidence": [
+        "outgoing_invoice +3: invoice MA-2026-0107 in Rechnung_MA-2026-0107.pdf issued by Max ASP GmbH",
+        "outgoing_invoice +2: sent by the invoicing agent"
+      ],
+      "seconds": 0.02
+    },
+    {
+      "email_id": "E24",
+      "expected_route": "outgoing_booking",
+      "route": "outgoing_booking",
+      "route_ok": true,
+      "expected_cases": 1,
+      "cases": 1,
+      "cases_ok": true,
+      "proposed": "outgoing_invoice",
+      "confidence": 1.0,
+      "gates": [],
+      "evidence": [
+        "outgoing_invoice +3: cancellation GS-2026-0012 in Stornorechnung_GS-2026-0012.pdf issued by Max ASP GmbH",
+        "outgoing_invoice +2: sent by the invoicing agent"
+      ],
+      "seconds": 0.02
+    },
+    {
+      "email_id": "E25",
+      "expected_route": "forward_reminder",
+      "route": "forward_reminder",
+      "route_ok": true,
+      "expected_cases": 0,
+      "cases": 0,
+      "cases_ok": true,
+      "proposed": "payment_reminder",
+      "confidence": 1.0,
+      "gates": [],
+      "evidence": [
+        "payment_reminder +3: reminder letter in Zahlungserinnerung.pdf",
+        "payment_reminder +2: reminder words in the subject"
+      ],
+      "seconds": 0.02
+    },
+    {
+      "email_id": "E26",
+      "expected_route": "forward_reminder",
+      "route": "forward_reminder",
+      "route_ok": true,
+      "expected_cases": 0,
+      "cases": 0,
+      "cases_ok": true,
+      "proposed": "payment_reminder",
+      "confidence": 1.0,
+      "gates": [],
+      "evidence": [
+        "payment_reminder +3: reminder letter in 1_Mahnung.pdf",
+        "payment_reminder +2: reminder words in the subject"
+      ],
+      "seconds": 0.02
+    },
+    {
+      "email_id": "E27",
+      "expected_route": "forward_reminder",
+      "route": "forward_reminder",
+      "route_ok": true,
+      "expected_cases": 0,
+      "cases": 0,
+      "cases_ok": true,
+      "proposed": "payment_reminder",
+      "confidence": 1.0,
+      "gates": [],
+      "evidence": [
+        "payment_reminder +2: reminder words in the subject"
+      ],
+      "seconds": 0.0
+    },
+    {
+      "email_id": "E28",
+      "expected_route": "forward_reminder",
+      "route": "forward_reminder",
+      "route_ok": true,
+      "expected_cases": 0,
+      "cases": 0,
+      "cases_ok": true,
+      "proposed": "payment_reminder",
+      "confidence": 1.0,
+      "gates": [],
+      "evidence": [
+        "payment_reminder +3: reminder letter in Letzte_Mahnung.jpg",
+        "payment_reminder +2: reminder words in the subject"
+      ],
+      "seconds": 0.64
+    },
+    {
+      "email_id": "E29",
+      "expected_route": "forward_reminder",
+      "route": "forward_reminder",
+      "route_ok": true,
+      "expected_cases": 0,
+      "cases": 0,
+      "cases_ok": true,
+      "proposed": "payment_reminder",
+      "confidence": 1.0,
+      "gates": [],
+      "evidence": [
+        "payment_reminder +3: reminder letter in Zahlungsaufforderung.pdf",
+        "payment_reminder +2: reminder words in the subject"
+      ],
+      "seconds": 0.02
+    },
+    {
+      "email_id": "E30",
+      "expected_route": "forward_reminder",
+      "route": "forward_reminder",
+      "route_ok": true,
+      "expected_cases": 0,
+      "cases": 0,
+      "cases_ok": true,
+      "proposed": "payment_reminder",
+      "confidence": 1.0,
+      "gates": [],
+      "evidence": [
+        "payment_reminder +2: reminder words in the subject"
+      ],
+      "seconds": 0.0
+    },
+    {
+      "email_id": "E31",
+      "expected_route": "forward_reminder",
+      "route": "forward_reminder",
+      "route_ok": true,
+      "expected_cases": 0,
+      "cases": 0,
+      "cases_ok": true,
+      "proposed": "payment_reminder",
+      "confidence": 1.0,
+      "gates": [],
+      "evidence": [
+        "payment_reminder +3: reminder letter in 2_Mahnung.pdf",
+        "payment_reminder +2: reminder words in the subject"
+      ],
+      "seconds": 0.02
+    },
+    {
+      "email_id": "E32",
+      "expected_route": "deletion_folder",
+      "route": "deletion_folder",
+      "route_ok": true,
+      "expected_cases": 0,
+      "cases": 0,
+      "cases_ok": true,
+      "proposed": "other",
+      "confidence": 1.0,
+      "gates": [],
+      "evidence": [
+        "other +3: marketing or newsletter wording: read more on our blog, unsubscribe, what's new"
+      ],
+      "seconds": 0.0
+    },
+    {
+      "email_id": "E33",
+      "expected_route": "deletion_folder",
+      "route": "deletion_folder",
+      "route_ok": true,
+      "expected_cases": 0,
+      "cases": 0,
+      "cases_ok": true,
+      "proposed": "other",
+      "confidence": 1.0,
+      "gates": [],
+      "evidence": [
+        "other +3: marketing or newsletter wording: jetzt anmelden, webinar"
+      ],
+      "seconds": 0.0
+    },
+    {
+      "email_id": "E34",
+      "expected_route": "deletion_folder",
+      "route": "deletion_folder",
+      "route_ok": true,
+      "expected_cases": 0,
+      "cases": 0,
+      "cases_ok": true,
+      "proposed": "other",
+      "confidence": 1.0,
+      "gates": [],
+      "evidence": [
+        "other +3: unknown sender asks to click a link, no document (phishing or spam pattern)"
+      ],
+      "seconds": 0.0
+    },
+    {
+      "email_id": "E35",
+      "expected_route": "deletion_folder",
+      "route": "deletion_folder",
+      "route_ok": true,
+      "expected_cases": 0,
+      "cases": 0,
+      "cases_ok": true,
+      "proposed": "other",
+      "confidence": 1.0,
+      "gates": [],
+      "evidence": [
+        "other +3: advertising in Herbst-Angebote_2026.pdf, not an invoice",
+        "other +2: marketing or newsletter wording: angebote"
+      ],
+      "seconds": 0.02
+    },
+    {
+      "email_id": "E36",
+      "expected_route": "deletion_folder",
+      "route": "deletion_folder",
+      "route_ok": true,
+      "expected_cases": 0,
+      "cases": 0,
+      "cases_ok": true,
+      "proposed": "other",
+      "confidence": 1.0,
+      "gates": [],
+      "evidence": [
+        "other +2: general notice from a known business partner, no invoice or payment words"
+      ],
+      "seconds": 0.0
+    },
+    {
+      "email_id": "E37",
+      "expected_route": "deletion_folder",
+      "route": "deletion_folder",
+      "route_ok": true,
+      "expected_cases": 0,
+      "cases": 0,
+      "cases_ok": true,
+      "proposed": "other",
+      "confidence": 1.0,
+      "gates": [],
+      "evidence": [
+        "other +3: quote in Angebot_Nr_AN-2026-044.pdf, not an invoice"
+      ],
+      "seconds": 0.02
+    },
+    {
+      "email_id": "E38",
+      "expected_route": "deletion_folder",
+      "route": "deletion_folder",
+      "route_ok": true,
+      "expected_cases": 0,
+      "cases": 0,
+      "cases_ok": true,
+      "proposed": "other",
+      "confidence": 1.0,
+      "gates": [],
+      "evidence": [
+        "other +3: order confirmation in Auftragsbestaetigung_AB-2026-5531.pdf, not an invoice"
+      ],
+      "seconds": 0.02
+    },
+    {
+      "email_id": "E39",
+      "expected_route": "deletion_folder",
+      "route": "deletion_folder",
+      "route_ok": true,
+      "expected_cases": 0,
+      "cases": 0,
+      "cases_ok": true,
+      "proposed": "other",
+      "confidence": 1.0,
+      "gates": [],
+      "evidence": [
+        "other +3: delivery note in Lieferschein_LS-2026-88412.pdf, not an invoice"
+      ],
+      "seconds": 0.02
+    },
+    {
+      "email_id": "E40",
+      "expected_route": "deletion_folder",
+      "route": "deletion_folder",
+      "route_ok": true,
+      "expected_cases": 0,
+      "cases": 0,
+      "cases_ok": true,
+      "proposed": "other",
+      "confidence": 1.0,
+      "gates": [],
+      "evidence": [
+        "other +3: automatic reply"
+      ],
+      "seconds": 0.0
+    },
+    {
+      "email_id": "E41",
+      "expected_route": "deletion_folder",
+      "route": "deletion_folder",
+      "route_ok": true,
+      "expected_cases": 0,
+      "cases": 0,
+      "cases_ok": true,
+      "proposed": "other",
+      "confidence": 1.0,
+      "gates": [],
+      "evidence": [
+        "other +2: internal email without an invoice"
+      ],
+      "seconds": 0.0
+    },
+    {
+      "email_id": "E42",
+      "expected_route": "deletion_folder",
+      "route": "deletion_folder",
+      "route_ok": true,
+      "expected_cases": 0,
+      "cases": 0,
+      "cases_ok": true,
+      "proposed": "other",
+      "confidence": 1.0,
+      "gates": [],
+      "evidence": [
+        "other +3: marketing or newsletter wording: abbestellen, newsletter"
+      ],
+      "seconds": 0.0
+    },
+    {
+      "email_id": "E43",
+      "expected_route": "deletion_folder",
+      "route": "deletion_folder",
+      "route_ok": true,
+      "expected_cases": 0,
+      "cases": 0,
+      "cases_ok": true,
+      "proposed": "other",
+      "confidence": 1.0,
+      "gates": [],
+      "evidence": [
+        "other +3: unknown sender asks to click a link, no document (phishing or spam pattern)"
+      ],
+      "seconds": 0.0
+    },
+    {
+      "email_id": "E44",
+      "expected_route": "manual_review",
+      "route": "manual_review",
+      "route_ok": true,
+      "expected_cases": 0,
+      "cases": 0,
+      "cases_ok": true,
+      "proposed": "other",
+      "confidence": 0.0,
+      "gates": [
+        "question about an invoice from a known customer: needs an answer from a person",
+        "too little evidence for any category"
+      ],
+      "evidence": [],
+      "seconds": 0.0
+    },
+    {
+      "email_id": "E45",
+      "expected_route": "manual_review",
+      "route": "manual_review",
+      "route_ok": true,
+      "expected_cases": 1,
+      "cases": 1,
+      "cases_ok": true,
+      "proposed": "other",
+      "confidence": 0.0,
+      "gates": [
+        "pro forma invoice in Pro_forma_invoice_PF-2026-0077.pdf: asks for payment but is not a VAT invoice",
+        "too little evidence for any category"
+      ],
+      "evidence": [],
+      "seconds": 0.02
+    },
+    {
+      "email_id": "E46",
+      "expected_route": "manual_review",
+      "route": "manual_review",
+      "route_ok": true,
+      "expected_cases": 0,
+      "cases": 0,
+      "cases_ok": true,
+      "proposed": "other",
+      "confidence": 0.0,
+      "gates": [
+        "scan_0001.jpg cannot be read (OCR confidence 0)",
+        "too little evidence for any category"
+      ],
+      "evidence": [],
+      "seconds": 2.19
+    },
+    {
+      "email_id": "E47",
+      "expected_route": "manual_review",
+      "route": "manual_review",
+      "route_ok": true,
+      "expected_cases": 1,
+      "cases": 1,
+      "cases_ok": true,
+      "proposed": "incoming_invoice",
+      "confidence": 0.75,
+      "gates": [
+        "invoice and payment reminder in one email: two categories apply"
+      ],
+      "evidence": [
+        "incoming_invoice +3: invoice BB-2026-1290 in Rechnung_BB-2026-1290.pdf from Muster Bürobedarf GmbH",
+        "payment_reminder +1: reminder words in the body"
+      ],
+      "seconds": 0.03
+    },
+    {
+      "email_id": "E48",
+      "expected_route": "manual_review",
+      "route": "manual_review",
+      "route_ok": true,
+      "expected_cases": 1,
+      "cases": 1,
+      "cases_ok": true,
+      "proposed": "incoming_invoice",
+      "confidence": 1.0,
+      "gates": [
+        "an employee forwarded an invoice: may be an expense claim or already paid"
+      ],
+      "evidence": [
+        "incoming_invoice +3: invoice BC-2026-221 in Rechnung_BC-2026-221.pdf from Beispiel Catering GmbH"
+      ],
+      "seconds": 0.04
+    },
+    {
+      "email_id": "E49",
+      "expected_route": "manual_review",
+      "route": "manual_review",
+      "route_ok": true,
+      "expected_cases": 1,
+      "cases": 1,
+      "cases_ok": true,
+      "proposed": "incoming_invoice",
+      "confidence": 1.0,
+      "gates": [
+        "invoice R-2026-0950 in Rechnung_R-2026-0950.pdf is addressed to 'Max Muster AG', not Max ASP GmbH (PR-03)"
+      ],
+      "evidence": [
+        "incoming_invoice +3: invoice R-2026-0950 in Rechnung_R-2026-0950.pdf from Beispiel Reinigung GmbH"
+      ],
+      "seconds": 0.03
+    },
+    {
+      "email_id": "E50",
+      "expected_route": "manual_review",
+      "route": "manual_review",
+      "route_ok": true,
+      "expected_cases": 1,
+      "cases": 1,
+      "cases_ok": true,
+      "proposed": "outgoing_invoice",
+      "confidence": 1.0,
+      "gates": [
+        "Max ASP GmbH invoice sent by einkauf@beispiel-handel.example, not by the invoicing agent"
+      ],
+      "evidence": [
+        "outgoing_invoice +3: invoice MA-2026-0101 in Rechnung_MA-2026-0101.pdf issued by Max ASP GmbH"
+      ],
+      "seconds": 0.03
+    }
+  ]
+}
