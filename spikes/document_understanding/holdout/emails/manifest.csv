@@ -1,0 +1,17 @@
+email_id,file,expected_route,invoice_count,note
+H01,H01.eml,invoice_processing,1,"Different layout: recipient first, issuer and VAT ID only in the footer, euro sign amounts"
+H02,H02.eml,invoice_processing,1,"English layout: Invoice #, Subtotal, Amount due, VAT in the footer"
+H03,H03.eml,invoice_processing,1,Two VAT rates on one invoice
+H04,H04.eml,invoice_processing,2,Two invoices on two pages of one PDF (IN-08)
+H05,H05.eml,invoice_processing,1,Scanned PDF without a text layer (IN-03)
+H06,H06.eml,forward_reminder,0,English reminder titled 'Second payment reminder'
+H07,H07.eml,deletion_folder,0,Newsletter from an unknown sender that uses invoice words
+H08,H08.eml,manual_review,0,"Invoice only as a link. A person has to download it, ARGUS must not delete it"
+H09,H09.eml,outgoing_booking,1,Outgoing invoice in an English layout
+H10,H10.eml,invoice_processing,1,Credit note titled 'Credit memo'
+H11,H11.eml,deletion_folder,0,Order confirmation with a different title word
+H12,H12.eml,deletion_folder,0,Phishing that pretends to be an invoice
+H13,H13.eml,forward_reminder,0,"Photo of a dunning letter, no subject, no body"
+H14,H14.eml,invoice_processing,1,"Kleinbetragsrechnung: gross only, no net amount"
+H15,H15.eml,deletion_folder,0,English out of office reply
+H16,H16.eml,manual_review,1,Reminder and invoice in one email

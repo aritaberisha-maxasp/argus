@@ -1,0 +1,298 @@
+{
+  "emails": 16,
+  "routes_correct": 8,
+  "route_accuracy": 0.5,
+  "ac1_passed": false,
+  "invoices_sent_to_deletion": [],
+  "cases_correct": 15,
+  "fields_checked": 0,
+  "fields_correct": 0,
+  "field_accuracy_by_format": {},
+  "field_errors": [],
+  "seconds_total": 3.0,
+  "rows": [
+    {
+      "email_id": "H01",
+      "expected_route": "invoice_processing",
+      "route": "manual_review",
+      "route_ok": false,
+      "expected_cases": 1,
+      "cases": 1,
+      "cases_ok": true,
+      "proposed": "incoming_invoice",
+      "confidence": 1.0,
+      "gates": [
+        "invoice 2026-4471 in Rechnung_2026-4471.pdf is addressed to 'Testallee 1', not Max ASP GmbH (PR-03)",
+        "invoice 2026-4471 in Rechnung_2026-4471.pdf: missing net_amount; missing vat_amount"
+      ],
+      "evidence": [
+        "incoming_invoice +3: invoice 2026-4471 in Rechnung_2026-4471.pdf from An: Beispiel Gartenbau GmbH"
+      ],
+      "seconds": 0.05
+    },
+    {
+      "email_id": "H02",
+      "expected_route": "invoice_processing",
+      "route": "manual_review",
+      "route_ok": false,
+      "expected_cases": 1,
+      "cases": 1,
+      "cases_ok": true,
+      "proposed": "incoming_invoice",
+      "confidence": 1.0,
+      "gates": [
+        "invoice ? in ED-2026-091.pdf is addressed to 'Invoice # ED-2026-091', not Max ASP GmbH (PR-03)",
+        "invoice ? in ED-2026-091.pdf: missing invoice_number; missing invoice_date; missing net_amount; missing vat_amount; missing gross_amount; missing currency"
+      ],
+      "evidence": [
+        "incoming_invoice +3: invoice ? in ED-2026-091.pdf from Example Design Studio Ltd TAX INVOICE"
+      ],
+      "seconds": 0.03
+    },
+    {
+      "email_id": "H03",
+      "expected_route": "invoice_processing",
+      "route": "manual_review",
+      "route_ok": false,
+      "expected_cases": 1,
+      "cases": 1,
+      "cases_ok": true,
+      "proposed": "incoming_invoice",
+      "confidence": 1.0,
+      "gates": [
+        "invoice K-2026-118 in K-2026-118.pdf: net plus VAT does not equal gross; VAT amount does not match the VAT rate"
+      ],
+      "evidence": [
+        "incoming_invoice +3: invoice K-2026-118 in K-2026-118.pdf from Beispiel Kantine GmbH"
+      ],
+      "seconds": 0.04
+    },
+    {
+      "email_id": "H04",
+      "expected_route": "invoice_processing",
+      "route": "invoice_processing",
+      "route_ok": true,
+      "expected_cases": 2,
+      "cases": 1,
+      "cases_ok": false,
+      "proposed": "incoming_invoice",
+      "confidence": 1.0,
+      "gates": [],
+      "evidence": [
+        "incoming_invoice +3: invoice BM-7781 in Rechnungen_Oktober.pdf from Beispiel Mietgeräte GmbH"
+      ],
+      "seconds": 0.04
+    },
+    {
+      "email_id": "H05",
+      "expected_route": "invoice_processing",
+      "route": "manual_review",
+      "route_ok": false,
+      "expected_cases": 1,
+      "cases": 1,
+      "cases_ok": true,
+      "proposed": "incoming_invoice",
+      "confidence": 1.0,
+      "gates": [
+        "invoice ? in scan.pdf: missing invoice_number"
+      ],
+      "evidence": [
+        "incoming_invoice +3: invoice ? in scan.pdf from Beispiel Hausmeister. GmbH"
+      ],
+      "seconds": 2.23
+    },
+    {
+      "email_id": "H06",
+      "expected_route": "forward_reminder",
+      "route": "forward_reminder",
+      "route_ok": true,
+      "expected_cases": 0,
+      "cases": 0,
+      "cases_ok": true,
+      "proposed": "payment_reminder",
+      "confidence": 1.0,
+      "gates": [],
+      "evidence": [
+        "payment_reminder +2: reminder words in the subject"
+      ],
+      "seconds": 0.02
+    },
+    {
+      "email_id": "H07",
+      "expected_route": "deletion_folder",
+      "route": "deletion_folder",
+      "route_ok": true,
+      "expected_cases": 0,
+      "cases": 0,
+      "cases_ok": true,
+      "proposed": "other",
+      "confidence": 1.0,
+      "gates": [],
+      "evidence": [
+        "other +2: marketing or newsletter wording: abmelden"
+      ],
+      "seconds": 0.0
+    },
+    {
+      "email_id": "H08",
+      "expected_route": "manual_review",
+      "route": "manual_review",
+      "route_ok": true,
+      "expected_cases": 0,
+      "cases": 0,
+      "cases_ok": true,
+      "proposed": "other",
+      "confidence": 0.0,
+      "gates": [
+        "too little evidence for any category"
+      ],
+      "evidence": [],
+      "seconds": 0.0
+    },
+    {
+      "email_id": "H09",
+      "expected_route": "outgoing_booking",
+      "route": "manual_review",
+      "route_ok": false,
+      "expected_cases": 1,
+      "cases": 1,
+      "cases_ok": true,
+      "proposed": "incoming_invoice",
+      "confidence": 0.6,
+      "gates": [
+        "invoice ? in Invoice_MA-2026-0110.pdf is addressed to 'Invoice # MA-2026-0110', not Max ASP GmbH (PR-03)",
+        "invoice ? in Invoice_MA-2026-0110.pdf: missing invoice_number; missing invoice_date; missing net_amount; missing vat_amount; missing gross_amount; missing currency",
+        "confidence 0.60 is below 0.75"
+      ],
+      "evidence": [
+        "incoming_invoice +3: invoice ? in Invoice_MA-2026-0110.pdf from Max ASP GmbH INVOICE",
+        "outgoing_invoice +2: sent by the invoicing agent"
+      ],
+      "seconds": 0.02
+    },
+    {
+      "email_id": "H10",
+      "expected_route": "invoice_processing",
+      "route": "manual_review",
+      "route_ok": false,
+      "expected_cases": 1,
+      "cases": 1,
+      "cases_ok": true,
+      "proposed": "incoming_invoice",
+      "confidence": 1.0,
+      "gates": [
+        "invoice ? in ED-CM-0012.pdf is addressed to 'Invoice # ED-CM-0012', not Max ASP GmbH (PR-03)",
+        "invoice ? in ED-CM-0012.pdf: missing invoice_number; missing invoice_date; missing net_amount; missing vat_amount; missing gross_amount; missing currency"
+      ],
+      "evidence": [
+        "incoming_invoice +3: invoice ? in ED-CM-0012.pdf from Example Design Studio Ltd CREDIT MEMO"
+      ],
+      "seconds": 0.03
+    },
+    {
+      "email_id": "H11",
+      "expected_route": "deletion_folder",
+      "route": "manual_review",
+      "route_ok": false,
+      "expected_cases": 0,
+      "cases": 0,
+      "cases_ok": true,
+      "proposed": "other",
+      "confidence": 0.0,
+      "gates": [
+        "too little evidence for any category"
+      ],
+      "evidence": [],
+      "seconds": 0.02
+    },
+    {
+      "email_id": "H12",
+      "expected_route": "deletion_folder",
+      "route": "deletion_folder",
+      "route_ok": true,
+      "expected_cases": 0,
+      "cases": 0,
+      "cases_ok": true,
+      "proposed": "other",
+      "confidence": 1.0,
+      "gates": [],
+      "evidence": [
+        "other +3: unknown sender asks to click a link, no document (phishing or spam pattern)"
+      ],
+      "seconds": 0.0
+    },
+    {
+      "email_id": "H13",
+      "expected_route": "forward_reminder",
+      "route": "forward_reminder",
+      "route_ok": true,
+      "expected_cases": 0,
+      "cases": 0,
+      "cases_ok": true,
+      "proposed": "payment_reminder",
+      "confidence": 1.0,
+      "gates": [],
+      "evidence": [
+        "payment_reminder +3: reminder letter in IMG_2041.jpg"
+      ],
+      "seconds": 0.49
+    },
+    {
+      "email_id": "H14",
+      "expected_route": "invoice_processing",
+      "route": "manual_review",
+      "route_ok": false,
+      "expected_cases": 1,
+      "cases": 1,
+      "cases_ok": true,
+      "proposed": "incoming_invoice",
+      "confidence": 1.0,
+      "gates": [
+        "invoice S-0915 in S-0915.pdf: missing net_amount; missing vat_amount"
+      ],
+      "evidence": [
+        "incoming_invoice +3: invoice S-0915 in S-0915.pdf from Beispiel Schlüsseldienst"
+      ],
+      "seconds": 0.02
+    },
+    {
+      "email_id": "H15",
+      "expected_route": "deletion_folder",
+      "route": "deletion_folder",
+      "route_ok": true,
+      "expected_cases": 0,
+      "cases": 0,
+      "cases_ok": true,
+      "proposed": "other",
+      "confidence": 1.0,
+      "gates": [],
+      "evidence": [
+        "other +3: automatic reply"
+      ],
+      "seconds": 0.0
+    },
+    {
+      "email_id": "H16",
+      "expected_route": "manual_review",
+      "route": "manual_review",
+      "route_ok": true,
+      "expected_cases": 1,
+      "cases": 1,
+      "cases_ok": true,
+      "proposed": "payment_reminder",
+      "confidence": 0.62,
+      "gates": [
+        "invoice 2026-4471 in Rechnung_2026-4471.pdf is addressed to 'Testallee 1', not Max ASP GmbH (PR-03)",
+        "invoice 2026-4471 in Rechnung_2026-4471.pdf: missing net_amount; missing vat_amount",
+        "invoice and payment reminder in one email: two categories apply",
+        "confidence 0.62 is below 0.75"
+      ],
+      "evidence": [
+        "incoming_invoice +3: invoice 2026-4471 in Rechnung_2026-4471.pdf from An: Beispiel Gartenbau GmbH",
+        "payment_reminder +3: reminder letter in Mahnung.pdf",
+        "payment_reminder +2: reminder words in the subject"
+      ],
+      "seconds": 0.04
+    }
+  ]
+}

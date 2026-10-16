@@ -1,0 +1,15 @@
+From: Beispiel Mobilfunk <service@beispiel-mobilfunk.example>
+To: accounts@maxasp.example
+Subject: Ihre Rechnung Oktober ist online
+Date: Fri, 16 Oct 2026 09:00:00 +0200
+Message-ID: <h08@holdout.argus.example>
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 8bit
+MIME-Version: 1.0
+
+Guten Tag,
+
+Ihre Rechnung für Oktober über 49,90 EUR steht im Kundenportal bereit:
+https://portal.beispiel-mobilfunk.example/rechnungen
+
+Ihr Beispiel Mobilfunk
