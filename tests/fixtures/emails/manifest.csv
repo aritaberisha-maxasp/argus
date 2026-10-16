@@ -42,7 +42,7 @@ E40,E40_abwesenheitsnotiz.eml,other,deletion_folder,0,,auto_reply,IN-04 IN-06,Ou
 E41,E41_interne-einladung.eml,other,deletion_folder,0,,internal,IN-04 IN-06,Internal mail that landed in the accounts inbox.
 E42,E42_steuer-newsletter.eml,other,deletion_folder,0,,,IN-04 IN-06,Tax newsletter full of invoice vocabulary.
 E43,E43_spam-fake-invoice.eml,other,deletion_folder,0,,spam,IN-04 IN-06,"Spam pretending to be an invoice: unknown sender, no document, only a link."
-E44,E44_kundenfrage-rechnung.eml,other,deletion_folder,0,,general_correspondence open_question,IN-04 IN-06,"Customer question about an invoice. Other under IN-04, but deleting it may be wrong. Question raised with Arita on issue #9."
+E44,E44_kundenfrage-rechnung.eml,uncertain,manual_review,0,,general_correspondence customer_question,IN-04 IN-09,"Customer question about an invoice. Arita decided on issue #9 that these go to manual review, not the deletion folder."
 E45,E45_proforma.eml,uncertain,manual_review,1,D31,proforma,IN-04 IN-09,"Looks like an invoice and asks for payment, but a pro forma is not a VAT invoice."
 E46,E46_unleserlicher-scan.eml,uncertain,manual_review,0,,unreadable,IN-03 IN-09 EX-02,"Empty body, unknown sender, faded and blurred scan that cannot be read."
 E47,E47_erinnerung-und-neue-rechnung.eml,uncertain,manual_review,1,D32,mixed_reminder_and_invoice,IN-04 IN-05 IN-09,Reminder and new invoice in one email. Two categories apply.

@@ -251,8 +251,8 @@ EMAILS = [
     {"id": "E44", "slug": "kundenfrage-rechnung", "from": "handel", "date": "2026-10-13T10:30:00+02:00",
      "subject": "Frage zu Ihrer Rechnung MA-2026-0101", "attachments": [],
      "body": f"{GREETING_DE}\n\nauf Ihrer Rechnung MA-2026-0101 sind 6 Supportstunden berechnet. Wir kommen nur auf 4. Können Sie das bitte prüfen?\n\nMit freundlichen Grüßen\nEinkauf, Beispiel Handel GmbH",
-     "category": OTHER, "invoice_count": 0, "flags": ["general_correspondence", "open_question"],
-     "requirements": ["IN-04", "IN-06"], "note": "Customer question about an invoice. Other under IN-04, but deleting it may be wrong. Question raised with Arita on issue #9."},
+     "category": UNCERTAIN, "invoice_count": 0, "flags": ["general_correspondence", "customer_question"],
+     "requirements": ["IN-04", "IN-09"], "note": "Customer question about an invoice. Arita decided on issue #9 that these go to manual review, not the deletion folder."},
 
     # Deliberately ambiguous: must go to manual review (IN-09)
     {"id": "E45", "slug": "proforma", "from": "software_uk", "date": "2026-10-12T14:00:00+02:00",

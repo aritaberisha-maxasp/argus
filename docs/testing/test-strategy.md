@@ -44,11 +44,14 @@ This is how QA proves that ARGUS does what the [requirements](../requirements/re
 
 For every PR QA posts on the PR: what was run, the command, the result in a few lines, and one sample input with its output. For acceptance tests QA also posts the result per AC on the sprint review.
 
+## Decisions
+
+- **Customer questions about an invoice go to manual review** (Arita on issue #9, 16 Oct 2026). E44 is such an email. Under IN-04 alone it would be "Other" and IN-06 would delete it, so nobody would answer the customer.
+
 ## Open questions
 
-1. **Customer questions about an invoice.** E44 is a customer asking about one of Max ASP's invoices. Under IN-04 that is "Other", which IN-06 removes. Asked Arita on issue #9 whether such emails should go to manual review instead.
-2. **Chart of accounts.** AC-2 needs the G/L accounts and tax keys Max ASP uses in DATEV (SKR03 or SKR04). This comes with the DATEV spike (#2).
-3. **E-invoice validation.** The XRechnung and ZUGFeRD fixtures follow the standards but have not been run through an official validator (KoSIT validator, a PDF/A-3 checker). We add that once the document spike (#5) picks the tooling.
+1. **Chart of accounts.** AC-2 needs the G/L accounts and tax keys Max ASP uses in DATEV (SKR03 or SKR04). This comes with the DATEV spike (#2).
+2. **E-invoice validation.** The XRechnung and ZUGFeRD fixtures follow the standards but have not been run through an official validator (KoSIT validator, a PDF/A-3 checker). We add that once the document spike (#5) picks the tooling.
 
 ## Not covered yet
 
