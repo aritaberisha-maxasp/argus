@@ -1,11 +1,11 @@
-# 0005: How ARGUS understands emails and reads invoices
+# 0006: How ARGUS understands emails and reads invoices
 
 Status: proposed
 Requirements: IN-02, IN-03, IN-04, IN-08, IN-09, PR-01, PR-03, NF-02, NF-03 (also touches NF-01, AC-1)
 
 The full findings, the prototype and its measured results are in the [document understanding spike note](../spikes/document-understanding.md).
 
-Numbered 0005 because 0002 belongs to the open DATEV spike and 0004 is left for the open Wise spike.
+Numbered 0006 because 0002 belongs to the DATEV spike, 0004 is left for the Wise spike and 0005 to the invoice case model (PR #17).
 
 ## Context
 

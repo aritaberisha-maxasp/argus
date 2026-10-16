@@ -1,6 +1,6 @@
 # Document understanding prototype (spike for issue #5)
 
-Spike code. It answers whether ARGUS can classify the accounts inbox and read invoices, and how. It is not product code: the build stories rewrite it inside the product skeleton. Findings: [docs/spikes/document-understanding.md](../../docs/spikes/document-understanding.md). Decision: [ADR 0005](../../docs/adr/0005-understanding-emails-and-invoices.md).
+Spike code. It answers whether ARGUS can classify the accounts inbox and read invoices, and how. It is not product code: the build stories rewrite it inside the product skeleton. Findings: [docs/spikes/document-understanding.md](../../docs/spikes/document-understanding.md). Decision: [ADR 0006](../../docs/adr/0006-understanding-emails-and-invoices.md).
 
 Covers: IN-02, IN-03, IN-04, IN-08, IN-09, PR-01, PR-03, NF-02
 

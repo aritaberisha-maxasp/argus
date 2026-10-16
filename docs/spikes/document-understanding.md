@@ -2,7 +2,7 @@
 
 Issue: #5
 Requirements: IN-02, IN-03, IN-04, IN-08, IN-09, PR-01, PR-03, NF-02, NF-03 (also touches NF-01, AC-1)
-Decision record: [ADR 0005](../adr/0005-understanding-emails-and-invoices.md)
+Decision record: [ADR 0006](../adr/0006-understanding-emails-and-invoices.md)
 Prototype: [spikes/document_understanding/](../../spikes/document_understanding/README.md)
 
 This note collects what we found out. The ADR holds only the decision.
