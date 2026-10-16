@@ -230,9 +230,9 @@ When a payment is created the cases move to In payment run. When Wise reports it
 
 A change to account, number, amount or currency while a case is Awaiting approval is allowed and logged with old and new value. The approval story must then ask for approval again, because an approval given for one amount must not count for another. The approval table it builds is the natural place to enforce that.
 
-## 8. Open questions
+## 8. Decisions
 
-Posted on issue #7 for Arita. ARGUS is designed on the default in brackets until the answer comes.
+Arita answered both questions on 16 Oct 2026.
 
-1. If the DATEV booking of an approved invoice fails, should it still be paid in the next payment run? (Default: no. Only booked invoices go into a run, so every payment has a booking reference to reconcile against, BK-07. The booking error is in the exception queue and Benjamin is told at once.)
-2. Do incoming credit notes need approval like invoices? (Default: yes, the same approver. AP-10 says nothing is approved automatically, and a wrong credit note would lower a payment to the vendor.)
+1. **An invoice whose DATEV booking failed is not paid in the next run.** Only booked invoices go into a payment run, so every payment has a booking reference to reconcile against (BK-07). The booking error waits in the exception queue and Benjamin is told at once.
+2. **Incoming credit notes need approval like invoices**, by the vendor's approver. AP-10 says nothing is approved automatically, and a wrong credit note would lower a payment to the vendor.
