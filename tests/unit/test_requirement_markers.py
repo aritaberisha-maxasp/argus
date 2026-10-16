@@ -4,7 +4,7 @@ from tests.conftest import known_requirement_ids, req_marker_problems
 
 
 def test_catalog_ids_are_found() -> None:
-    assert {"IN-01", "NF-04", "PY-13", "VM-04"} <= known_requirement_ids()
+    assert {"AC-1", "IN-01", "NF-04", "PY-13", "VM-04"} <= known_requirement_ids()
 
 
 @pytest.mark.req("NF-01")

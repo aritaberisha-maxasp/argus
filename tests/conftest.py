@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 CATALOG = Path(__file__).resolve().parent.parent / "docs" / "requirements" / "requirements.md"
-REQ_ID = re.compile(r"\b[A-Z]{2}-\d{2}\b")
+REQ_ID = re.compile(r"\b[A-Z]{2}-\d+\b")
 
 
 def known_requirement_ids() -> set[str]:

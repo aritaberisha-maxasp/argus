@@ -51,4 +51,5 @@ select = ["E", "W", "F", "I", "B", "UP", "S", "SIM", "RUF"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
-files = ["src"]
+files = ["src", "tests"]
+exclude = ["tests/fixtures/tools/"]
