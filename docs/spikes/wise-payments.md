@@ -12,7 +12,7 @@ Status: findings from Wise's public API documentation and help centre, read on 1
 - **Monthly statement (BA-01, BA-08): not through a personal token.** Wise does not allow retrieving balance statements through a personal token for a business outside the US, Canada, Australia, New Zealand, Singapore and Malaysia. This needs a decision from Arita (see the questions at the end).
 - **Sandbox: partly.** Wise has a sandbox with simulated transfer states and balance top ups, but no live rates and no rate history, and its fallback profiles are UK ones, so it may not show the German restrictions. CI should run against a Wise stand in, like the DATEV one.
 
-ADR [0003](../adr/0003-wise-payment-handover.md) proposes the approach.
+ADR [0004](../adr/0004-wise-payment-handover.md) proposes the approach.
 
 ## What ARGUS needs from Wise
 
