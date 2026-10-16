@@ -59,4 +59,4 @@ ADR 0001 (proposed) puts ARGUS on Azure in Max ASP's own tenant, with a 5 minute
 
 ## Questions for Arita
 
-See section 5 of the spike note. The folder question is answered (yes, 16 Oct 2026); the other five are still open.
+The folder question is answered (yes, 16 Oct 2026). The other five are with Max ASP. Section 5 of the spike note lists the working assumptions we build on until they answer and what would change if an answer differs.

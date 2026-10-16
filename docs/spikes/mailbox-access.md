@@ -148,14 +148,20 @@ Options for the sandbox mailbox:
 
 **We propose the shared sandbox mailbox in Max ASP's tenant.** It costs nothing, matches production exactly, and the scoping test proves the test app cannot read accounts@ or any other mailbox. Test emails are synthetic, sent from a test sender, and Benjamin's address is replaced by a test recipient through configuration so no real person gets a forwarded test reminder.
 
-## 5. Open questions for Arita (to ask Max ASP)
+## 5. Questions for Max ASP and the assumptions we build on
 
-1. **Mailbox type.** Is accounts@maxasp.com a shared mailbox, or a normal user mailbox with its own licence? Both work; it changes the admin script slightly.
-2. **Admin.** Who at Max ASP can do the one time setup (app registrations and the Exchange PowerShell scoping)? We provide the script.
-3. **Folders.** Answered by Arita on 16 Oct 2026: yes, ARGUS may move emails into its own subfolders once it has processed them.
-4. **Sandbox.** May we have a shared mailbox `argus-sandbox@maxasp.com` for testing, reachable only by a separate test app?
-5. **People in the mailbox today.** Does anyone work in accounts@ by hand today, and are there Inbox rules or other tools on it? They could move emails before ARGUS sees them.
-6. **Purge.** Is it fine that ARGUS deletes emails in its Removed folder after 30 days, with Exchange keeping them recoverable for another 14 days (or 30 if Max ASP raises it)?
+Arita has passed questions 1, 2, 4, 5 and 6 to Max ASP (16 Oct 2026) and asked the team to carry on with working assumptions in the meantime. If an answer comes back different, only the item named below changes.
+
+| # | Question | Status | What we assume until Max ASP answers | What changes if the answer differs |
+| --- | --- | --- | --- | --- |
+| 1 | Is accounts@maxasp.com a shared mailbox or a user mailbox with its own licence? | With Max ASP | Shared mailbox | One line in the admin script. The code is the same for both. |
+| 2 | Who at Max ASP does the one time admin setup? | With Max ASP | Max ASP's Microsoft 365 admin runs our script; Arita relays it | Nothing in the code. Only who runs the script. |
+| 3 | May ARGUS move processed emails into its own subfolders? | Answered: yes (Arita, 16 Oct 2026) | | |
+| 4 | May we have a shared test mailbox `argus-sandbox@maxasp.com` reachable only by a separate test app? | With Max ASP | Yes. Until it exists, all testing runs against the fake Graph | If no, we use a separate small test tenant instead (section 4). |
+| 5 | Does anyone work in accounts@ by hand, or are there Inbox rules or other tools on it? | With Max ASP | Nobody moves emails before ARGUS sees them and there are no Inbox rules | If yes, existing rules must be switched off at go live, and people agree to leave the Inbox to ARGUS. Emails moved back by hand already go to manual review. |
+| 6 | May ARGUS delete Removed emails 30 days after moving them, with Exchange keeping them recoverable another 14 days? | With Max ASP | Yes | The 30 days is one setting. A longer period changes nothing else. |
+
+None of these block the first stories, because everything is built and tested against the fake Graph. Questions 1, 2 and 4 must be answered before the first test against a real mailbox, and 5 and 6 before go live.
 
 ## Sources (checked 15 Oct 2026)
 
