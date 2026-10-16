@@ -36,7 +36,7 @@ This is how QA proves that ARGUS does what the [requirements](../requirements/re
 
 ## Tagging requirement IDs in tests
 
-- Every test names the requirement IDs it covers. If we use Python and pytest, that is a marker: `@pytest.mark.req("IN-04", "IN-09")`. In another stack the ID goes into the test name, for example `[IN-04] reminder is forwarded`. The final form is fixed together with the tech stack (#6) and the project skeleton (#8).
+- Every test names the requirement IDs it covers. In pytest that is a marker: `@pytest.mark.req("IN-04", "IN-09")`. The run fails if a marker names an ID that is not in the catalog (see `tests/conftest.py`).
 - A small script will list every requirement ID from the catalog with the tests that cover it, so a requirement without a test shows up. It is built once the skeleton exists.
 - The fixtures carry requirement IDs too: see the `requirements` column in `manifest.csv`.
 
