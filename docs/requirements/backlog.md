@@ -16,42 +16,45 @@ Sizes: S is about one night, M is two or three nights. Nothing is L.
 
 ## Proposed Sprint 1 (26 Oct to 1 Nov 2026)
 
-**Sprint goal:** an email arriving at the accounts mailbox is stored unaltered, sorted, then filed or forwarded, with every step in the audit trail. The Wise client and the DATEV stand in are ready so payments and bookings can start in Sprint 2.
+**Sprint goal:** every email arriving at the accounts mailbox is picked up once, stored unaltered and recorded with its audit trail. The Wise client and the DATEV stand in are ready so payments and bookings can build on them.
 
-| Rank | Issue | Story | Size | Depends on | Provisional |
-|---|---|---|---|---|---|
-| 1 | [#19](https://github.com/aritaberisha-maxasp/argus/issues/19) | Keep every invoice and transaction as a case with a status and an audit trail | M | #7, #8 |  |
-| 2 | [#20](https://github.com/aritaberisha-maxasp/argus/issues/20) | Store every received email and attachment unaltered with a fingerprint | S | #8 |  |
-| 3 | [#21](https://github.com/aritaberisha-maxasp/argus/issues/21) | Put every case ARGUS cannot handle into one exception queue with a reason | S | #19 |  |
-| 4 | [#24](https://github.com/aritaberisha-maxasp/argus/issues/24) | Pick up every new email in the accounts mailbox | M | #19, #20 |  |
-| 5 | [#22](https://github.com/aritaberisha-maxasp/argus/issues/22) | Know which days are working days in Baden-Württemberg | S | #8 |  |
-| 6 | [#25](https://github.com/aritaberisha-maxasp/argus/issues/25) | Sort each email into invoice, outgoing invoice, payment reminder or other | M | #24 | yes, #5 |
-| 7 | [#26](https://github.com/aritaberisha-maxasp/argus/issues/26) | Move processed emails out of the inbox and remove the ones that are not needed | S | #25 |  |
-| 8 | [#27](https://github.com/aritaberisha-maxasp/argus/issues/27) | Forward payment reminders and dunning letters to Benjamin | S | #25 |  |
-| 9 | [#43](https://github.com/aritaberisha-maxasp/argus/issues/43) | Talk to Wise only through a client that cannot release payments | M | #8, #4 |  |
-| 10 | [#33](https://github.com/aritaberisha-maxasp/argus/issues/33) | Give ARGUS one way to read and write DATEV, with a stand in for development | M | #8 | yes, #2 |
+**Stretch:** ranks 8 to 10 sort the emails, then file or forward them. They are in the list so threads have work if the core goes faster than planned.
 
-That is 5 M and 5 S stories, roughly 17 nights of work for up to three threads in parallel. The longest chain is case store, mailbox sweep, sorting, then filing, about eight nights. Ranks 9 and 10 are the first to drop if the sprint runs short.
+| Rank | Issue | Story | Size | Depends on | Provisional | Stretch |
+|---|---|---|---|---|---|---|
+| 1 | [#19](https://github.com/aritaberisha-maxasp/argus/issues/19) | Keep every invoice and transaction as a case with a status and an audit trail | M | #7, #8 |  |  |
+| 2 | [#20](https://github.com/aritaberisha-maxasp/argus/issues/20) | Store every received email and attachment unaltered with a fingerprint | S | #8, #19 |  |  |
+| 3 | [#21](https://github.com/aritaberisha-maxasp/argus/issues/21) | Put every case ARGUS cannot handle into one exception queue with a reason | S | #19 |  |  |
+| 4 | [#24](https://github.com/aritaberisha-maxasp/argus/issues/24) | Pick up every new email in the accounts mailbox | M | #19, #20 |  |  |
+| 5 | [#22](https://github.com/aritaberisha-maxasp/argus/issues/22) | Know which days are working days in Baden-Württemberg | S | #8 |  |  |
+| 6 | [#43](https://github.com/aritaberisha-maxasp/argus/issues/43) | Talk to Wise only through a client that cannot release payments | M | #8, #4 |  |  |
+| 7 | [#33](https://github.com/aritaberisha-maxasp/argus/issues/33) | Give ARGUS one way to read and write DATEV, with a stand in for development | M | #8 | yes, #2 |  |
+| 8 | [#25](https://github.com/aritaberisha-maxasp/argus/issues/25) | Sort each email into invoice, outgoing invoice, payment reminder or other | M | #24 | yes, #5 | yes |
+| 9 | [#26](https://github.com/aritaberisha-maxasp/argus/issues/26) | Move processed emails out of the inbox and remove the ones that are not needed | S | #25 |  | yes |
+| 10 | [#27](https://github.com/aritaberisha-maxasp/argus/issues/27) | Forward payment reminders and dunning letters to Benjamin | S | #25 |  | yes |
+
+Sprint 1 has seven shifts (five weeknights, Saturday and Sunday) and at most three threads at a time. The core (ranks 1 to 7) is about 13 nights of work. Its longest chain is case store, document store, then mailbox sweep: about six nights one after the other, plus review and Arita's merge between the steps. Sorting would add two or three more nights to that chain, which is why it is a stretch.
 
 **Must happen before Monday 26 Oct for this list to work:**
 - #7 (invoice case design, PR #17) and #8 (project skeleton and CI, PR #16) merged. Rank 1 and almost everything else build on them.
-- #4 (Wise spike, PR #14) merged for rank 9.
-- #5 (document spike, PR #55) merged for rank 6, including Arita's answers to its two questions on sending email content to Azure in the EU and on shadow mode.
+- #2 (DATEV spike, PR #12) merged for rank 7. Until then #33 can start from ADR 0002 on that PR's branch, because it only builds the gateway and a stand in.
+- #5 (document spike, PR #55) merged for the stretch rank 8, including Arita's answers to its two questions on sending email content to Azure in the EU and on shadow mode.
+- #4 (Wise spike) is done: PR #14 is merged, so rank 6 can start.
 
 ## Full backlog
 
 | Rank | Issue | Story | Area | Size | Depends on | Provisional |
 |---|---|---|---|---|---|---|
 | 1 | [#19](https://github.com/aritaberisha-maxasp/argus/issues/19) | Keep every invoice and transaction as a case with a status and an audit trail | Foundation | M | #7, #8 |  |
-| 2 | [#20](https://github.com/aritaberisha-maxasp/argus/issues/20) | Store every received email and attachment unaltered with a fingerprint | Foundation | S | #8 |  |
+| 2 | [#20](https://github.com/aritaberisha-maxasp/argus/issues/20) | Store every received email and attachment unaltered with a fingerprint | Foundation | S | #8, #19 |  |
 | 3 | [#21](https://github.com/aritaberisha-maxasp/argus/issues/21) | Put every case ARGUS cannot handle into one exception queue with a reason | Foundation | S | #19 |  |
 | 4 | [#24](https://github.com/aritaberisha-maxasp/argus/issues/24) | Pick up every new email in the accounts mailbox | Intake | M | #19, #20 |  |
 | 5 | [#22](https://github.com/aritaberisha-maxasp/argus/issues/22) | Know which days are working days in Baden-Württemberg | Foundation | S | #8 |  |
-| 6 | [#25](https://github.com/aritaberisha-maxasp/argus/issues/25) | Sort each email into invoice, outgoing invoice, payment reminder or other | Intake | M | #24 | yes, #5 |
-| 7 | [#26](https://github.com/aritaberisha-maxasp/argus/issues/26) | Move processed emails out of the inbox and remove the ones that are not needed | Intake | S | #25 |  |
-| 8 | [#27](https://github.com/aritaberisha-maxasp/argus/issues/27) | Forward payment reminders and dunning letters to Benjamin | Intake | S | #25 |  |
-| 9 | [#43](https://github.com/aritaberisha-maxasp/argus/issues/43) | Talk to Wise only through a client that cannot release payments | Booking | M | #8, #4 |  |
-| 10 | [#33](https://github.com/aritaberisha-maxasp/argus/issues/33) | Give ARGUS one way to read and write DATEV, with a stand in for development | DATEV | M | #8 | yes, #2 |
+| 6 | [#43](https://github.com/aritaberisha-maxasp/argus/issues/43) | Talk to Wise only through a client that cannot release payments | Booking | M | #8, #4 |  |
+| 7 | [#33](https://github.com/aritaberisha-maxasp/argus/issues/33) | Give ARGUS one way to read and write DATEV, with a stand in for development | DATEV | M | #8 | yes, #2 |
+| 8 | [#25](https://github.com/aritaberisha-maxasp/argus/issues/25) | Sort each email into invoice, outgoing invoice, payment reminder or other | Intake | M | #24 | yes, #5 |
+| 9 | [#26](https://github.com/aritaberisha-maxasp/argus/issues/26) | Move processed emails out of the inbox and remove the ones that are not needed | Intake | S | #25 |  |
+| 10 | [#27](https://github.com/aritaberisha-maxasp/argus/issues/27) | Forward payment reminders and dunning letters to Benjamin | Intake | S | #25 |  |
 | 11 | [#66](https://github.com/aritaberisha-maxasp/argus/issues/66) | Run the acceptance tests AC-1 to AC-8 end to end against the stand ins | Quality | M | #24 |  |
 | 12 | [#29](https://github.com/aritaberisha-maxasp/argus/issues/29) | Read the invoice data from PDFs, images and scanned paper invoices | Intake | M | #24 | yes, #5 |
 | 13 | [#28](https://github.com/aritaberisha-maxasp/argus/issues/28) | Read XRechnung and ZUGFeRD e-invoices | Intake | M | #24 | yes, #5 |
@@ -64,7 +67,7 @@ That is 5 M and 5 S stories, roughly 17 nights of work for up to three threads i
 | 20 | [#36](https://github.com/aritaberisha-maxasp/argus/issues/36) | Block invoices whose IBAN differs from the one in DATEV | DATEV | S | #35 |  |
 | 21 | [#37](https://github.com/aritaberisha-maxasp/argus/issues/37) | Propose the G/L account and tax key from the vendor's booking history | DATEV | M | #35 | yes, #2 |
 | 22 | [#38](https://github.com/aritaberisha-maxasp/argus/issues/38) | Let the vendor's approver approve, reject or query an invoice without DATEV or Wise | Approval | M | #23, #35, #37 |  |
-| 23 | [#39](https://github.com/aritaberisha-maxasp/argus/issues/39) | Ask Benjamin for a second approval above EUR 5,000 | Approval | S | #38 |  |
+| 23 | [#39](https://github.com/aritaberisha-maxasp/argus/issues/39) | Ask Benjamin for a second approval above EUR 5,000 | Approval | S | #38, #43 |  |
 | 24 | [#40](https://github.com/aritaberisha-maxasp/argus/issues/40) | Remind approvers after 3 working days and escalate after 5 | Approval | S | #38, #22 |  |
 | 25 | [#41](https://github.com/aritaberisha-maxasp/argus/issues/41) | Book approved invoices in DATEV automatically | Booking | M | #33, #38 | yes, #2 |
 | 26 | [#42](https://github.com/aritaberisha-maxasp/argus/issues/42) | Attach the invoice image and XML to every DATEV booking | Booking | S | #41 | yes, #2 |
@@ -79,7 +82,7 @@ That is 5 M and 5 S stories, roughly 17 nights of work for up to three threads i
 | 35 | [#49](https://github.com/aritaberisha-maxasp/argus/issues/49) | Send Benjamin a summary before each run is handed to Wise | Payment runs | S | #48 |  |
 | 36 | [#50](https://github.com/aritaberisha-maxasp/argus/issues/50) | Hand each payment run to Wise as an unfunded batch | Payment runs | M | #49, #43, #36 |  |
 | 37 | [#51](https://github.com/aritaberisha-maxasp/argus/issues/51) | Mark invoices as paid once Wise has sent the money | Payment runs | S | #50 |  |
-| 38 | [#52](https://github.com/aritaberisha-maxasp/argus/issues/52) | Book outgoing invoices to the right customer account and tax treatment | Outgoing invoices | M | #33, #25, #29, #21 | yes, #2 |
+| 38 | [#52](https://github.com/aritaberisha-maxasp/argus/issues/52) | Book outgoing invoices to the right customer account and tax treatment | Outgoing invoices | M | #33, #25, #29, #21, #42, #44 | yes, #2 |
 | 39 | [#53](https://github.com/aritaberisha-maxasp/argus/issues/53) | Check outgoing invoice numbers for gaps and duplicates | Outgoing invoices | S | #52 |  |
 | 40 | [#54](https://github.com/aritaberisha-maxasp/argus/issues/54) | Book outgoing credit notes and cancellations linked to the original invoice | Outgoing invoices | S | #52 |  |
 | 41 | [#56](https://github.com/aritaberisha-maxasp/argus/issues/56) | Import the monthly Wise statement safely, once, with balances that add up | Bank import | M | #19, #20, #21 |  |
@@ -93,4 +96,4 @@ That is 5 M and 5 S stories, roughly 17 nights of work for up to three threads i
 ## What changes when the spikes close
 
 - **#2 DATEV.** If Max ASP cannot run DATEVconnect and the bridge, the DATEV gateway falls back to the DATEV booking file (ADR 0002). Then vendor matching, the IBAN check and the account proposal need a different data source, and a story for the bridge at Max ASP is added or dropped.
-- **#5 Documents.** The approach decides how the sorting, extraction, e-invoice and split stories are cut. PR #55 proposes reading e-invoice XML first, Azure AI Document Intelligence for PDFs and scans, and a language model in the EU for sorting. If Arita agrees to shadow mode, a story for two weeks of shadow mode on real mail is added before ARGUS routes on its own.
+- **#5 Documents.** The approach decides how the sorting, extraction, e-invoice and split stories are cut. ADR 0006 in PR #55 proposes reading e-invoice XML first, Azure AI Document Intelligence for PDFs and scans, and a language model in the EU for sorting. If Arita agrees to shadow mode, a story for two weeks of shadow mode on real mail is added before ARGUS routes on its own.

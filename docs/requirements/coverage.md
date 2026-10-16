@@ -56,7 +56,7 @@ Every requirement ID in the [catalog](requirements.md) mapped to the backlog iss
 | AR-03 | [#52](https://github.com/aritaberisha-maxasp/argus/issues/52) | not yet |
 | AR-04 | [#52](https://github.com/aritaberisha-maxasp/argus/issues/52) | not yet |
 | AR-05 | [#44](https://github.com/aritaberisha-maxasp/argus/issues/44), [#52](https://github.com/aritaberisha-maxasp/argus/issues/52) | not yet |
-| AR-06 | [#42](https://github.com/aritaberisha-maxasp/argus/issues/42) | not yet |
+| AR-06 | [#52](https://github.com/aritaberisha-maxasp/argus/issues/52) | not yet |
 | AR-07 | [#53](https://github.com/aritaberisha-maxasp/argus/issues/53) | not yet |
 | AR-08 | [#54](https://github.com/aritaberisha-maxasp/argus/issues/54) | not yet |
 | AR-09 | [#58](https://github.com/aritaberisha-maxasp/argus/issues/58) | not yet |
