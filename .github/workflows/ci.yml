@@ -50,5 +50,7 @@ jobs:
           curl -sSfL -o gitleaks.tgz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
           echo "${GITLEAKS_SHA256}  gitleaks.tgz" | sha256sum -c
           tar xzf gitleaks.tgz gitleaks
-      - name: Scan the whole git history
-        run: ./gitleaks git --redact --no-banner --verbose .
+      # Only the history of the commit under test, so a secret on another branch
+      # does not turn this run red. Each branch is checked by its own runs.
+      - name: Scan the git history
+        run: ./gitleaks git --redact --no-banner --verbose --log-opts="--full-history HEAD" .

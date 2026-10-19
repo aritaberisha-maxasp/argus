@@ -39,7 +39,8 @@ line-length = 100
 target-version = "py312"
 src = ["src", "tests"]
 # The fixture generator is a standalone script with its own style; check.py still runs in CI.
-extend-exclude = ["tests/fixtures/tools"]
+# Spike code is a throwaway prototype (see docs/team/roles/architect.md) and is rewritten in a story.
+extend-exclude = ["tests/fixtures/tools", "spikes"]
 
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "B", "UP", "S", "SIM", "RUF"]
