@@ -2,6 +2,8 @@
 
 One file per decision, numbered in order: `0001-short-title.md`. Keep each one short enough to read on a phone.
 
+Before you pick a number, check main and every open PR so two ADRs never share one, and put the number in the PR title. When several ADRs are started at the same time, the coordinator hands out the numbers.
+
 ## Template
 
 ```markdown
