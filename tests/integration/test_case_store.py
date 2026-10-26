@@ -40,6 +40,7 @@ from tests.integration.conftest import migrate
 
 S = CaseStatus
 INTAKE = Actor.system("intake")
+APPROVER = Actor.user("approver-entra-id")
 BENJAMIN = Actor.user("benjamin-entra-id")
 
 # The vendor accounts, numbers and amounts below are made up (CLAUDE.md: synthetic data only).
@@ -60,11 +61,13 @@ def new_case(app: Engine, kind: CaseKind = CaseKind.INCOMING_INVOICE, **fields: 
 
 
 def walk(app: Engine, case_id: int, *statuses: CaseStatus, actor: Actor = INTAKE) -> None:
-    """Move a case step by step, each step in its own transaction."""
+    """Move a case step by step, each step in its own transaction. Approval is given by a
+    person and booking sets a DATEV reference, as the database requires."""
     for to in statuses:
-        with unit_of_work(app, actor) as db:
-            current = get_case(db, case_id).status
-            assert move_case(db, case_id, expected=current, to=to)
+        with unit_of_work(app, APPROVER if to is S.APPROVED else actor) as db:
+            case = get_case(db, case_id)
+            ref = f"DATEV-TEST-{case_id}" if to is S.BOOKED and not case.datev_booking_ref else None
+            assert move_case(db, case_id, expected=case.status, to=to, datev_booking_ref=ref)
 
 
 def booked_invoice(app: Engine) -> int:
@@ -211,7 +214,7 @@ def test_a_new_case_without_an_actor_is_refused(app: Engine) -> None:
 
 
 @pytest.mark.req("NF-01")
-@pytest.mark.parametrize("actor", ["", "intake", "robot:intake", "system:", "user:"])
+@pytest.mark.parametrize("actor", ["", "intake", "robot:intake", "system:", "user:", "user: "])
 def test_a_malformed_actor_is_refused(app: Engine, actor: str) -> None:
     case_id = new_case(app)
 
@@ -437,6 +440,12 @@ def test_things_that_are_not_amounts_are_refused(amount: object) -> None:
 def test_the_datev_booking_reference_is_stored_once(app: Engine) -> None:
     case_id = new_case(app)
     walk(app, case_id, S.AWAITING_APPROVAL, S.APPROVED)
+
+    with (
+        pytest.raises(CaseRuleBroken, match="booked_needs_datev_reference"),
+        unit_of_work(app, Actor.system("booking")) as db,
+    ):
+        move_case(db, case_id, expected=S.APPROVED, to=S.BOOKED)
 
     with unit_of_work(app, Actor.system("booking")) as db:
         move_case(db, case_id, expected=S.APPROVED, to=S.BOOKED, datev_booking_ref="DATEV-TEST-1")
@@ -793,3 +802,174 @@ def test_a_change_behind_the_triggers_is_found(owner: Engine, app: Engine, tampe
     assert seq is not None
     assert broken is not None
     assert broken <= seq + 1
+
+
+@pytest.mark.req("BK-07")
+@pytest.mark.parametrize("kind", [CaseKind.OUTGOING_INVOICE, CaseKind.BANK_TRANSACTION])
+def test_no_kind_is_booked_without_a_datev_reference(app: Engine, kind: CaseKind) -> None:
+    case_id = new_case(app, kind)
+
+    with (
+        pytest.raises(CaseRuleBroken, match="booked_needs_datev_reference"),
+        unit_of_work(app, Actor.system("booking")) as db,
+    ):
+        move_case(db, case_id, expected=S.RECEIVED, to=S.BOOKED)
+
+
+@pytest.mark.req("AP-08", "NF-05")
+def test_a_system_job_cannot_approve(app: Engine) -> None:
+    # AP-10: nothing is approved automatically.
+    case_id = new_case(app)
+    walk(app, case_id, S.AWAITING_APPROVAL)
+
+    with (
+        pytest.raises(CaseRuleBroken, match="only be approved by a person"),
+        unit_of_work(app, Actor.system("approval")) as db,
+    ):
+        move_case(db, case_id, expected=S.AWAITING_APPROVAL, to=S.APPROVED)
+
+    assert status_of(app, case_id) is S.AWAITING_APPROVAL
+
+
+@pytest.mark.req("BA-07", "NF-01")
+def test_a_bank_transaction_import_is_logged(app: Engine) -> None:
+    with unit_of_work(app, Actor.system("bank-import")) as db:
+        case_id = create_case(db, CaseKind.BANK_TRANSACTION)
+        db.execute(
+            text(
+                "insert into bank_transaction values (:id, 'EUR', 'TRANSFER-TEST-LOG', "
+                "'2026-11-03', -892500)"
+            ),
+            {"id": case_id},
+        )
+        imported = [e for e in trace(db, case_id) if e.event_type == "bank_transaction_imported"]
+
+    assert len(imported) == 1
+    assert imported[0].actor == "system:bank-import"
+    assert imported[0].details == {
+        "wise_transaction_id": "TRANSFER-TEST-LOG",
+        "wise_balance_currency": "EUR",
+        "amount_minor": -892500,
+        "booked_on": "2026-11-03",
+    }
+
+
+@pytest.mark.req("BA-07")
+def test_a_bank_transaction_cannot_hang_on_an_invoice_case(app: Engine) -> None:
+    case_id = new_case(app)
+
+    with (
+        pytest.raises(CaseRuleBroken, match="not a bank transaction"),
+        unit_of_work(app, Actor.system("bank-import")) as db,
+    ):
+        db.execute(
+            text(
+                "insert into bank_transaction values (:id, 'EUR', 'TRANSFER-TEST-WRONG', "
+                "'2026-11-03', -100)"
+            ),
+            {"id": case_id},
+        )
+
+
+@pytest.mark.req("PY-11", "EX-01")
+@pytest.mark.parametrize("last", [S.IN_PAYMENT_RUN, S.PAID])
+def test_a_case_in_a_run_or_paid_cannot_be_closed(app: Engine, last: CaseStatus) -> None:
+    case_id = booked_invoice(app)
+    walk(
+        app,
+        case_id,
+        *([S.IN_PAYMENT_RUN] if last is S.IN_PAYMENT_RUN else [S.IN_PAYMENT_RUN, S.PAID]),
+    )
+    with unit_of_work(app, INTAKE) as db:
+        exception_id = open_exception(
+            db, ExceptionReason.INVOICE_CHECK_FAILED, "x", case_id=case_id
+        )
+
+    with (
+        pytest.raises(CaseRuleBroken, match="cannot be closed"),
+        unit_of_work(app, BENJAMIN) as db,
+    ):
+        resolve_exception(
+            db,
+            exception_id,
+            Outcome.ACCEPTED_WITH_COMMENT,
+            case_to=S.CLOSED,
+            closed_reason=ClosedReason.WITHDRAWN,
+        )
+
+
+@pytest.mark.req("NF-01")
+def test_the_app_user_cannot_create_temporary_tables(app: Engine) -> None:
+    with pytest.raises(NotAllowed, match="permission denied"), unit_of_work(app, INTAKE) as db:
+        db.execute(text("create temp table audit_event (id bigint)"))
+
+
+@pytest.fixture
+def app_with_temp_tables(owner: Engine) -> Iterator[None]:
+    """Gives argus_app temporary tables back, to prove the pinned search_path holds on its own."""
+    with owner.begin() as db:
+        db.execute(
+            text(
+                "do $$ begin execute format('grant temporary on database %I to argus_app', "
+                "current_database()); end $$"
+            )
+        )
+    yield
+    with owner.begin() as db:
+        db.execute(
+            text(
+                "do $$ begin execute format('revoke temporary on database %I from argus_app', "
+                "current_database()); end $$"
+            )
+        )
+
+
+@pytest.mark.req("NF-01", "NF-05")
+@pytest.mark.usefixtures("app_with_temp_tables")
+def test_a_temporary_table_cannot_stand_in_for_the_real_ones(app: Engine, owner: Engine) -> None:
+    case_id = new_case(app)
+    walk(app, case_id, S.AWAITING_APPROVAL, S.APPROVED)
+
+    with app.connect() as db:
+        # QA's attacks on PR #79: a fake transition list and a fake audit log.
+        db.execute(
+            text(
+                "create temp table case_status_transition "
+                "(kind case_kind, from_status case_status, to_status case_status)"
+            )
+        )
+        db.execute(
+            text(
+                "insert into pg_temp.case_status_transition "
+                "values ('incoming_invoice', 'approved', 'paid')"
+            )
+        )
+        db.execute(
+            text(
+                "create temp table audit_event (case_id bigint, email_id bigint, "
+                "statement_id bigint, exception_id bigint, event_type text, "
+                "from_status case_status, to_status case_status, details jsonb)"
+            )
+        )
+        db.commit()
+        with pytest.raises(DBAPIError, match="approved -> paid not allowed"):
+            db.execute(text("select set_config('argus.actor', 'system:qa', true)"))
+            db.execute(
+                text("update invoice_case set status = 'paid' where id = :id"), {"id": case_id}
+            )
+        db.rollback()
+        db.execute(text("select set_config('argus.actor', 'system:qa', true)"))
+        db.execute(
+            text(
+                "update invoice_case set status = 'booked', datev_booking_ref = 'DATEV-TEMP' "
+                "where id = :id"
+            ),
+            {"id": case_id},
+        )
+        db.commit()
+        fake_events = db.execute(text("select count(*) from pg_temp.audit_event")).scalar()
+
+    assert fake_events == 0
+    assert events_of(app, case_id)[-1] == "status_changed"
+    with unit_of_work(app, INTAKE) as db:
+        assert trace(db, case_id)[-1].to_status is S.BOOKED

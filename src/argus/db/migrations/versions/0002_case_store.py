@@ -5,7 +5,13 @@ Covers NF-05, NF-01, BK-07, IN-10 and BA-07. The database refuses every move tha
 case_status_transition, every change without an actor, and writes the audit event for each
 change in the same transaction, so no code path can get round the rules.
 
-Taken from docs/design/invoice-case/schema-sketch.sql without changes to the rules.
+Taken from docs/design/invoice-case/schema-sketch.sql, with these rules added after the
+compliance and QA review of PR #79:
+- A case in booked, in payment run or paid must have its DATEV booking reference.
+- Only a person (actor user:...) can move a case from awaiting approval to approved (AP-10).
+- A bank_transaction row must belong to a bank transaction case and its import is logged.
+- A case that was in a payment run or paid cannot be closed through the exception queue.
+- Every function pins its search_path (see 0001).
 
 Revision ID: 0002
 Revises: 0001
@@ -90,7 +96,11 @@ create table invoice_case (
   created_at timestamptz not null default clock_timestamp(),
   updated_at timestamptz not null default clock_timestamp(),
   check ((status = 'closed') = (closed_reason is not null)),
-  check ((status = 'exception') = (resume_status is not null))
+  check ((status = 'exception') = (resume_status is not null)),
+  -- Nothing is booked or paid without the DATEV reference (BK-07, Arita's decision of 16 Oct 2026).
+  -- If DATEV (#2) gives no reference at booking time, this is the one place to change.
+  constraint booked_needs_datev_reference
+    check (status not in ('booked','in_payment_run','paid') or datev_booking_ref is not null)
 );
 create unique index invoice_case_duplicate_key on invoice_case (kind, duplicate_key)
   where duplicate_key is not null;
@@ -103,6 +113,32 @@ create table bank_transaction (
   amount_minor bigint not null,
   unique (wise_balance_currency, wise_transaction_id)   -- BA-07
 );
+
+-- A bank transaction row belongs to a bank transaction case, and its import is logged.
+create function bank_transaction_guard() returns trigger language plpgsql
+set search_path = pg_catalog, public, pg_temp as $$
+begin
+  if (select kind from invoice_case where id = new.case_id) is distinct from 'bank_transaction' then
+    raise exception 'case % is not a bank transaction', new.case_id;
+  end if;
+  return new;
+end $$;
+create trigger bank_transaction_guard before insert or update on bank_transaction
+  for each row execute function bank_transaction_guard();
+
+-- Runs as the owner, like case_audit. Only IDs, currency, amount and date: no names or IBANs.
+create function bank_transaction_audit() returns trigger language plpgsql security definer
+set search_path = pg_catalog, public, pg_temp as $$
+begin
+  insert into audit_event (case_id, event_type, details)
+  values (new.case_id, 'bank_transaction_imported',
+          jsonb_build_object('wise_transaction_id', new.wise_transaction_id,
+                             'wise_balance_currency', new.wise_balance_currency,
+                             'amount_minor', new.amount_minor, 'booked_on', new.booked_on));
+  return null;
+end $$;
+create trigger bank_transaction_audit after insert on bank_transaction
+  for each row execute function bank_transaction_audit();
 
 create type exception_reason as enum (
   'uncertain_classification','unreadable_document','unknown_vendor','unknown_customer',
@@ -143,7 +179,8 @@ insert into exception_exit values
   ('payment_failed', 'paid', 'booked'),             -- the transfer bounced, back to the pool
   ('payment_failed', 'in_payment_run', 'booked');
 
-create function case_guard() returns trigger language plpgsql as $$
+create function case_guard() returns trigger language plpgsql
+set search_path = pg_catalog, public, pg_temp as $$
 declare
   effective case_status := case when old.status = 'exception' then old.resume_status
                                 else old.status end;
@@ -179,6 +216,13 @@ begin
                      and to_status = new.status) then
       raise exception 'status change % -> % not allowed for %', old.status, new.status, new.kind;
     end if;
+    -- AP-10: nothing is approved automatically. Only a person can approve, and the audit
+    -- event records who (AP-08).
+    if old.status = 'awaiting_approval' and new.status = 'approved'
+       and (current_actor())[1] <> 'user' then
+      raise exception 'case % can only be approved by a person, not by %', old.id,
+        current_setting('argus.actor', true);
+    end if;
     -- Direct debit (PY-13) and held invoices (PY-10) never go into a payment run.
     if new.status = 'in_payment_run' and (new.direct_debit or new.payment_hold) then
       raise exception
@@ -210,6 +254,11 @@ begin
         raise exception 'case % is a confirmed duplicate and can only be closed as duplicate',
           old.id;
       end if;
+      -- Money may already have left for a case in a payment run or paid, so it cannot be
+      -- closed. It goes back to booked first (payment failed), or stays paid.
+      if new.status = 'closed' and old.resume_status in ('in_payment_run','paid') then
+        raise exception 'case % was % and cannot be closed', old.id, old.resume_status;
+      end if;
       if new.status <> old.resume_status and new.status <> 'closed' and not exists (
            select 1 from exception_item ei join exception_exit x on x.reason = ei.reason
            where ei.case_id = old.id and ei.resolved_at >= old.exception_since
@@ -229,7 +278,7 @@ create trigger case_guard before update on invoice_case
 -- Writes the audit event for every new case and every change, in the same transaction.
 -- Runs as the owner, because the application itself may not write these event types.
 create function case_audit() returns trigger language plpgsql security definer
-set search_path = public as $$
+set search_path = pg_catalog, public, pg_temp as $$
 declare
   changes jsonb := '{}';
   f text;
@@ -261,7 +310,8 @@ end $$;
 create trigger case_audit after insert or update on invoice_case
   for each row execute function case_audit();
 
-create function exception_guard() returns trigger language plpgsql as $$
+create function exception_guard() returns trigger language plpgsql
+set search_path = pg_catalog, public, pg_temp as $$
 declare a text[] := current_actor();
 begin
   if tg_op = 'INSERT' then
@@ -296,7 +346,7 @@ create trigger exception_guard before insert or update on exception_item
   for each row execute function exception_guard();
 
 create function exception_audit() returns trigger language plpgsql security definer
-set search_path = public as $$
+set search_path = pg_catalog, public, pg_temp as $$
 begin
   if tg_op = 'INSERT' then
     insert into audit_event (case_id, email_id, statement_id, exception_id, event_type, details)
@@ -314,7 +364,8 @@ create trigger exception_audit after insert or update on exception_item
 
 -- Checked at commit: a case with an open exception is in exception, and a case in exception
 -- has one. So opening an exception without stopping the case cannot be committed.
-create function case_exception_consistent() returns trigger language plpgsql as $$
+create function case_exception_consistent() returns trigger language plpgsql
+set search_path = pg_catalog, public, pg_temp as $$
 declare cid bigint; st case_status; open_count int;
 begin
   if tg_table_name = 'invoice_case' then cid := new.id; else cid := new.case_id; end if;
@@ -371,6 +422,8 @@ drop table bank_transaction;
 drop table invoice_case;
 drop table case_status_transition;
 drop function case_exception_consistent();
+drop function bank_transaction_audit();
+drop function bank_transaction_guard();
 drop function exception_audit();
 drop function exception_guard();
 drop function case_audit();

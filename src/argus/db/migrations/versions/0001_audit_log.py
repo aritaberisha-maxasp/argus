@@ -5,6 +5,9 @@ clock, the application role can only add events, and audit_verify() finds any ch
 behind the triggers.
 
 Differences from docs/design/invoice-case/schema-sketch.sql:
+- Every function pins search_path to pg_catalog, public, pg_temp, and temporary tables are
+  taken away from PUBLIC, so the app cannot shadow a table with a temporary one (QA on PR #79).
+- An actor name must not contain spaces, so 'user: ' is refused.
 - The hash uses the built in sha256() instead of pgcrypto, so no extension is needed on Azure.
 - The argus_app role is created only if it does not exist yet, because roles belong to the
   whole server and not to one database.
@@ -30,6 +33,11 @@ do $$ begin
   end if;
 end $$;
 grant usage on schema public to argus_app;
+-- Every function below pins its search_path with pg_temp last, so a temporary table cannot
+-- stand in for a real one. Taking away temporary tables is the second line of defence.
+do $$ begin
+  execute format('revoke temporary on database %I from public', current_database());
+end $$;
 
 create type case_status as enum ('received','awaiting_approval','approved','booked',
                                  'in_payment_run','paid','exception','closed');
@@ -53,16 +61,18 @@ create index audit_event_email on audit_event (email_id, chain_seq);
 
 -- The actor of every change comes from the transaction:
 -- SET LOCAL argus.actor = 'user:<entra id>' or 'system:<job>'.
-create function current_actor() returns text[] language plpgsql as $$
+create function current_actor() returns text[] language plpgsql
+set search_path = pg_catalog, public, pg_temp as $$
 declare a text := current_setting('argus.actor', true);
 begin
-  if a is null or a !~ '^(system|user):.+$' then raise exception 'argus.actor is not set'; end if;
+  if a is null or a !~ '^(system|user):\S+$' then raise exception 'argus.actor is not set'; end if;
   return array[split_part(a, ':', 1), substr(a, strpos(a, ':') + 1)];
 end $$;
 
 -- One canonical hash input, used when writing and when checking. Every field is named, nulls
 -- stay visible, and the time is seconds since 1970 so the session time zone cannot change it.
-create function audit_hash(e audit_event) returns bytea language sql immutable as $$
+create function audit_hash(e audit_event) returns bytea language sql immutable
+set search_path = pg_catalog, public, pg_temp as $$
   select sha256(e.prev_hash || convert_to(jsonb_build_object(
     'v', e.hash_version, 'seq', e.chain_seq, 'at', extract(epoch from e.occurred_at),
     'case_id', e.case_id, 'email_id', e.email_id, 'statement_id', e.statement_id,
@@ -71,12 +81,14 @@ create function audit_hash(e audit_event) returns bytea language sql immutable a
     'from_status', e.from_status, 'to_status', e.to_status, 'details', e.details)::text, 'UTF8'))
 $$;
 
-create function audit_chain() returns trigger language plpgsql as $$
+create function audit_chain() returns trigger language plpgsql
+set search_path = pg_catalog, public, pg_temp as $$
 declare last record; a text[] := current_actor();
 begin
   -- Events that describe a case or exception change may only come from the database triggers.
   if pg_trigger_depth() = 1 and (new.event_type in ('case_created','status_changed','case_changed',
-                                                    'exception_opened','exception_resolved')
+                                                    'exception_opened','exception_resolved',
+                                                    'bank_transaction_imported')
                                  or new.from_status is not null or new.to_status is not null) then
     raise exception 'event % is written by the database, not by the application', new.event_type;
   end if;
@@ -97,7 +109,8 @@ create trigger audit_chain before insert on audit_event
 
 -- Refused even for roles that have the right, so history only changes with the trigger off,
 -- and audit_verify() then shows it.
-create function audit_append_only() returns trigger language plpgsql as $$
+create function audit_append_only() returns trigger language plpgsql
+set search_path = pg_catalog, public, pg_temp as $$
 begin raise exception 'audit_event is append only'; end $$;
 create trigger audit_no_change before update or delete on audit_event
   for each row execute function audit_append_only();
@@ -105,7 +118,8 @@ create trigger audit_no_truncate before truncate on audit_event
   execute function audit_append_only();
 
 -- Check the whole chain. Returns the first broken link, or nothing.
-create function audit_verify() returns table (broken_at bigint) language sql stable as $$
+create function audit_verify() returns table (broken_at bigint) language sql stable
+set search_path = pg_catalog, public, pg_temp as $$
   select chain_seq from (
     select e.chain_seq, e.hash, e.prev_hash, audit_hash(e) as calc,
            lag(e.hash) over (order by e.chain_seq) as prev_row_hash
@@ -134,6 +148,9 @@ drop function audit_append_only();
 drop function current_actor();
 drop type case_status;
 revoke usage on schema public from argus_app;
+do $$ begin
+  execute format('grant temporary on database %I to public', current_database());
+end $$;
 """
 
 
