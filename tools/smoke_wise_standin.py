@@ -21,7 +21,7 @@ def check(ok: bool, what: str) -> None:
 
 
 def main(base_url: str, token: str) -> None:
-    with WiseClient(SecretStr(token), PROFILE_ID, base_url) as wise:
+    with WiseClient(SecretStr(token), PROFILE_ID, base_url, standin=True) as wise:
         recipient = wise.create_recipient(
             {
                 "currency": "EUR",

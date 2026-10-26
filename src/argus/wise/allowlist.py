@@ -28,17 +28,29 @@ class WiseCallRefused(PermissionError):
     """ARGUS refused to send a Wise request because it is not on the allowlist."""
 
 
-def _only_complete(body: bytes) -> bool:
-    """A batch group may only be marked COMPLETED, which hands it over unfunded."""
+def _json_object(body: bytes) -> dict[str, object] | None:
     try:
         data = json.loads(body)
     except ValueError:
-        return False
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _only_complete(body: bytes, profile_id: int) -> bool:
+    """A batch group may only be marked COMPLETED, which hands it over unfunded."""
+    data = _json_object(body)
     return (
-        isinstance(data, dict)
+        data is not None
         and data.get("status") == "COMPLETED"
         and set(data) <= {"status", "version"}
     )
+
+
+def _own_profile(body: bytes, profile_id: int) -> bool:
+    """A recipient names its profile in the body, so the profile check happens here."""
+    data = _json_object(body)
+    profile = None if data is None else data.get("profile")
+    return type(profile) is int and profile == profile_id
 
 
 @dataclass(frozen=True)
@@ -46,7 +58,7 @@ class AllowedCall:
     method: str
     template: str
     purpose: str
-    body_check: Callable[[bytes], bool] | None = None
+    body_check: Callable[[bytes, int], bool] | None = None
 
     def pattern(self) -> re.Pattern[str]:
         parts = _PLACEHOLDER.split(self.template)
@@ -58,7 +70,12 @@ class AllowedCall:
 
 
 ALLOWED_CALLS: tuple[AllowedCall, ...] = (
-    AllowedCall("POST", "/v1/accounts", "create a recipient from DATEV bank details"),
+    AllowedCall(
+        "POST",
+        "/v1/accounts",
+        "create a recipient from DATEV bank details",
+        body_check=_own_profile,
+    ),
     AllowedCall("GET", "/v1/accounts/{accountId}", "read a recipient to compare it with DATEV"),
     AllowedCall("POST", "/v3/profiles/{profileId}/quotes", "quote the exact invoice amount"),
     AllowedCall(
@@ -104,7 +121,7 @@ def check_call(method: str, path: str, body: bytes, profile_id: int) -> AllowedC
         profile = match.groupdict().get("profileId")
         if profile is not None and int(profile) != profile_id:
             raise WiseCallRefused(f"refused Wise call {method} {path}: not ARGUS's profile")
-        if call.body_check is not None and not call.body_check(body):
+        if call.body_check is not None and not call.body_check(body, profile_id):
             raise WiseCallRefused(f"refused Wise call {method} {path}: body not allowed")
         return call
     raise WiseCallRefused(f"refused Wise call {method} {path}: not on the allowlist")

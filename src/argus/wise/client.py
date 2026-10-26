@@ -8,7 +8,7 @@ reaches past the methods below to the underlying HTTP client is stopped.
 
 import logging
 import time
-from collections.abc import Mapping
+from collections.abc import Generator, Mapping
 from typing import Any, cast
 from urllib.parse import urlsplit
 
@@ -43,6 +43,17 @@ class WiseApiError(RuntimeError):
         super().__init__(f"Wise {method} {path} failed with {status}: {', '.join(codes) or '-'}")
 
 
+class _BearerToken(httpx.Auth):
+    """Adds the token to each request, so it is not kept as a plain string in the client."""
+
+    def __init__(self, token: SecretStr) -> None:
+        self._token = token
+
+    def auth_flow(self, request: httpx.Request) -> Generator[httpx.Request, httpx.Response, None]:
+        request.headers["Authorization"] = f"Bearer {self._token.get_secret_value()}"
+        yield request
+
+
 class _GuardedTransport(httpx.BaseTransport):
     """Checks every outgoing request against the allowlist and the Wise host."""
 
@@ -73,9 +84,11 @@ class WiseClient:
         base_url: str = PRODUCTION_URL,
         transport: httpx.BaseTransport | None = None,
         timeout: float = 30.0,
+        standin: bool = False,
     ) -> None:
-        if urlsplit(base_url).scheme != "https" and not _is_local(base_url):
-            raise ValueError("the Wise base URL must use https unless it is a local stand in")
+        """``standin=True`` allows plain http, for the Wise stand in only, never for Wise."""
+        if urlsplit(base_url).scheme != "https" and not standin:
+            raise ValueError("the Wise base URL must use https unless it is the stand in")
         self.profile_id = profile_id
         url = httpx.URL(base_url)
         guarded = _GuardedTransport(transport or httpx.HTTPTransport(), url, profile_id)
@@ -84,7 +97,7 @@ class WiseClient:
             transport=guarded,
             timeout=timeout,
             follow_redirects=False,
-            headers={"Authorization": f"Bearer {token.get_secret_value()}"},
+            auth=_BearerToken(token),
         )
 
     @classmethod
@@ -108,7 +121,7 @@ class WiseClient:
     # Recipients
 
     def create_recipient(self, recipient: JsonObject) -> JsonObject:
-        return self._object("POST", "/v1/accounts", {"profile": self.profile_id, **recipient})
+        return self._object("POST", "/v1/accounts", {**recipient, "profile": self.profile_id})
 
     def get_recipient(self, account_id: int) -> JsonObject:
         return self._object("GET", f"/v1/accounts/{account_id}")
@@ -190,10 +203,6 @@ class WiseClient:
         if not response.is_success:
             raise WiseApiError(method, path, response.status_code, _error_codes(response))
         return response.json()
-
-
-def _is_local(base_url: str) -> bool:
-    return urlsplit(base_url).hostname in {"localhost", "127.0.0.1", "wise-standin"}
 
 
 def _error_codes(response: httpx.Response) -> list[str]:

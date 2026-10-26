@@ -1,5 +1,6 @@
 """The Wise client prepares a payment run (PY-08) and keeps the token safe (NF-06)."""
 
+import json
 import logging
 
 import httpx
@@ -145,8 +146,30 @@ def test_errors_keep_only_wise_error_codes_not_bank_details() -> None:
 
 
 @pytest.mark.req("NF-06")
-@pytest.mark.parametrize("url", ["http://api.wise.com", "ftp://api.wise.com"])
-def test_plain_http_is_only_allowed_for_a_local_standin(url: str) -> None:
+@pytest.mark.parametrize(
+    "url", ["http://api.wise.com", "ftp://api.wise.com", "http://wise-standin", "http://localhost"]
+)
+def test_plain_http_is_only_allowed_when_the_standin_is_named(url: str) -> None:
     with pytest.raises(ValueError, match="https"):
         WiseClient(SecretStr(TOKEN), PROFILE_ID, url)
-    WiseClient(SecretStr(TOKEN), PROFILE_ID, "http://localhost:8080").close()
+    WiseClient(SecretStr(TOKEN), PROFILE_ID, url, standin=True).close()
+
+
+@pytest.mark.req("NF-06")
+def test_the_client_keeps_no_plain_copy_of_the_token() -> None:
+    client = client_for(httpx.MockTransport(lambda _: httpx.Response(200, json={})))
+    assert "authorization" not in client._http.headers
+    assert TOKEN not in repr(vars(client._http.auth))
+
+
+@pytest.mark.req("NF-04", "NF-06")
+def test_a_recipient_always_goes_to_argus_own_profile() -> None:
+    sent: list[bytes] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        sent.append(request.read())
+        return httpx.Response(200, json={"id": 1})
+
+    client = client_for(httpx.MockTransport(answer))
+    client.create_recipient({"currency": "EUR", "profile": 999})
+    assert json.loads(sent[0])["profile"] == PROFILE_ID

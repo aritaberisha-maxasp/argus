@@ -13,7 +13,7 @@ docker build -f standins/wise/Dockerfile -t argus-wise-standin .
 docker run --rm -p 8080:8080 -e WISE_STANDIN_TOKEN=local-test-token argus-wise-standin
 ```
 
-Point ARGUS at it with base URL `http://localhost:8080` and the same token. Without `WISE_STANDIN_TOKEN` it accepts any bearer token.
+Point ARGUS at it with base URL `http://localhost:8080`, the same token and `standin=True`, which is the only way the Wise client accepts plain http. Without `WISE_STANDIN_TOKEN` it accepts any bearer token.
 
 ## Look at what ARGUS handed over
 

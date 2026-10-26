@@ -126,3 +126,22 @@ def test_every_method_on_the_client_passes_the_allowlist() -> None:
     client.complete_batch_group(GROUP, 3)
     client.get_transfer(70000001)
     assert len(recorder.requests) == 9
+
+
+@pytest.mark.req("NF-04", "NF-06")
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"currency": "EUR", "profile": 999},
+        {"currency": "EUR", "profile": str(PROFILE_ID)},
+        {"currency": "EUR", "profile": True},
+        {"currency": "EUR"},
+        [PROFILE_ID],
+    ],
+)
+def test_a_recipient_for_another_profile_is_refused(body: object) -> None:
+    recorder = Recorder()
+    client = client_for(recorder)
+    with pytest.raises(WiseCallRefused):
+        client._http.post("/v1/accounts", content=json.dumps(body))
+    assert recorder.requests == []
