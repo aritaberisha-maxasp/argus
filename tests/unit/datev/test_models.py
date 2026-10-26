@@ -33,6 +33,11 @@ def test_a_complete_booking_is_accepted() -> None:
         ({"gross": Decimal("119.01")}, "gross must equal net plus VAT"),
         ({"net": Decimal("-1.00"), "vat": Decimal("120.00")}, "greater than or equal to 0"),
         ({"net": Decimal("0"), "vat": Decimal("0"), "gross": Decimal("0")}, "greater than 0"),
+        (
+            {"net": Decimal("100.004"), "vat": Decimal("19.00"), "gross": Decimal("119.004")},
+            "no more than 2 decimal places",
+        ),
+        ({"original_currency": "GBP", "original_gross": Decimal("1.001")}, "2 decimal places"),
         ({"case_id": ""}, "at least 1 character"),
         ({"document_number": "X" * 37}, "at most 36 characters"),
         ({"original_currency": "GBP"}, "original currency and original amount go together"),

@@ -23,8 +23,25 @@ from argus.datev.fake import DEFAULT_CLIENT_ID, create_fake_datev
 Handler = Callable[[httpx.Request], httpx.Response]
 
 
+ACCOUNT = {"account_number": 70001, "caption": "Muster Bürobedarf GmbH", "bank_accounts": []}
+
+
+def with_accounts(handler: Handler) -> Handler:
+    """Answer account lookups with an existing account and hand everything else on."""
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET" and "/creditors/" in request.url.path:
+            return httpx.Response(200, json=ACCOUNT)
+        if request.method == "GET" and "/debitors/" in request.url.path:
+            return httpx.Response(200, json={**ACCOUNT, "account_number": 10001})
+        return handler(request)
+
+    return answer
+
+
 def gateway_answering(handler: Handler) -> DatevConnectGateway:
-    http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://datev")
+    transport = httpx.MockTransport(with_accounts(handler))
+    http = httpx.Client(transport=transport, base_url="http://datev")
     return DatevConnectGateway(http, DEFAULT_CLIENT_ID, today=lambda: date(2026, 10, 26))
 
 
@@ -70,10 +87,35 @@ def test_a_server_error_means_unavailable() -> None:
         gateway_answering(lambda request: httpx.Response(502)).submit_booking(a_booking())
 
 
+@pytest.mark.req("VM-01", "VM-03", "BK-06")
+@pytest.mark.parametrize("account, resource", [(70099, "creditors"), (10099, "debitors")])
+def test_a_booking_on_a_missing_account_is_never_sent(account: int, resource: str) -> None:
+    sent: list[httpx.Request] = []
+
+    def datev_that_accepts_anything(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        if request.method == "GET":
+            return httpx.Response(404)
+        return httpx.Response(201, json={"id": "000001", "accounting_records": []})
+
+    transport = httpx.MockTransport(datev_that_accepts_anything)
+    gateway = DatevConnectGateway(
+        httpx.Client(transport=transport, base_url="http://datev"), DEFAULT_CLIENT_ID
+    )
+
+    with pytest.raises(BookingRejected) as rejected:
+        gateway.submit_booking(a_booking(account=account))
+
+    assert rejected.value.reason is RejectionReason.UNKNOWN_ACCOUNT
+    assert [(r.method, r.url.path.rsplit("/", 2)[-2:]) for r in sent] == [
+        ("GET", [resource, str(account)])
+    ]
+
+
 @pytest.mark.req("NF-06")
 def test_refused_credentials_are_an_error_not_a_missing_account() -> None:
     with pytest.raises(DatevError) as error:
-        gateway_answering(lambda request: httpx.Response(401)).get_vendor(70001)
+        gateway_answering(lambda request: httpx.Response(401)).list_vendors()
 
     assert not isinstance(error.value, DatevUnavailable)
 
@@ -129,7 +171,7 @@ def test_debit_or_credit_follows_the_account_and_kind(
     with pytest.raises(DatevUnavailable):
         gateway_answering(record).submit_booking(booking)
 
-    assert b'"debit_credit_identifier":"%s"' % side.encode() in sent[0].content
+    assert b'"debit_credit_identifier":"%s"' % side.encode() in sent[-1].content
 
 
 @pytest.mark.req("BK-02")
@@ -143,7 +185,7 @@ def test_bookings_go_to_the_fiscal_year_of_the_document_date() -> None:
     with pytest.raises(DatevUnavailable):
         gateway_answering(record).submit_booking(a_booking(document_date=date(2025, 12, 31)))
 
-    assert "/fiscal-years/20250101/" in paths[0]
+    assert "/fiscal-years/20250101/" in paths[-1]
 
 
 def test_fiscal_year_ids_are_the_first_day() -> None:

@@ -51,7 +51,8 @@ class BookingKind(StrEnum):
 class Booking(_Frozen):
     """One booking ARGUS asks DATEV to record (BK-02, AR-05).
 
-    Amounts are in EUR and positive. A credit note is marked by ``kind``, not by a sign.
+    Amounts are in EUR, positive and in cents at most, because DATEV rounds to cents.
+    A credit note is marked by ``kind``, not by a sign.
     """
 
     case_id: str = Field(min_length=1)
@@ -61,14 +62,14 @@ class Booking(_Frozen):
     tax_key: str
     document_date: date
     document_number: str = Field(min_length=1, max_length=36)
-    net: Decimal = Field(ge=0)
-    vat: Decimal = Field(ge=0)
-    gross: Decimal = Field(gt=0)
+    net: Decimal = Field(ge=0, decimal_places=2)
+    vat: Decimal = Field(ge=0, decimal_places=2)
+    gross: Decimal = Field(gt=0, decimal_places=2)
     due_date: date | None = None
     service_period_start: date | None = None
     service_period_end: date | None = None
     original_currency: str | None = None
-    original_gross: Decimal | None = None
+    original_gross: Decimal | None = Field(default=None, decimal_places=2)
     voucher_link: str | None = None
     original_document_number: str | None = None
     description: str = Field(default="", max_length=60)

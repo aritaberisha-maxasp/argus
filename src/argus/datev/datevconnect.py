@@ -135,12 +135,27 @@ class DatevConnectGateway:
         fiscal_year = fiscal_year_id(booking.document_date)
         path = self._path("accounting-sequences", booking.document_date)
         body = {"accounting_records": [_record_json(booking)]}
+        # DATEV may accept a booking on an account without master data and so open
+        # the account by booking on it. VM-01 forbids that, so check first.
+        is_vendor = booking.account >= FIRST_VENDOR_ACCOUNT
+        lookup = self.get_vendor if is_vendor else self.get_customer
+        if lookup(booking.account) is None:
+            kind = "vendor" if is_vendor else "customer"
+            log.info("DATEV booking for case %s refused: no %s account", booking.case_id, kind)
+            raise BookingRejected(
+                RejectionReason.UNKNOWN_ACCOUNT,
+                f"{kind} account {booking.account} does not exist in DATEV",
+            )
         log.info("DATEV booking for case %s, document %s", booking.case_id, booking.document_number)
         response = self._send("POST", path, json=body)
         if response.status_code in (400, 409, 422):
-            raise _rejection(response)
+            rejection = _rejection(response)
+            log.info("DATEV rejected case %s: %s", booking.case_id, rejection)
+            raise rejection
         _raise_for_status(response)
-        return _booking_record(fiscal_year, response.json())
+        record = _booking_record(fiscal_year, response.json())
+        log.info("DATEV booked case %s as %s", booking.case_id, record.reference)
+        return record
 
     def get_booking(self, reference: str) -> BookingRecord | None:
         fiscal_year, _, sequence_id = reference.partition(":")

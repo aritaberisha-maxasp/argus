@@ -33,10 +33,14 @@ The bridge at Max ASP (ADR 0002) will carry the same allow list, so the rule hol
 | `BookingRejected(UNKNOWN_ACCOUNT)` | The vendor, customer or G/L account does not exist | Exception queue (BK-06, VM-03) |
 | `BookingRejected(DUPLICATE_DOCUMENT_NUMBER)` | That document number is already booked on the account | Exception queue (BK-06) |
 | `BookingRejected(INVALID)` | Anything else DATEV refused | Exception queue (BK-06) |
-| `DatevUnavailable` | DATEV did not answer or answered with a server error | Try again later |
+| `DatevUnavailable` | DATEV did not answer or answered with a server error | Try again later, but see below before sending a booking again |
 | `DatevError` | For example, DATEV refused the credentials | Alert, this is a setup problem |
 
-A booking that cannot be right never reaches DATEV: the `Booking` model refuses a gross amount that is not net plus VAT, a credit note that does not name its invoice, a foreign currency without its original amount, and a service period that ends before it starts.
+**A booking on a missing account is never sent.** Real DATEV may accept a booking on a vendor or customer account number that has no master data and so open the account by booking on it, which VM-01 forbids. The gateway therefore looks the account up first and raises `BookingRejected(UNKNOWN_ACCOUNT)` without sending anything when it is missing.
+
+**A failed booking is not safe to simply send again.** After `DatevUnavailable` on `submit_booking`, DATEV may have recorded the booking and only the answer got lost. The fake refuses a repeated document number, but real DATEV may only warn about it, so a blind retry can book an invoice twice. Before sending again, the caller reads `list_postings` for the account on the document date and only resends when the document number is not there. The booking story (#41) owns that check.
+
+A booking that cannot be right never reaches DATEV: the `Booking` model refuses a gross amount that is not net plus VAT, amounts with more than two decimal places, a credit note that does not name its invoice, a foreign currency without its original amount, and a service period that ends before it starts.
 
 Bookings land as **uncommitted** in DATEV. Someone at Max ASP commits them there (question 6 on #2).
 

@@ -18,7 +18,13 @@ class DatevError(Exception):
 
 
 class DatevUnavailable(DatevError):
-    """DATEV did not answer. Worth trying again later."""
+    """DATEV did not answer, or answered with a server error.
+
+    Reading again later is safe. Sending a booking again is not: DATEV may have
+    recorded it and only the answer got lost. Before a resend, the caller looks for
+    the booking with ``list_postings`` on the account and document date, and only
+    sends again when the document number is not there.
+    """
 
 
 class ForbiddenDatevOperation(DatevError):
@@ -63,7 +69,12 @@ class DatevGateway(Protocol):
         ...
 
     def submit_booking(self, booking: Booking) -> BookingRecord:
-        """Write one booking. Raises BookingRejected or DatevUnavailable."""
+        """Write one booking. Raises BookingRejected or DatevUnavailable.
+
+        A booking on a vendor or customer account that DATEV does not hold is
+        rejected without being sent (VM-01, VM-03). After DatevUnavailable, see
+        that class before sending again.
+        """
         ...
 
     def get_booking(self, reference: str) -> BookingRecord | None:
