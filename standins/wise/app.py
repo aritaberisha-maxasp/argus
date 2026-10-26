@@ -102,7 +102,7 @@ def create_app(token: str | None = None) -> FastAPI:
 
     @app.post("/v1/accounts", dependencies=auth)
     def create_recipient(body: JsonObject) -> JsonObject:
-        recipient = {"id": records.next_id(), "active": True, **body}
+        recipient = {**body, "id": records.next_id(), "active": True}
         records.recipients[recipient["id"]] = recipient
         return recipient
 

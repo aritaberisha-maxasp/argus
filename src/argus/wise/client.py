@@ -64,10 +64,17 @@ class _GuardedTransport(httpx.BaseTransport):
 
     def handle_request(self, request: httpx.Request) -> httpx.Response:
         url = request.url
-        if (url.scheme, url.host, url.port) != self._origin:
-            raise WiseCallRefused(f"refused Wise call to another host: {url.host}")
-        path = url.raw_path.split(b"?", 1)[0].decode("ascii")
-        check_call(request.method, path, request.read(), self._profile_id)
+        path, _, query = url.raw_path.decode("ascii").partition("?")
+        try:
+            if (url.scheme, url.host, url.port) != self._origin:
+                raise WiseCallRefused(f"refused Wise call to another host: {url.host}")
+            if query and request.method != "GET":
+                raise WiseCallRefused(f"refused Wise call {request.method} {path}: query string")
+            check_call(request.method, path, request.read(), self._profile_id)
+        except WiseCallRefused:
+            # Some code tried a call ARGUS must never make. Method and path only, no body.
+            log.warning("Refused Wise call %s %s", request.method, path)
+            raise
         return self._inner.handle_request(request)
 
     def close(self) -> None:

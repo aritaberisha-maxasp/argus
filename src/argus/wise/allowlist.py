@@ -28,9 +28,17 @@ class WiseCallRefused(PermissionError):
     """ARGUS refused to send a Wise request because it is not on the allowlist."""
 
 
+def _no_repeated_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    """Refuse a key given twice, so the guard and Wise cannot read different values."""
+    keys = [key for key, _ in pairs]
+    if len(keys) != len(set(keys)):
+        raise ValueError("repeated key in JSON body")
+    return dict(pairs)
+
+
 def _json_object(body: bytes) -> dict[str, object] | None:
     try:
-        data = json.loads(body)
+        data = json.loads(body, object_pairs_hook=_no_repeated_keys)
     except ValueError:
         return None
     return data if isinstance(data, dict) else None

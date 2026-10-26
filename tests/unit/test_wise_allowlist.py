@@ -125,7 +125,8 @@ def test_every_method_on_the_client_passes_the_allowlist() -> None:
     client.add_transfer(GROUP, 70000001, GROUP, "attempt-1", "R-2026-0001")
     client.complete_batch_group(GROUP, 3)
     client.get_transfer(70000001)
-    assert len(recorder.requests) == 9
+    client._send("GET", "/v1/rates", params={"source": "USD", "target": "EUR"})
+    assert len(recorder.requests) == 10
 
 
 @pytest.mark.req("NF-04", "NF-06")
@@ -145,3 +146,43 @@ def test_a_recipient_for_another_profile_is_refused(body: object) -> None:
     with pytest.raises(WiseCallRefused):
         client._http.post("/v1/accounts", content=json.dumps(body))
     assert recorder.requests == []
+
+
+@pytest.mark.req("NF-04", "NF-06")
+@pytest.mark.parametrize(
+    ("path", "raw_body"),
+    [
+        ("/v1/accounts", f'{{"currency": "EUR", "profile": 2, "profile": {PROFILE_ID}}}'),
+        (
+            f"{P}/batch-groups/{GROUP}",
+            '{"status": "CANCELLED", "status": "COMPLETED", "version": 1}',
+        ),
+        (f"{P}/batch-groups/{GROUP}", '{"status": "COMPLETED", "version": 1, "version": 2}'),
+    ],
+)
+def test_a_body_with_a_repeated_key_is_refused(path: str, raw_body: str) -> None:
+    recorder = Recorder()
+    client = client_for(recorder)
+    method = "POST" if path == "/v1/accounts" else "PATCH"
+    with pytest.raises(WiseCallRefused):
+        client._http.request(method, path, content=raw_body)
+    assert recorder.requests == []
+
+
+@pytest.mark.req("NF-04")
+def test_a_write_call_with_a_query_string_is_refused() -> None:
+    recorder = Recorder()
+    client = client_for(recorder)
+    with pytest.raises(WiseCallRefused, match="query string"):
+        client._http.post(f"{P}/batch-groups", params={"fund": "true"}, json={"name": "x"})
+    assert recorder.requests == []
+
+
+@pytest.mark.req("NF-04")
+def test_a_refused_call_is_logged_without_its_body(caplog: pytest.LogCaptureFixture) -> None:
+    client = client_for(Recorder())
+    with pytest.raises(WiseCallRefused):
+        client._send("POST", f"{P}/transfers/70000001/payments", {"secret": "body-text"})
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert warnings == [f"Refused Wise call POST {P}/transfers/70000001/payments"]
+    assert "body-text" not in caplog.text
