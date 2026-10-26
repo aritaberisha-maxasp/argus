@@ -18,6 +18,6 @@ Covers: <!-- requirement IDs, for example IN-04, IN-09 -->
 ## Checklist
 
 - [ ] Meets the Definition of Done
-- [ ] Reviewer approved
-- [ ] Compliance reviewer approved (only if it touches payments, bookings, audit log, personal data or credentials)
-- [ ] QA evidence posted
+- [ ] Reviewer verdict posted as a PR comment, naming the commit
+- [ ] Compliance reviewer verdict posted (only if it touches payments, bookings, audit log, personal data or credentials)
+- [ ] QA evidence posted, or "Docs only, no QA evidence needed"
