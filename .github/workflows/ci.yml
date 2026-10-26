@@ -34,6 +34,31 @@ jobs:
         run: pytest --cov=argus --cov-report=term
       - name: Fixture check
         run: python tests/fixtures/tools/check.py
+      # ARGUS must never fund or release a payment (NF-04, ADR 0004).
+      - name: No Wise funding path
+        run: python tools/check_no_funding_paths.py
+
+  wise-standin:
+    name: Wise stand in
+    runs-on: ubuntu-latest
+    env:
+      WISE_STANDIN_TOKEN: ci-standin-token
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: pip install -e .
+      - name: Build the stand in image
+        run: docker build -f standins/wise/Dockerfile -t argus-wise-standin .
+      - name: Start the stand in
+        run: |
+          docker run -d --name wise-standin -p 8080:8080 -e WISE_STANDIN_TOKEN argus-wise-standin
+          for i in $(seq 1 30); do curl -sf http://localhost:8080/_standin/records && break; sleep 1; done
+      - name: Smoke test the Wise client against it
+        run: python tools/smoke_wise_standin.py http://localhost:8080 "$WISE_STANDIN_TOKEN"
 
   secrets:
     name: Secret scan

@@ -13,6 +13,10 @@ python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 
 CI runs the same tests plus `ruff check`, `ruff format --check`, `mypy`, the fixture check and a secret scan on every PR. Tag each test with the requirements it covers, for example `@pytest.mark.req("IN-04", "IN-09")`. An ID that is not in the catalog fails the run.
 
+## Stand ins
+
+ARGUS cannot reach Wise or DATEV from the build environment, so development and CI use stand ins that answer like the real systems. See [standins/wise/README.md](standins/wise/README.md) for the Wise one.
+
 ## Start here
 
 - [Team charter](CLAUDE.md): what we build, how the team works, the rules
