@@ -171,17 +171,6 @@ def test_a_booking_on_a_missing_account_is_rejected(gateway: DatevConnectGateway
     assert rejected.value.reason is RejectionReason.UNKNOWN_ACCOUNT
 
 
-@pytest.mark.req("BK-06", "IN-10")
-def test_the_same_document_number_cannot_be_booked_twice(gateway: DatevConnectGateway) -> None:
-    booking = a_booking()
-    gateway.submit_booking(booking)
-
-    with pytest.raises(BookingRejected) as rejected:
-        gateway.submit_booking(a_booking(document_number=booking.document_number))
-
-    assert rejected.value.reason is RejectionReason.DUPLICATE_DOCUMENT_NUMBER
-
-
 @pytest.mark.req("BK-07")
 def test_an_unknown_reference_reads_as_none(gateway: DatevConnectGateway) -> None:
     assert gateway.get_booking("20260101:nonexistent") is None

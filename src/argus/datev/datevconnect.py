@@ -18,6 +18,7 @@ from typing import Any, Protocol
 import httpx
 
 from argus.datev.gateway import (
+    BookingOutcomeUnknown,
     BookingRejected,
     DatevError,
     DatevUnavailable,
@@ -147,7 +148,14 @@ class DatevConnectGateway:
                 f"{kind} account {booking.account} does not exist in DATEV",
             )
         log.info("DATEV booking for case %s, document %s", booking.case_id, booking.document_number)
-        response = self._send("POST", path, json=body)
+        try:
+            response = self._send("POST", path, json=body)
+        except DatevUnavailable as exc:
+            if not isinstance(exc.__cause__, httpx.ConnectError | httpx.ConnectTimeout):
+                raise _outcome_unknown(booking, str(exc)) from exc
+            raise
+        if response.status_code >= 500:
+            raise _outcome_unknown(booking, f"DATEV answered {response.status_code}")
         if response.status_code in (400, 409, 422):
             rejection = _rejection(response)
             log.info("DATEV rejected case %s: %s", booking.case_id, rejection)
@@ -166,7 +174,7 @@ class DatevConnectGateway:
             f"/accounting-sequences/{sequence_id}"
         )
         response = self._send("GET", path)
-        if response.status_code == 404:
+        if _is_missing(response, "booking_not_found"):
             return None
         _raise_for_status(response)
         return _booking_record(fiscal_year, response.json())
@@ -179,7 +187,7 @@ class DatevConnectGateway:
 
     def _get_account(self, resource: str, number: int) -> Account | None:
         response = self._send("GET", f"{self._path(resource)}/{number}")
-        if response.status_code == 404:
+        if _is_missing(response, "account_not_found"):
             return None
         _raise_for_status(response)
         return _account(response.json())
@@ -202,6 +210,28 @@ class DatevConnectGateway:
             return self._http.request(method, path, params=params, json=json)
         except httpx.TransportError as exc:
             raise DatevUnavailable(f"DATEV did not answer: {exc}") from exc
+
+
+def _outcome_unknown(booking: Booking, problem: str) -> BookingOutcomeUnknown:
+    log.warning("DATEV booking for case %s may or may not exist: %s", booking.case_id, problem)
+    return BookingOutcomeUnknown(
+        f"booking {booking.document_number} on account {booking.account} was sent but "
+        f"the answer got lost ({problem}); look it up before sending it again"
+    )
+
+
+def _is_missing(response: HttpResponse, code: str) -> bool:
+    """True only when DATEV says the thing itself is missing.
+
+    A 404 for an unknown client or fiscal year is a setup problem, not a missing
+    account, and must not send healthy invoices to the unknown vendor path (VM-03).
+    """
+    if response.status_code != 404:
+        return False
+    try:
+        return bool(response.json()["error"]["code"] == code)
+    except (ValueError, KeyError, TypeError):
+        return False
 
 
 def _raise_for_status(response: HttpResponse) -> None:

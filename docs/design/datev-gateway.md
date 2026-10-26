@@ -33,12 +33,15 @@ The bridge at Max ASP (ADR 0002) will carry the same allow list, so the rule hol
 | `BookingRejected(UNKNOWN_ACCOUNT)` | The vendor, customer or G/L account does not exist | Exception queue (BK-06, VM-03) |
 | `BookingRejected(DUPLICATE_DOCUMENT_NUMBER)` | That document number is already booked on the account | Exception queue (BK-06) |
 | `BookingRejected(INVALID)` | Anything else DATEV refused | Exception queue (BK-06) |
-| `DatevUnavailable` | DATEV did not answer or answered with a server error | Try again later, but see below before sending a booking again |
-| `DatevError` | For example, DATEV refused the credentials | Alert, this is a setup problem |
+| `DatevUnavailable` | DATEV could not be reached, so nothing was written | Try again later |
+| `BookingOutcomeUnknown` | The booking was sent, but the answer got lost (a timeout or a server error) | Look the booking up before sending it again, see below |
+| `DatevError` | A setup problem, for example refused credentials or an unknown client or fiscal year | Alert, never treat it as a missing account |
 
 **A booking on a missing account is never sent.** Real DATEV may accept a booking on a vendor or customer account number that has no master data and so open the account by booking on it, which VM-01 forbids. The gateway therefore looks the account up first and raises `BookingRejected(UNKNOWN_ACCOUNT)` without sending anything when it is missing.
 
-**A failed booking is not safe to simply send again.** After `DatevUnavailable` on `submit_booking`, DATEV may have recorded the booking and only the answer got lost. The fake refuses a repeated document number, but real DATEV may only warn about it, so a blind retry can book an invoice twice. Before sending again, the caller reads `list_postings` for the account on the document date and only resends when the document number is not there. The booking story (#41) owns that check.
+**A lost answer is not a reason to send again.** When a booking was sent and then the connection dropped or DATEV answered with a server error, DATEV may have recorded it. The gateway raises `BookingOutcomeUnknown` for that case and keeps `DatevUnavailable` for failures where nothing left ARGUS. After `BookingOutcomeUnknown` the caller reads `list_postings` for the account on the document date and only sends again when the document number is not there. ARGUS does not rely on DATEV to refuse a repeated document number (IN-10). The booking story (#41) owns that check.
+
+**A missing account is not the same as a wrong setup.** `get_vendor` and `get_customer` only return `None` when DATEV says the account itself is missing. A 404 for an unknown client or fiscal year raises `DatevError`, so a wrong client ID or a fiscal year that DATEV has not opened yet never sends healthy invoices down the unknown vendor path (VM-03, EX-01).
 
 A booking that cannot be right never reaches DATEV: the `Booking` model refuses a gross amount that is not net plus VAT, amounts with more than two decimal places, a credit note that does not name its invoice, a foreign currency without its original amount, and a service period that ends before it starts.
 
@@ -108,5 +111,8 @@ The paths and field names follow public DATEVconnect material, not DATEV's own A
 - that a booking reference is `<fiscal year>:<sequence id>`
 - that Max ASP's fiscal year runs January to December
 - how the bridge signs in; the gateway sends no credentials yet
+- how DATEV tells a missing account from an unknown client or fiscal year (the fake uses the error codes `account_not_found`, `client_not_found` and `booking_not_found`)
+- that vendor accounts start at 70000 and customer accounts are below that (SKR 03 with five digit personal accounts); the gateway uses it to pick debit or credit and which account to look up
+- whether DATEV refuses a repeated document number; the fake does, real DATEV may only warn, so ARGUS checks itself
 
 Each of these changes in one place once Benjamin's answers or the API specification arrive.

@@ -18,12 +18,16 @@ class DatevError(Exception):
 
 
 class DatevUnavailable(DatevError):
-    """DATEV did not answer, or answered with a server error.
+    """DATEV did not answer, and nothing was written. Safe to try again later."""
 
-    Reading again later is safe. Sending a booking again is not: DATEV may have
-    recorded it and only the answer got lost. Before a resend, the caller looks for
-    the booking with ``list_postings`` on the account and document date, and only
-    sends again when the document number is not there.
+
+class BookingOutcomeUnknown(DatevError):
+    """A booking was sent, but the answer got lost (a timeout or a server error).
+
+    DATEV may have recorded it. Never simply send it again: first look for the
+    document number with ``list_postings`` on the account and document date, and
+    only send again when it is not there. DATEV may not refuse a repeated document
+    number on its own (IN-10).
     """
 
 
@@ -53,7 +57,10 @@ class DatevGateway(Protocol):
         ...
 
     def get_vendor(self, number: int) -> Account | None:
-        """One vendor account, or None when DATEV has no such account (VM-03)."""
+        """One vendor account, or None when DATEV has no such account (VM-03).
+
+        Any other problem, such as an unknown client or fiscal year, raises DatevError.
+        """
         ...
 
     def list_customers(self) -> list[Account]:
@@ -69,11 +76,12 @@ class DatevGateway(Protocol):
         ...
 
     def submit_booking(self, booking: Booking) -> BookingRecord:
-        """Write one booking. Raises BookingRejected or DatevUnavailable.
+        """Write one booking.
 
+        Raises BookingRejected when DATEV refuses it, DatevUnavailable when it was
+        not sent, and BookingOutcomeUnknown when it was sent but the answer got lost.
         A booking on a vendor or customer account that DATEV does not hold is
-        rejected without being sent (VM-01, VM-03). After DatevUnavailable, see
-        that class before sending again.
+        rejected without being sent (VM-01, VM-03).
         """
         ...
 

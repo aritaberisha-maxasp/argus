@@ -38,6 +38,7 @@ def test_a_complete_booking_is_accepted() -> None:
             "no more than 2 decimal places",
         ),
         ({"original_currency": "GBP", "original_gross": Decimal("1.001")}, "2 decimal places"),
+        ({"original_currency": "GBP", "original_gross": Decimal("0.00")}, "greater than 0"),
         ({"case_id": ""}, "at least 1 character"),
         ({"document_number": "X" * 37}, "at most 36 characters"),
         ({"original_currency": "GBP"}, "original currency and original amount go together"),

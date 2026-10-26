@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from argus.datev import (
     Booking,
     BookingKind,
+    BookingOutcomeUnknown,
     BookingRejected,
     DatevConnectGateway,
     DatevError,
@@ -82,9 +83,49 @@ def test_no_answer_means_unavailable() -> None:
 
 
 @pytest.mark.req("BK-06")
-def test_a_server_error_means_unavailable() -> None:
+def test_a_server_error_on_a_read_means_unavailable() -> None:
     with pytest.raises(DatevUnavailable):
-        gateway_answering(lambda request: httpx.Response(502)).submit_booking(a_booking())
+        gateway_answering(lambda request: httpx.Response(502)).list_vendors()
+
+
+@pytest.mark.req("BK-06")
+@pytest.mark.parametrize(
+    "failure", [httpx.ConnectError("refused"), httpx.ConnectTimeout("no route")]
+)
+def test_a_booking_that_never_left_is_unavailable(failure: httpx.TransportError) -> None:
+    def fail(request: httpx.Request) -> httpx.Response:
+        raise failure
+
+    with pytest.raises(DatevUnavailable) as error:
+        gateway_answering(fail).submit_booking(a_booking())
+
+    assert not isinstance(error.value, BookingOutcomeUnknown)
+
+
+@pytest.mark.req("BK-06", "IN-10")
+@pytest.mark.parametrize(
+    "failure",
+    [
+        httpx.ReadTimeout("no answer"),
+        httpx.WriteTimeout("half sent"),
+        httpx.RemoteProtocolError("connection dropped"),
+    ],
+)
+def test_a_booking_whose_answer_got_lost_has_an_unknown_outcome(
+    failure: httpx.TransportError,
+) -> None:
+    def fail(request: httpx.Request) -> httpx.Response:
+        raise failure
+
+    with pytest.raises(BookingOutcomeUnknown, match="look it up before sending it again"):
+        gateway_answering(fail).submit_booking(a_booking())
+
+
+@pytest.mark.req("BK-06", "IN-10")
+@pytest.mark.parametrize("status", [500, 502, 503, 504])
+def test_a_server_error_after_a_booking_has_an_unknown_outcome(status: int) -> None:
+    with pytest.raises(BookingOutcomeUnknown):
+        gateway_answering(lambda request: httpx.Response(status)).submit_booking(a_booking())
 
 
 @pytest.mark.req("VM-01", "VM-03", "BK-06")
@@ -95,7 +136,7 @@ def test_a_booking_on_a_missing_account_is_never_sent(account: int, resource: st
     def datev_that_accepts_anything(request: httpx.Request) -> httpx.Response:
         sent.append(request)
         if request.method == "GET":
-            return httpx.Response(404)
+            return httpx.Response(404, json={"error": {"code": "account_not_found"}})
         return httpx.Response(201, json={"id": "000001", "accounting_records": []})
 
     transport = httpx.MockTransport(datev_that_accepts_anything)
@@ -168,7 +209,7 @@ def test_debit_or_credit_follows_the_account_and_kind(
         return httpx.Response(500)
 
     booking = a_booking(account=account, kind=kind, original_document_number="X-1")
-    with pytest.raises(DatevUnavailable):
+    with pytest.raises(BookingOutcomeUnknown):
         gateway_answering(record).submit_booking(booking)
 
     assert b'"debit_credit_identifier":"%s"' % side.encode() in sent[-1].content
@@ -182,10 +223,77 @@ def test_bookings_go_to_the_fiscal_year_of_the_document_date() -> None:
         paths.append(request.url.path)
         return httpx.Response(500)
 
-    with pytest.raises(DatevUnavailable):
+    with pytest.raises(BookingOutcomeUnknown):
         gateway_answering(record).submit_booking(a_booking(document_date=date(2025, 12, 31)))
 
     assert "/fiscal-years/20250101/" in paths[-1]
+
+
+@pytest.mark.req("PR-04")
+def test_history_is_read_one_fiscal_year_at_a_time() -> None:
+    asked: list[tuple[str, str, str]] = []
+
+    def record(request: httpx.Request) -> httpx.Response:
+        params = request.url.params
+        asked.append((request.url.path.split("/")[-2], params["date_from"], params["date_to"]))
+        return httpx.Response(200, json=[])
+
+    gateway_answering(record).list_postings(70001, date(2024, 11, 1), date(2026, 2, 15))
+
+    assert asked == [
+        ("20240101", "2024-11-01", "2024-12-31"),
+        ("20250101", "2025-01-01", "2025-12-31"),
+        ("20260101", "2026-01-01", "2026-02-15"),
+    ]
+
+
+@pytest.mark.req("VM-03", "EX-01")
+def test_a_wrong_client_is_an_error_not_a_missing_account(fake: TestClient) -> None:
+    gateway = DatevConnectGateway(fake, "wrong-client")
+
+    with pytest.raises(DatevError):
+        gateway.get_vendor(70001)
+    with pytest.raises(DatevError):
+        gateway.get_customer(10001)
+    with pytest.raises(DatevError):
+        gateway.get_booking("20260101:000001")
+    with pytest.raises(DatevError):
+        gateway.submit_booking(a_booking())
+
+
+@pytest.mark.req("VM-03", "EX-01")
+@pytest.mark.parametrize(
+    "answer",
+    [
+        httpx.Response(404),
+        httpx.Response(404, text="Not Found"),
+        httpx.Response(404, json={"error": {"code": "fiscal_year_not_found"}}),
+    ],
+)
+def test_any_other_not_found_is_an_error(answer: httpx.Response) -> None:
+    def respond(request: httpx.Request) -> httpx.Response:
+        return answer
+
+    transport = httpx.MockTransport(respond)
+    gateway = DatevConnectGateway(
+        httpx.Client(transport=transport, base_url="http://datev"), DEFAULT_CLIENT_ID
+    )
+
+    with pytest.raises(DatevError):
+        gateway.get_vendor(70001)
+    with pytest.raises(DatevError):
+        gateway.get_booking("20260101:000001")
+
+
+@pytest.mark.req("BK-06", "IN-10")
+def test_the_fake_refuses_a_repeated_document_number(gateway: DatevConnectGateway) -> None:
+    """Fake only: real DATEV may only warn, so ARGUS checks itself (#41)."""
+    gateway.submit_booking(a_booking())
+
+    with pytest.raises(BookingRejected) as rejected:
+        gateway.submit_booking(a_booking(case_id="case-2"))
+
+    assert rejected.value.reason is RejectionReason.DUPLICATE_DOCUMENT_NUMBER
 
 
 def test_fiscal_year_ids_are_the_first_day() -> None:

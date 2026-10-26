@@ -103,8 +103,8 @@ def _error(status: int, code: str, message: str) -> JSONResponse:
     return JSONResponse(status_code=status, content={"error": {"code": code, "message": message}})
 
 
-def _not_found(what: str) -> JSONResponse:
-    return _error(404, "not_found", f"{what} not found")
+def _not_found(code: str, what: str) -> JSONResponse:
+    return _error(404, code, f"{what} not found")
 
 
 class _ClosedUntil(BaseModel):
@@ -132,7 +132,7 @@ def create_fake_datev(
         return await call_next(request)
 
     def unknown_client(client: str) -> JSONResponse | None:
-        return None if client == client_id else _not_found(f"client {client}")
+        return None if client == client_id else _not_found("client_not_found", f"client {client}")
 
     def all_accounts() -> dict[int, dict[str, Any]]:
         return {**state.seed.creditors, **state.seed.debitors}
@@ -148,7 +148,9 @@ def create_fake_datev(
     @app.get(f"{base}/creditors/{{number}}", response_model=None)
     def creditor(client: str, fiscal_year: str, number: int) -> Any:
         found = state.seed.creditors.get(number)
-        return unknown_client(client) or found or _not_found(f"creditor {number}")
+        return (
+            unknown_client(client) or found or _not_found("account_not_found", f"creditor {number}")
+        )
 
     @app.get(f"{base}/debitors", response_model=None)
     def debitors(client: str, fiscal_year: str) -> Any:
@@ -157,7 +159,9 @@ def create_fake_datev(
     @app.get(f"{base}/debitors/{{number}}", response_model=None)
     def debitor(client: str, fiscal_year: str, number: int) -> Any:
         found = state.seed.debitors.get(number)
-        return unknown_client(client) or found or _not_found(f"debitor {number}")
+        return (
+            unknown_client(client) or found or _not_found("account_not_found", f"debitor {number}")
+        )
 
     @app.get(f"{base}/account-postings", response_model=None)
     def account_postings(
@@ -233,7 +237,11 @@ def create_fake_datev(
     @app.get(f"{base}/accounting-sequences/{{sequence_id}}", response_model=None)
     def get_sequence(client: str, fiscal_year: str, sequence_id: str) -> Any:
         found = state.sequences.get(f"{fiscal_year}:{sequence_id}")
-        return unknown_client(client) or found or _not_found(f"sequence {sequence_id}")
+        return (
+            unknown_client(client)
+            or found
+            or _not_found("booking_not_found", f"sequence {sequence_id}")
+        )
 
     # Controls for tests, not part of DATEVconnect
 

@@ -2,6 +2,7 @@
 
 from argus.datev.datevconnect import DatevConnectGateway
 from argus.datev.gateway import (
+    BookingOutcomeUnknown,
     BookingRejected,
     DatevError,
     DatevGateway,
@@ -24,6 +25,7 @@ __all__ = [
     "BankAccount",
     "Booking",
     "BookingKind",
+    "BookingOutcomeUnknown",
     "BookingRecord",
     "BookingRejected",
     "BookingStatus",

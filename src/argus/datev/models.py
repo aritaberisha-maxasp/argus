@@ -69,7 +69,7 @@ class Booking(_Frozen):
     service_period_start: date | None = None
     service_period_end: date | None = None
     original_currency: str | None = None
-    original_gross: Decimal | None = Field(default=None, decimal_places=2)
+    original_gross: Decimal | None = Field(default=None, gt=0, decimal_places=2)
     voucher_link: str | None = None
     original_document_number: str | None = None
     description: str = Field(default="", max_length=60)
