@@ -10,7 +10,10 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115,<1",
+    "holidays>=0.60,<1",
     "pydantic>=2.9,<3",
+    # zoneinfo needs the IANA time zone data on hosts that do not ship it
+    "tzdata>=2024.1",
 ]
 
 [project.optional-dependencies]
