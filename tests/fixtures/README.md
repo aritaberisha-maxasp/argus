@@ -74,3 +74,7 @@ The generator is deterministic: the same input produces the same files, so a dif
 
 - The XRechnung and ZUGFeRD files follow the standards but have not been checked with an official validator. The ZUGFeRD PDF embeds `factur-x.xml` with the right metadata but is not a certified PDF/A-3.
 - There is no Wise CSV export yet (AC-7). It follows once the Wise spike (#4) confirms the format.
+
+## E-invoices for #28
+
+`einvoice/` holds two e-invoices written by hand for the e-invoice reader, in forms the generated documents do not cover: an XRechnung in CII syntax with an early payment discount (`X01`) and an XRechnung credit note in UBL (`X02`). Both pass the official KoSIT validator, like the generated XRechnung and ZUGFeRD files (`tests/contract/kosit`). They are not part of the 50 emails.
