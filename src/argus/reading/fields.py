@@ -57,6 +57,7 @@ class Flag(StrEnum):
     MODEL_NOT_CONFIRMED = "model_not_confirmed"
     SEVERAL_VALUES = "several_values"
     FAILED_CHECK = "failed_check"
+    FROM_MODEL = "from_model"  # an amount or IBAN only the language model located
 
 
 @dataclass(frozen=True)
