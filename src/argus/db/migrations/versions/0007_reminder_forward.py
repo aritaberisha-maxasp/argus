@@ -11,12 +11,12 @@ The database writes the audit events itself (``reminder_forward_drafted``,
 0004. The events hold IDs only, never the recipient, sender, subject or content (NF-03).
 Records cannot be deleted.
 
-Migrations 0005 (#91) and 0006 (#26) are reserved for stories built at the same time. Until
-they are merged this one follows 0004; whichever lands last moves its ``down_revision`` so the
-chain stays one line.
+Follows 0006, the filing of #26 (PR 92), which this story builds on: the email moves to the
+step ``routed`` with the route ``forward_reminder``. Migration 0005 is kept for #91; whichever
+of the two lands second follows the other so the chain stays one line.
 
 Revision ID: 0007
-Revises: 0004
+Revises: 0006
 Create Date: 2026-10-28
 """
 
@@ -25,7 +25,7 @@ from alembic import op
 from argus.db import run_script
 
 revision = "0007"
-down_revision = "0004"
+down_revision = "0006"
 branch_labels = None
 depends_on = None
 

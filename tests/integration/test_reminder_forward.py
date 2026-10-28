@@ -221,7 +221,12 @@ def test_a_reminder_is_forwarded_to_benjamin_with_its_original_attachment(app: E
     assert [data for _, data in forward.attachments] == [a.data for a in original]
     with app.connect() as connection:
         routed = get_email(connection, email.graph_message_id)
+        # With #26's migration 0006 in place, a routed email must carry its route.
+        route: str = connection.execute(
+            text("select route from mailbox_email where id = :id"), {"id": email.id}
+        ).scalar_one()
     assert routed is not None and routed.step is EmailStep.ROUTED
+    assert route == Route.FORWARD_REMINDER.value
 
 
 @pytest.mark.req("IN-05")

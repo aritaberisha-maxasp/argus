@@ -35,7 +35,7 @@ from sqlalchemy import Connection, Engine, text
 from argus.cases.model import Actor, CaseKind, CaseStatus, ExceptionReason
 from argus.cases.store import change_case, open_exception, unit_of_work
 from argus.intake.graph import GraphApiError, GraphCallRefused
-from argus.intake.records import EmailRecord, EmailStep
+from argus.intake.records import EmailRecord, EmailStep, mark_routed
 from argus.sorting.models import EmailToSort, Route, SortingDecision
 
 log = logging.getLogger("argus.intake.reminders")
@@ -254,14 +254,8 @@ def _finish(
             ).scalar_one()
             if first:  # the first reminder counts; a later one changes nothing
                 change_case(db, case_id, reminder_received_at=received)
-        db.execute(
-            text("update mailbox_email set step = :routed where id = :id and step = :classified"),
-            {
-                "routed": EmailStep.ROUTED.value,
-                "classified": EmailStep.CLASSIFIED.value,
-                "id": email.id,
-            },
-        )
+        if not mark_routed(db, email.id, Route.FORWARD_REMINDER):
+            raise RuntimeError(f"email {email.id} left step classified while being forwarded")
     return match
 
 

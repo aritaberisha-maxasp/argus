@@ -107,20 +107,26 @@ def check_token(token: SecretStr) -> None:
 def allowed_paths(
     base_path: str, mailbox: str, forward_to: str | None = None
 ) -> tuple[tuple[str, re.Pattern[str]], ...]:
-    """The only Graph calls ARGUS makes, all on the one mailbox. Later stories add moving and
-    deleting (ADR 0003), each with a review.
+    """The only Graph calls ARGUS makes, all on the one mailbox: list the Inbox, read an email,
+    find or create the ARGUS folders, move an email into one and delete an email (#26).
 
-    Forwarding (#27) is only allowed when a forward address is set: save a forward as a draft,
-    check whether a message is still a draft, and send a draft."""
+    Forwarding a payment reminder (#27) is only allowed when a forward address is set: save a
+    forward as a draft and send a draft. Reading a message, which shows whether it is still a
+    draft and who it goes to, is already allowed for #26."""
     user = re.escape(f"{base_path.rstrip('/')}/users/{quote(mailbox, safe='@')}")
     paths: tuple[tuple[str, re.Pattern[str]], ...] = (
         ("GET", re.compile(f"{user}/mailFolders/inbox/messages")),
         ("GET", re.compile(f"{user}/messages/{_MESSAGE_ID}/\\$value")),
+        ("GET", re.compile(f"{user}/messages/{_MESSAGE_ID}")),
+        ("GET", re.compile(f"{user}/mailFolders(/{_MESSAGE_ID}/childFolders)?")),
+        ("GET", re.compile(f"{user}/mailFolders/deleteditems")),
+        ("POST", re.compile(f"{user}/mailFolders(/{_MESSAGE_ID}/childFolders)?")),
+        ("POST", re.compile(f"{user}/messages/{_MESSAGE_ID}/move")),
+        ("DELETE", re.compile(f"{user}/messages/{_MESSAGE_ID}")),
     )
     if forward_to:
         paths += (
             ("POST", re.compile(f"{user}/messages/{_MESSAGE_ID}/createForward")),
-            ("GET", re.compile(f"{user}/messages/{_MESSAGE_ID}")),
             ("POST", re.compile(f"{user}/messages/{_MESSAGE_ID}/send")),
         )
     return paths
@@ -227,6 +233,7 @@ class GraphClient:
         self.forward_to = forward_to
         url = httpx.URL(base_url.rstrip("/") + "/")
         self._user = f"users/{quote(mailbox, safe='@')}"
+        self._deleted_items: str | None = None
         self._sleep = sleep
         self._http = httpx.Client(
             base_url=url,
@@ -250,10 +257,18 @@ class GraphClient:
     def __exit__(self, *_: object) -> None:
         self.close()
 
-    def _get(self, url: str, params: dict[str, str] | None = None) -> httpx.Response:
-        """GET with retries on 429 and 503, honouring Retry-After (Graph throttling)."""
+    def _send(
+        self,
+        method: str,
+        url: str,
+        params: dict[str, str] | None = None,
+        body: dict[str, str] | None = None,
+    ) -> httpx.Response:
+        """Send with retries on 429 and 503, honouring Retry-After (Graph throttling). Every
+        call ARGUS makes is safe to repeat: a move to the folder the email is already in, or a
+        second folder of the same name, changes nothing (see :meth:`create_folder`)."""
         for attempt in range(1, MAX_ATTEMPTS + 1):
-            response = self._http.get(url, params=params)
+            response = self._http.request(method, url, params=params, json=body)
             if response.status_code not in (429, 503) or attempt == MAX_ATTEMPTS:
                 break
             try:
@@ -261,15 +276,40 @@ class GraphClient:
             except ValueError:
                 wait = 5.0
             self._sleep(min(max(wait, 0.0), MAX_RETRY_AFTER))
-        _raise_for_error("GET", response)
         return response
 
     def _post(self, url: str, body: dict[str, Any] | None = None) -> httpx.Response:
         """POST once, without retries. A retried forward or send could act twice; the caller
         checks the draft instead and tries again on the next sweep (#27)."""
         response = self._http.post(url, json=body or {})
-        _raise_for_error("POST", response)
+        if response.is_error:
+            raise self._error(response)
         return response
+
+    @staticmethod
+    def _error(response: httpx.Response) -> GraphApiError:
+        try:
+            code = str(response.json()["error"]["code"])
+        except (ValueError, KeyError, TypeError):
+            code = ""
+        return GraphApiError(
+            response.request.method, response.request.url.path, response.status_code, code
+        )
+
+    def _checked(
+        self,
+        method: str,
+        url: str,
+        params: dict[str, str] | None = None,
+        body: dict[str, str] | None = None,
+    ) -> httpx.Response:
+        response = self._send(method, url, params, body)
+        if response.is_error:
+            raise self._error(response)
+        return response
+
+    def _get(self, url: str, params: dict[str, str] | None = None) -> httpx.Response:
+        return self._checked("GET", url, params)
 
     def list_inbox(self) -> Iterator[InboxMessage]:
         """Every email in the Inbox, oldest first, following Graph's paging."""
@@ -292,13 +332,13 @@ class GraphClient:
 
     def get_raw(self, message_id: str) -> bytes:
         """The email exactly as received, as an .eml file with every attachment in it."""
-        _check_message_id(message_id)
+        _check_id(message_id)
         return self._get(f"{self._user}/messages/{message_id}/$value").content
 
     def create_forward(self, message_id: str, comment: str) -> str:
         """Save a forward of this email to the reminder address as a draft, with every original
         attachment, and return the draft's immutable ID. Nothing is sent yet."""
-        _check_message_id(message_id)
+        _check_id(message_id)
         if not self.forward_to:
             raise GraphCallRefused("refused Graph forward: no forward address is set")
         body = {
@@ -313,7 +353,7 @@ class GraphClient:
 
     def is_draft(self, message_id: str) -> bool:
         """Whether this message is still an unsent draft."""
-        _check_message_id(message_id)
+        _check_id(message_id)
         answer = self._get(f"{self._user}/messages/{message_id}", {"$select": "isDraft"}).json()
         return bool(answer.get("isDraft")) if isinstance(answer, dict) else False
 
@@ -323,7 +363,7 @@ class GraphClient:
         The draft sits in the shared mailbox until it is sent, so a person could change it in
         the meantime. Right before sending, ARGUS reads its recipients again and refuses unless
         it goes to the one forward address only, with no copy (compliance review of PR 93)."""
-        _check_message_id(message_id)
+        _check_id(message_id)
         answer = self._get(
             f"{self._user}/messages/{message_id}",
             {"$select": "isDraft,toRecipients,ccRecipients,bccRecipients"},
@@ -333,6 +373,88 @@ class GraphClient:
             log.warning("Refused to send draft %s: %s", message_id, problem)
             raise GraphCallRefused(f"refused to send the draft: {problem}")
         self._post(f"{self._user}/messages/{message_id}/send")
+
+    def _folders_url(self, parent_id: str | None) -> str:
+        if parent_id is None:
+            return f"{self._user}/mailFolders"
+        _check_id(parent_id)
+        return f"{self._user}/mailFolders/{parent_id}/childFolders"
+
+    def find_folder(self, parent_id: str | None, name: str) -> str | None:
+        """The ID of the folder called ``name`` directly under ``parent_id``, or at the top of
+        the mailbox when ``parent_id`` is None. None when there is no such folder."""
+        _check_folder_name(name)
+        page = self._get(
+            self._folders_url(parent_id),
+            {"$filter": f"displayName eq '{name}'", "$select": "id,displayName"},
+        ).json()
+        for item in page.get("value", []):
+            if item.get("displayName") == name:
+                return str(item["id"])
+        return None
+
+    def create_folder(self, parent_id: str | None, name: str) -> str:
+        """Create the folder and return its ID. If it was created meanwhile (Graph answers
+        409 ErrorFolderExists), return the one that is there."""
+        _check_folder_name(name)
+        response = self._send("POST", self._folders_url(parent_id), body={"displayName": name})
+        if response.status_code == 409:
+            found = self.find_folder(parent_id, name)
+            if found is not None:
+                return found
+        if response.is_error:
+            raise self._error(response)
+        return str(response.json()["id"])
+
+    def folder_of(self, message_id: str) -> str | None:
+        """The ID of the folder the email is in, or None when it is not in the mailbox."""
+        _check_id(message_id)
+        response = self._send(
+            "GET", f"{self._user}/messages/{message_id}", {"$select": "parentFolderId"}
+        )
+        if response.status_code == 404:
+            return None
+        if response.is_error:
+            raise self._error(response)
+        return str(response.json()["parentFolderId"])
+
+    def move(self, message_id: str, folder_id: str) -> None:
+        """Move the email into the folder. With immutable IDs it keeps its ID."""
+        _check_id(message_id)
+        _check_id(folder_id)
+        moved = self._checked(
+            "POST", f"{self._user}/messages/{message_id}/move", body={"destinationId": folder_id}
+        ).json()
+        if moved.get("id") != message_id:
+            raise GraphApiError(
+                "POST", f"{self._user}/messages/{message_id}/move", 200, "IdChangedOnMove"
+            )
+
+    def deleted_items(self) -> str:
+        """The ID of the well known folder Deleted Items, read once."""
+        if self._deleted_items is None:
+            folder = self._get(f"{self._user}/mailFolders/deleteditems", {"$select": "id"})
+            self._deleted_items = str(folder.json()["id"])
+        return self._deleted_items
+
+    def delete_from(self, message_id: str, folder_id: str) -> bool:
+        """Delete the email, but only if it is in ``folder_id``. Graph moves it to Deleted
+        Items, where Exchange keeps it recoverable for at least 14 days (ADR 0003).
+
+        Returns False when the email was already deleted: it is in Deleted Items, or no longer
+        in the mailbox at all. An email in any other folder is refused, so a mistake can never
+        delete an invoice."""
+        parent = self.folder_of(message_id)
+        if parent is None or parent == self.deleted_items():
+            return False
+        if parent != folder_id:
+            raise GraphCallRefused("refused to delete an email that is not in ARGUS/Removed")
+        response = self._send("DELETE", f"{self._user}/messages/{message_id}")
+        if response.status_code == 404:
+            return False
+        if response.is_error:
+            raise self._error(response)
+        return True
 
 
 def _addresses(recipients: Any) -> list[Any]:
@@ -359,15 +481,12 @@ def draft_recipient_problem(message: Any, forward_to: str) -> str | None:
     return None
 
 
-def _check_message_id(message_id: str) -> None:
-    if not re.fullmatch(_MESSAGE_ID, message_id):
-        raise GraphCallRefused("refused Graph call: not a message ID")
+def _check_id(value: str) -> None:
+    if not re.fullmatch(_MESSAGE_ID, value):
+        raise GraphCallRefused("refused Graph call: not a Graph ID")
 
 
-def _raise_for_error(method: str, response: httpx.Response) -> None:
-    if response.is_error:
-        try:
-            code = str(response.json()["error"]["code"])
-        except (ValueError, KeyError, TypeError):
-            code = ""
-        raise GraphApiError(method, response.request.url.path, response.status_code, code)
+def _check_folder_name(name: str) -> None:
+    # The name goes into a $filter, so only plain names are allowed.
+    if not re.fullmatch(r"[A-Za-z][A-Za-z ]{0,63}", name):
+        raise GraphCallRefused("refused Graph call: not a plain folder name")

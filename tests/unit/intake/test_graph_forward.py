@@ -61,8 +61,6 @@ def test_without_a_forward_address_the_client_cannot_forward_or_send(app: FastAP
         graph.create_forward(message_id, "x")
     with pytest.raises(GraphCallRefused):
         graph.send_draft(message_id)
-    with pytest.raises(GraphCallRefused):
-        graph.is_draft(message_id)
     box: Mailbox = app.state.mailbox
     assert box.drafts == {}
 

@@ -14,14 +14,20 @@ Graph forwards in two calls: first it saves the forward as a draft, then it send
 
 1. **Save the draft.** Graph saves the forward with every attachment of the original. Nothing is sent yet.
 2. **Record the draft.** One short transaction records the draft's ID. The database allows only one forward record per email, so a second draft is never recorded.
-3. **Send the recorded draft.** Before sending, ARGUS asks Graph whether it is still a draft. Graph itself sends a draft only once.
-4. **Record that it was sent.** One short transaction marks the forward sent, marks the matched invoice cases and moves the email to `routed`.
+3. **Send the recorded draft.** Before sending, ARGUS asks Graph whether it is still a draft. Right before the send call it reads the draft's recipients again and refuses unless it goes to the reminder address alone, with no cc or bcc, because a person with access to the shared mailbox could change the draft in the meantime. Graph itself sends a draft only once.
+4. **Record that it was sent.** One short transaction marks the forward sent, marks the matched invoice cases and moves the email to `routed` with the route `forward_reminder` (#26). It also records whether ARGUS sent the draft (`sent`) or found it already sent (`found_sent`), so the log never claims ARGUS sent what a person sent from Outlook.
 
 | ARGUS stops after | What the next sweep does |
 |---|---|
 | step 1 | saves a new draft and sends that one. The first draft was never recorded, so it is never sent. It stays in the Drafts folder of the accounts mailbox. |
 | step 2 | finds the recorded draft and sends it |
-| step 3 | finds the draft is no longer a draft and only records it |
+| step 3 | finds the draft is no longer a draft and records it as `found_sent` |
+
+## When a person has to look
+
+If the recorded draft is gone (someone deleted it) or was changed (another recipient, a cc or a bcc), ARGUS sends nothing, saves no second draft and opens one exception on the email with the reason `forward_failed` (EX-01). The exception says what happened and what to check. While it is open, ARGUS leaves the email alone; once a person resolves it, the next sweep tries the recorded draft again. If Graph is unreachable or throttles, nothing is opened and the next sweep simply tries again.
+
+Graph's documentation does not say clearly whether a draft keeps its immutable ID once it is sent. If it does not, a crash right after ARGUS's own send would show up as "draft gone" and land in the queue instead of being recorded as `found_sent`. That is safe (nothing is sent twice) and is to be checked against the real mailbox with the Azure setup (#65).
 
 Graph is never called inside a transaction (PR #79 review), and Graph calls that send are not retried on throttling: the next sweep checks the draft and tries again instead.
 
@@ -40,7 +46,8 @@ The sender is not used yet, because vendor email addresses are not in the master
 The database writes every event itself, and the application cannot write them:
 
 - `reminder_forward_drafted` with the draft's Graph ID
-- `reminder_forwarded` with the draft's Graph ID, the matched case IDs and the number of unclear numbers
+- `reminder_forwarded` with the draft's Graph ID, the matched case IDs, the number of unclear numbers and the send outcome (`sent` or `found_sent`)
+- `exception_opened` when the draft is gone or was changed, with the problem and the draft's ID
 - `email_routed` from the email steps of #24
 - `case_changed` on each marked case, with the old and new `reminder_received_at`
 
@@ -51,4 +58,4 @@ The events hold IDs only, never the forward address, the sender, the subject or 
 - The sweep calls `forward_reminder` once sorting is wired into it (#91).
 - Filing the email out of the Inbox is #26.
 - Unsent drafts left by a crash after step 1 stay in Drafts. They are harmless; a later clean up could remove them.
-- Migration 0007 follows 0004 for now. 0005 (#91) and 0006 (#26) are built at the same time; whichever is merged last moves its `down_revision` so the chain is one line again.
+- Migration 0007 follows 0006 (#26, PR 92), so this story is merged after PR 92. 0005 is kept for #91; whichever of 0005 and the others lands second follows the other.
