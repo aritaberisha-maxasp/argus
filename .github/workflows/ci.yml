@@ -78,6 +78,36 @@ jobs:
       - name: Smoke test the Wise client against it
         run: python tools/smoke_wise_standin.py http://localhost:8080 "$WISE_STANDIN_TOKEN"
 
+  fake-datev:
+    name: DATEV contract tests on the Docker fake
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: pip install -e ".[dev]"
+      - name: Build the fake DATEV
+        run: docker build -f docker/fake-datev/Dockerfile -t argus-fake-datev .
+      - name: Start the fake DATEV
+        run: |
+          docker run -d --name fake-datev -p 58452:58452 argus-fake-datev
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:58452/health && exit 0
+            sleep 1
+          done
+          docker logs fake-datev
+          exit 1
+      - name: Contract tests
+        env:
+          ARGUS_DATEV_CONTRACT_URL: http://localhost:58452
+        run: pytest tests/contract -v
+      - name: Fake DATEV log
+        if: always()
+        run: docker logs fake-datev || true
+
   secrets:
     name: Secret scan
     runs-on: ubuntu-latest
