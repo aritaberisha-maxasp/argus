@@ -45,6 +45,7 @@ from argus.reading.text_rules import (
     document_kind,
     find_fields,
     iban_valid,
+    ibans,
     invoice_numbers,
     on_page,
     vat_rates,
@@ -163,6 +164,14 @@ def build_reading(
     if count > 1:
         # Two invoices in one file must never become one case silently (spike H04, IN-08).
         problems.append(f"the file holds {count} invoices")
+    stated = ibans(analysis.pages)
+    if len(stated) > 1:
+        # Which IBAN is paid is not ARGUS's to choose, whoever read it.
+        fields["iban_on_document"] = ReadField(
+            "iban_on_document",
+            flag=Flag.SEVERAL_VALUES,
+            note=f"the document states {len(stated)} IBANs: {', '.join(stated)}",
+        )
     rates = vat_rates(analysis.pages)
     if len(rates) > 1 and fields.get("vat_rate", ReadField("vat_rate")).source is Source.PAGE_TEXT:
         fields["vat_rate"] = ReadField(
@@ -280,8 +289,19 @@ def _add_from_model(
                 ),
             )
             continue
+        # Our rules confirmed the words, but the model chose them. Where money goes and how much
+        # is confirmed by a person (ADR 0006 point 3, QA on PR #94).
+        protected = name in PROTECTED_FIELDS
         fields[name] = ReadField(
-            name, value, Source.LANGUAGE_MODEL, page=proposal.page, words=proposal.words
+            name,
+            value,
+            Source.LANGUAGE_MODEL,
+            page=proposal.page,
+            words=proposal.words,
+            flag=Flag.FROM_MODEL if protected else None,
+            note="only the language model located this value, a person confirms it"
+            if protected
+            else None,
         )
 
 

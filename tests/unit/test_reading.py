@@ -378,6 +378,68 @@ def test_a_money_field_from_the_model_is_kept_only_when_our_label_rule_reads_it(
     assert gross.value == "1190.00"
     assert gross.source is Source.LANGUAGE_MODEL
     assert gross.page == 1 and gross.words == "Gesamtbetrag 1.190,00 EUR"
+    # The model chose which line is the gross amount, so a person confirms it.
+    assert gross.flag is Flag.FROM_MODEL
+
+
+@pytest.mark.req("PR-01", "NF-03")
+@pytest.mark.parametrize(
+    ("name", "value", "line", "quote"),
+    [
+        # QA on PR #94: a label inside a sentence, quoted alone, reads as that field.
+        (
+            "gross_amount",
+            "9999.00",
+            "Info: unser Umsatz Total 9.999,00 EUR im Jahr 2025",
+            "Total 9.999,00 EUR",
+        ),
+        (
+            "net_amount",
+            "5000.00",
+            "Hinweis: Ihr Rabatt Nettobetrag 5.000,00 EUR wurde verrechnet",
+            "Nettobetrag 5.000,00 EUR",
+        ),
+    ],
+)
+def test_a_money_field_only_the_model_located_is_never_kept_silently(
+    name: str, value: str, line: str, quote: str
+) -> None:
+    page = Page(1, f"Beispiel Lieferant GmbH\nRechnung\nRechnung Nr. 1\n{line}\n")
+    model = FixedModel({"name": name, "value": value, "page": 1, "words": quote})
+
+    reading = build_reading("attachment 1", "test", Analysis((page,)), model, ReadingSettings())
+
+    assert reading.fields[name].flag is Flag.FROM_MODEL
+    assert name in reading.flagged
+
+
+@pytest.mark.req("PR-01", "IN-02")
+def test_two_ibans_in_a_body_invoice_are_flagged_not_picked() -> None:
+    body = body_of("E16_rechnung-im-mailtext.eml").replace(
+        "Bankverbindung: IBAN DE49 0000 0006 0000 7000 06",
+        "Bankverbindung: IBAN DE49 0000 0006 0000 7000 06\n"
+        "Alternativ: IBAN: DE89 3704 0044 0532 0130 00",
+    )
+    assert "Alternativ" in body
+
+    reading = read_body(body)
+
+    assert reading is not None
+    iban = reading.fields["iban_on_document"]
+    assert iban.value is None
+    assert iban.flag is Flag.SEVERAL_VALUES
+
+
+@pytest.mark.req("PR-01")
+def test_two_ibans_are_flagged_even_when_document_intelligence_read_one() -> None:
+    result = json.loads((RECORDINGS / "D01.json").read_text())["analyzeResult"]
+    result["pages"][0]["lines"].append({"content": "Oder an IBAN DE89 3704 0044 0532 0130 00"})
+
+    reading = build_reading(
+        "attachment 1", "test", parse_analyze_result(result), None, ReadingSettings()
+    )
+
+    assert reading.fields["iban_on_document"].flag is Flag.SEVERAL_VALUES
 
 
 @pytest.mark.req("PR-01", "NF-03")
@@ -412,7 +474,9 @@ def test_the_quote_must_name_the_field_not_only_contain_the_value(
 
 @pytest.mark.req("PR-01")
 def test_an_iban_on_the_page_with_wrong_check_digits_is_flagged() -> None:
-    text = SPARSE_INVOICE + "IBAN DE45 0000 0002 0000 7000 01\n"
+    text = SPARSE_INVOICE.replace(
+        "Überweisung auf DE44 0000 0002 0000 7000 01", "IBAN DE45 0000 0002 0000 7000 01"
+    )
 
     reading = build_reading(
         "attachment 1", "test", Analysis((Page(1, text),)), None, ReadingSettings()

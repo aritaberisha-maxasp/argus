@@ -255,6 +255,20 @@ def vat_rates(pages: tuple[Page, ...]) -> list[str]:
     return rates
 
 
+def ibans(pages: tuple[Page, ...]) -> list[str]:
+    """Every IBAN the document states: after an IBAN label, or anywhere with valid check digits.
+    More than one means a person must say which one is paid (a direct debit invoice can show the
+    customer's own IBAN too)."""
+    found: list[str] = []
+    for page in pages:
+        labelled = [compact_iban(m[1]) for m in _LABELS["iban"].finditer(page.text)]
+        anywhere = [compact_iban(m[1]) for m in re.finditer(IBAN, page.text.upper())]
+        for iban in [*labelled, *(i for i in anywhere if iban_valid(i))]:
+            if iban not in found:
+                found.append(iban)
+    return found
+
+
 # ------------------------------------------------------------------ checking a proposed value
 
 
