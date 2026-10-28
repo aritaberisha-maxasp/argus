@@ -65,7 +65,20 @@ jobs:
           done
           docker logs azurite
           exit 1
+      # The official XRechnung validator (ADR 0006, #28). The e-invoice contract tests need it.
+      - name: Start the KoSIT validator
+        run: |
+          docker build -f docker/kosit-validator/Dockerfile -t argus-kosit-validator .
+          docker run -d --name kosit -p 8090:8080 argus-kosit-validator
+          for i in $(seq 1 120); do
+            curl -s -o /dev/null -X POST --data-binary '<a/>' http://localhost:8090/ && exit 0
+            sleep 1
+          done
+          docker logs kosit
+          exit 1
       - name: Tests
+        env:
+          ARGUS_KOSIT_URL: http://localhost:8090/
         run: pytest --cov=argus --cov-report=term
       - name: Fixture check
         run: python tests/fixtures/tools/check.py
@@ -145,7 +158,7 @@ jobs:
       - name: Contract tests
         env:
           ARGUS_DATEV_CONTRACT_URL: http://localhost:58452
-        run: pytest tests/contract -v
+        run: pytest tests/contract/datev -v
       - name: Fake DATEV log
         if: always()
         run: docker logs fake-datev || true
@@ -170,42 +183,3 @@ jobs:
       - name: Scan the git history
         run: ./gitleaks git --redact --no-banner --verbose --log-opts="--full-history HEAD" .
 
-  # TEMPORARY (#28): finds the KoSIT XRechnung configuration release and its checksum, so the
-  # validator image can pin it. Removed before the PR leaves draft.
-  kosit-discovery:
-    name: KoSIT discovery (temporary)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Download the newest configuration and the engine
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          curl -sSfL -o config.zip https://github.com/itplr-kosit/validator-configuration-xrechnung/releases/download/v2026-08-31/xrechnung-3.0.2-validator-configuration-2026-08-31.zip
-          echo "2530cd107c414511c5d0462ec10f886910395abfca820db82e83d70bf01221a8  config.zip" | sha256sum -c
-          unzip -l config.zip | grep -v "codelist\|/$" | awk '{print $4}' | grep -v "^resources/ubl/2.1/xsd/common"
-          unzip -o -q config.zip -d config
-          curl -sSfL -o validator.jar https://repo.maven.apache.org/maven2/de/kosit/validationtool/1.5.0/validationtool-1.5.0-standalone.jar
-          sha256sum validator.jar
-      - name: Try the daemon
-        run: |
-          cat config/docs/usage.md
-          cd config
-          nohup java -jar ../validator.jar -s "$PWD/scenarios.xml" -r "$PWD" -D -H 0.0.0.0 -P 8080 > ../daemon.log 2>&1 &
-          for i in $(seq 1 60); do curl -s -o /dev/null http://localhost:8080/ && break; sleep 1; done
-          cd ..
-          head -c 4000 daemon.log
-          curl -s -i http://localhost:8080/ | head -20
-          python3 -c "from pypdf import PdfReader" 2>/dev/null || pip install -q pypdf
-          python3 -c "
-          from pypdf import PdfReader
-          open('d09.xml','wb').write(PdfReader('tests/fixtures/documents/D09_Rechnung_BB-2026-1243_zugferd.pdf').attachments['factur-x.xml'][0])"
-          for f in tests/fixtures/documents/D08_Rechnung_BCH-26-10-0057_xrechnung.xml tests/fixtures/documents/D24_Rechnung_MA-2026-0104_xrechnung.xml d09.xml; do
-            echo "=== $f"
-            curl -s -i -X POST -H "Content-Type: application/xml" --data-binary @"$f" http://localhost:8080/ | head -c 6000
-            echo
-          done
-          echo "=== not an invoice"
-          curl -s -i -X POST -H "Content-Type: application/xml" --data-binary '<a/>' http://localhost:8080/ | head -c 3000
-          echo "=== broken"
-          curl -s -i -X POST -H "Content-Type: application/xml" --data-binary '<a>' http://localhost:8080/ | head -c 3000
