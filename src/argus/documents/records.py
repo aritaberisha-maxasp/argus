@@ -72,7 +72,10 @@ def record_document(
 
 def record_email_documents(connection: Connection, email_id: int, stored: StoredEmail) -> list[int]:
     """Record the raw email and its attachments. Returns the document IDs, raw email first.
-    An email has one raw file: recording different bytes for the same email is refused."""
+    An email has one raw file: recording different bytes for the same email is refused.
+
+    The same file attached twice to one email, even under two names, is one record on purpose:
+    the bytes are what GoBD keeps. It keeps the first file name and its ID appears twice."""
     ids = [record_document(connection, email_id, "email", stored.raw)]
     ids += [
         record_document(connection, email_id, "attachment", a.document, a.filename)
