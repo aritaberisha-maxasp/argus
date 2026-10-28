@@ -1,10 +1,12 @@
 """The invoice case store against a real PostgreSQL (issue #19, ADR 0005).
 
-The first six groups match the acceptance criteria of #19. The rest turn the review checks of
-docs/design/invoice-case/checks.sql into tests, so no later story can loosen a rule unnoticed.
+The first six groups match the acceptance criteria of #19. The middle part turns the review
+checks of docs/design/invoice-case/checks.sql into tests, so no later story can loosen a rule
+unnoticed. The last group matches the acceptance criteria of #21, the exception queue.
 """
 
 from collections.abc import Iterator
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -28,6 +30,7 @@ from argus.cases.store import (
     change_case,
     create_case,
     get_case,
+    list_open_exceptions,
     move_case,
     open_exception,
     record_event,
@@ -973,3 +976,227 @@ def test_a_temporary_table_cannot_stand_in_for_the_real_ones(app: Engine, owner:
     assert events_of(app, case_id)[-1] == "status_changed"
     with unit_of_work(app, INTAKE) as db:
         assert trace(db, case_id)[-1].to_status is S.BOOKED
+
+
+# 7. The exception queue (issue #21)
+
+# EX-02 word for word, mapped to the reason ARGUS stores. "Unknown vendor or customer" is two
+# reasons, so the queue can say which master data is missing.
+EX_02_REASONS = {
+    "uncertain classification": [ExceptionReason.UNCERTAIN_CLASSIFICATION],
+    "unreadable document": [ExceptionReason.UNREADABLE_DOCUMENT],
+    "unknown vendor or customer": [
+        ExceptionReason.UNKNOWN_VENDOR,
+        ExceptionReason.UNKNOWN_CUSTOMER,
+    ],
+    "vendor without approver": [ExceptionReason.VENDOR_WITHOUT_APPROVER],
+    "duplicate": [ExceptionReason.DUPLICATE],
+    "IBAN mismatch": [ExceptionReason.IBAN_MISMATCH],
+    "failed §14 UStG check": [ExceptionReason.INVOICE_CHECK_FAILED],
+    "booking error": [ExceptionReason.BOOKING_ERROR],
+    "unmatched bank transaction": [ExceptionReason.UNMATCHED_BANK_TRANSACTION],
+    "bank balance difference": [ExceptionReason.BANK_BALANCE_DIFFERENCE],
+}
+
+
+def open_ids(app: Engine, reason: ExceptionReason | None = None) -> list[int]:
+    with unit_of_work(app, BENJAMIN) as db:
+        return [e.id for e in list_open_exceptions(db, reason=reason)]
+
+
+@pytest.mark.req("EX-02")
+def test_every_ex_02_reason_and_customer_query_can_be_queued(app: Engine) -> None:
+    assert len(EX_02_REASONS) == 10
+    wanted = [r for reasons in EX_02_REASONS.values() for r in reasons]
+    wanted.append(ExceptionReason.CUSTOMER_QUERY)  # manual review for customer questions, #9
+
+    email_id = 800_000 + next(_counter)
+    with unit_of_work(app, INTAKE) as db:
+        opened = {
+            reason: open_exception(db, reason, f"test {reason}", email_id=email_id)
+            for reason in wanted
+        }
+
+    with unit_of_work(app, BENJAMIN) as db:
+        queued = {e.id: e.reason for e in list_open_exceptions(db) if e.email_id == email_id}
+    assert queued == {exception_id: reason for reason, exception_id in opened.items()}
+
+
+@pytest.mark.req("EX-01")
+@pytest.mark.parametrize(
+    "left", [S.RECEIVED, S.AWAITING_APPROVAL, S.APPROVED, S.BOOKED, S.IN_PAYMENT_RUN, S.PAID]
+)
+def test_opening_an_exception_stores_the_status_the_case_left(
+    app: Engine, left: CaseStatus
+) -> None:
+    case_id = new_case(app)
+    path = [S.RECEIVED, S.AWAITING_APPROVAL, S.APPROVED, S.BOOKED, S.IN_PAYMENT_RUN, S.PAID]
+    walk(app, case_id, *path[1 : path.index(left) + 1])
+
+    with unit_of_work(app, INTAKE) as db:
+        open_exception(db, ExceptionReason.BOOKING_ERROR, "test", case_id=case_id)
+        case = get_case(db, case_id)
+
+    assert (case.status, case.resume_status) == (S.EXCEPTION, left)
+    with unit_of_work(app, INTAKE) as db:
+        last = trace(db, case_id)[-1]
+    assert (last.event_type, last.from_status, last.to_status) == (
+        "status_changed",
+        left,
+        S.EXCEPTION,
+    )
+
+
+@pytest.mark.req("EX-01", "NF-01")
+def test_resolving_returns_the_case_and_both_steps_are_logged(app: Engine) -> None:
+    case_id = new_case(app)
+    walk(app, case_id, S.AWAITING_APPROVAL)
+    with unit_of_work(app, INTAKE) as db:
+        exception_id = open_exception(
+            db, ExceptionReason.VENDOR_WITHOUT_APPROVER, "no approver for 70001", case_id=case_id
+        )
+    with unit_of_work(app, BENJAMIN) as db:
+        resolve_exception(db, exception_id, Outcome.DATA_CORRECTED)
+        case = get_case(db, case_id)
+        events = [e for e in trace(db, case_id) if e.exception_id == exception_id or e.to_status]
+
+    assert (case.status, case.resume_status) == (S.AWAITING_APPROVAL, None)
+    opened, stopped, resolved, returned = events[-4:]
+    assert (opened.event_type, opened.actor) == ("exception_opened", str(INTAKE))
+    assert opened.details["reason"] == "vendor_without_approver"
+    assert (stopped.from_status, stopped.to_status) == (S.AWAITING_APPROVAL, S.EXCEPTION)
+    assert (resolved.event_type, resolved.actor) == ("exception_resolved", str(BENJAMIN))
+    assert resolved.details == {"reason": "vendor_without_approver", "outcome": "data_corrected"}
+    assert (returned.from_status, returned.to_status, returned.actor) == (
+        S.EXCEPTION,
+        S.AWAITING_APPROVAL,
+        str(BENJAMIN),
+    )
+
+
+@pytest.mark.req("EX-01", "NF-01")
+def test_resolving_can_close_the_case_and_both_steps_are_logged(app: Engine) -> None:
+    case_id = new_case(app)
+    with unit_of_work(app, INTAKE) as db:
+        exception_id = open_exception(
+            db, ExceptionReason.INVOICE_CHECK_FAILED, "no VAT ID on invoice", case_id=case_id
+        )
+    with unit_of_work(app, BENJAMIN) as db:
+        resolve_exception(
+            db,
+            exception_id,
+            Outcome.REJECTED,
+            case_to=S.CLOSED,
+            closed_reason=ClosedReason.REJECTED,
+        )
+        case = get_case(db, case_id)
+        events = trace(db, case_id)
+
+    assert (case.status, case.closed_reason) == (S.CLOSED, ClosedReason.REJECTED)
+    assert [e.event_type for e in events][-2:] == ["exception_resolved", "status_changed"]
+    assert events[-2].details["outcome"] == "rejected"
+    assert (events[-1].from_status, events[-1].to_status) == (S.EXCEPTION, S.CLOSED)
+    assert events[-1].details["closed_reason"]["new"] == "rejected"
+
+
+@pytest.mark.req("EX-01")
+def test_a_case_with_a_second_open_exception_stays_in_exception(app: Engine) -> None:
+    case_id = booked_invoice(app)
+    with unit_of_work(app, INTAKE) as db:
+        first = open_exception(db, ExceptionReason.DUPLICATE, "maybe RE-1 again", case_id=case_id)
+        second = open_exception(db, ExceptionReason.IBAN_MISMATCH, "IBAN differs", case_id=case_id)
+
+    with unit_of_work(app, BENJAMIN) as db:
+        resolve_exception(db, first, Outcome.NOT_A_DUPLICATE)
+    assert status_of(app, case_id) is S.EXCEPTION
+
+    for to in (S.BOOKED, S.IN_PAYMENT_RUN, S.CLOSED):
+        with (
+            pytest.raises(CaseRuleBroken, match="open exception"),
+            unit_of_work(app, BENJAMIN) as db,
+        ):
+            move_case(
+                db, case_id, expected=S.EXCEPTION, to=to, closed_reason=ClosedReason.WITHDRAWN
+            )
+    assert status_of(app, case_id) is S.EXCEPTION
+
+    with unit_of_work(app, BENJAMIN) as db:
+        resolve_exception(db, second, Outcome.FIXED_IN_DATEV)
+    assert status_of(app, case_id) is S.BOOKED
+
+
+@pytest.mark.req("EX-01")
+def test_the_queue_lists_open_exceptions_with_case_reason_age_and_detail(app: Engine) -> None:
+    case_id = booked_invoice(app)
+    email_id = 800_000 + next(_counter)
+    statement_id = 700_000 + next(_counter)
+    with unit_of_work(app, INTAKE) as db:
+        on_case = open_exception(
+            db, ExceptionReason.BOOKING_ERROR, "account 4980 is locked", case_id=case_id
+        )
+    with unit_of_work(app, INTAKE) as db:
+        on_email = open_exception(
+            db, ExceptionReason.UNREADABLE_DOCUMENT, "PDF is password protected", email_id=email_id
+        )
+        done = open_exception(
+            db, ExceptionReason.UNCERTAIN_CLASSIFICATION, "invoice or reminder?", email_id=email_id
+        )
+        on_statement = open_exception(
+            db,
+            ExceptionReason.BANK_BALANCE_DIFFERENCE,
+            "EUR 12.00 apart",
+            statement_id=statement_id,
+        )
+    with unit_of_work(app, BENJAMIN) as db:
+        resolve_exception(db, done, Outcome.CATEGORY_CHOSEN)
+
+    with unit_of_work(app, BENJAMIN) as db:
+        queue = {e.id: e for e in list_open_exceptions(db)}
+
+    assert done not in queue
+    mine = [i for i in queue if i in (on_case, on_email, on_statement)]
+    assert mine == [on_case, on_email, on_statement], "oldest first"
+
+    case_entry = queue[on_case]
+    assert case_entry.case_id == case_id
+    assert case_entry.case_kind is CaseKind.INCOMING_INVOICE
+    assert case_entry.resume_status is S.BOOKED
+    assert case_entry.reason is ExceptionReason.BOOKING_ERROR
+    assert case_entry.detail == "account 4980 is locked"
+    assert (case_entry.email_id, case_entry.statement_id) == (None, None)
+
+    email_entry, statement_entry = queue[on_email], queue[on_statement]
+    assert (email_entry.email_id, email_entry.case_id, email_entry.case_kind) == (
+        email_id,
+        None,
+        None,
+    )
+    assert email_entry.detail == "PDF is password protected"
+    assert statement_entry.statement_id == statement_id
+
+    assert case_entry.age >= email_entry.age >= statement_entry.age >= timedelta(0)
+    assert case_entry.age > timedelta(0)
+    with unit_of_work(app, BENJAMIN) as db:
+        now: datetime = db.execute(text("select clock_timestamp()")).scalar_one()
+    assert timedelta(0) <= now - (case_entry.opened_at + case_entry.age) < timedelta(seconds=5)
+
+
+@pytest.mark.req("EX-01")
+def test_the_queue_can_show_one_reason(app: Engine) -> None:
+    email_id = 800_000 + next(_counter)
+    with unit_of_work(app, INTAKE) as db:
+        query = open_exception(
+            db, ExceptionReason.CUSTOMER_QUERY, "asks for a copy", email_id=email_id
+        )
+        other = open_exception(
+            db, ExceptionReason.UNKNOWN_CUSTOMER, "not in DATEV", email_id=email_id
+        )
+
+    only_queries = open_ids(app, ExceptionReason.CUSTOMER_QUERY)
+    assert query in only_queries
+    assert other not in only_queries
+    with unit_of_work(app, BENJAMIN) as db:
+        assert all(
+            e.reason is ExceptionReason.CUSTOMER_QUERY
+            for e in list_open_exceptions(db, reason=ExceptionReason.CUSTOMER_QUERY)
+        )
