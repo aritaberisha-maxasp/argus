@@ -10,6 +10,8 @@ Test data for ARGUS. Everything here is invented. See the [test strategy](../../
 | `documents/` | Every invoice and letter on its own, and `expected.json` with the data ARGUS should extract from each invoice (PR-01) |
 | `master-data/` | `vendors.csv` (Kreditoren), `customers.csv` (Debitoren), `approvers.csv` (the ARGUS approver table, AP-01, AP-06, PY-13) and `roles.csv` (who approves above EUR 5,000, who gets reminders and exceptions) |
 | `tools/` | `generate.py` builds everything above except `datev/`, `check.py` checks it |
+| `readings/` | What a document reader gets out of the two readable scans (E07, E28), made from the same rows the generator drew. The unreadable scan (E46) has none on purpose. Replaced by the recorded Document Intelligence answers of #29 |
+| `model-answers/` | `answers.json`, the recorded language model answer for each email, keyed by Message-ID. Written by hand until they can be recorded from Azure OpenAI ([email sorting](../../docs/design/email-sorting.md)) |
 | `datev/` | `postings.csv`, past bookings the fake DATEV serves as booking history (PR-04). Written by hand, see [the DATEV gateway](../../docs/design/datev-gateway.md) |
 
 ## The 50 emails

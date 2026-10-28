@@ -1,0 +1,112 @@
+"""Turn the fixture emails into the input of the sorting (IN-04).
+
+This stands in for the mailbox sweep (#24) and the document readers (#28, #29) until they are
+built: PDFs are read with pypdf, e-invoice XML is read just enough to name seller and buyer,
+and the two readable scans use a recorded reading in ``tests/fixtures/readings``.
+"""
+
+import csv
+import email
+import io
+import re
+import xml.etree.ElementTree as ET
+from email import policy
+from email.message import EmailMessage
+from email.utils import parseaddr
+from pathlib import Path
+
+import pypdf
+
+from argus.sorting import Attachment, EmailToSort, SortingConfig
+
+FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
+EMAILS = FIXTURES / "emails"
+READINGS = FIXTURES / "readings"
+MODEL_ANSWERS = FIXTURES / "model-answers" / "answers.json"
+
+# Type codes of EN 16931: 380 invoice, 381 credit note, 384 corrected invoice.
+TITLE_FOR_TYPE_CODE = {"380": "Rechnung", "381": "Gutschrift", "384": "Rechnungskorrektur"}
+
+
+def fixture_config() -> SortingConfig:
+    def names(file: str) -> tuple[str, ...]:
+        with (FIXTURES / "master-data" / file).open(encoding="utf-8") as f:
+            return tuple(row["name"] for row in csv.DictReader(f))
+
+    return SortingConfig(
+        own_domain="maxasp.example",
+        invoicing_agent="rechnungen@maxasp.example",
+        vendors=names("vendors.csv"),
+        customers=names("customers.csv"),
+    )
+
+
+def manifest() -> list[dict[str, str]]:
+    with (EMAILS / "manifest.csv").open(encoding="utf-8") as f:
+        return list(csv.DictReader(f))
+
+
+def read_fixture_email(path: Path) -> EmailToSort:
+    message = email.message_from_bytes(path.read_bytes(), policy=policy.default)
+    assert isinstance(message, EmailMessage)
+    name, address = parseaddr(str(message.get("From", "")))
+    part = message.get_body(preferencelist=("plain", "html"))
+    body = part.get_content() if part is not None else ""
+    if part is not None and part.get_content_type() == "text/html":
+        body = re.sub(r"<[^>]+>", " ", body)
+    attachments = []
+    for p in message.iter_attachments():
+        filename, data = p.get_filename() or "attachment", p.get_payload(decode=True)
+        assert isinstance(data, bytes)
+        text = _read(filename, p.get_content_type(), data)
+        attachments.append(Attachment(filename, p.get_content_type(), text))
+    return EmailToSort(
+        message_id=str(message.get("Message-ID", "")).strip(),
+        sender_address=address.lower(),
+        sender_name=name,
+        subject=str(message.get("Subject", "")),
+        body=body,
+        headers={key.lower(): str(value) for key, value in message.items()},
+        attachments=tuple(attachments),
+    )
+
+
+def _read(filename: str, content_type: str, data: bytes) -> str | None:
+    if content_type == "application/pdf":
+        reader = pypdf.PdfReader(io.BytesIO(data))
+        return "\n".join(page.extract_text() or "" for page in reader.pages)
+    if content_type in ("application/xml", "text/xml"):
+        return _einvoice_text(data)
+    # A scan: the recorded reading, or nothing when the scan cannot be read (E46).
+    reading = READINGS / f"{filename}.txt"
+    return reading.read_text(encoding="utf-8") if reading.exists() else None
+
+
+def _einvoice_text(data: bytes) -> str | None:
+    if b"<!DOCTYPE" in data.upper():
+        return None
+    # Only our own fixtures, and a DTD is refused above.
+    root = ET.fromstring(data)  # noqa: S314
+
+    def first(*local_names: str) -> str:
+        for element in root.iter():
+            if element.tag.rpartition("}")[2] in local_names and (element.text or "").strip():
+                return element.text.strip()  # type: ignore[union-attr]
+        return ""
+
+    def party_name(tag: str) -> str:
+        for element in root.iter():
+            if element.tag.rpartition("}")[2] == tag:
+                for inner in element.iter():
+                    local = inner.tag.rpartition("}")[2]
+                    if local in ("RegistrationName", "Name") and (inner.text or "").strip():
+                        return inner.text.strip()  # type: ignore[union-attr]
+        return ""
+
+    seller = party_name("AccountingSupplierParty") or party_name("SellerTradeParty")
+    buyer = party_name("AccountingCustomerParty") or party_name("BuyerTradeParty")
+    code = first("InvoiceTypeCode", "CreditNoteTypeCode", "TypeCode")
+    number = first("ID")
+    # Laid out like the PDF copies: seller, its address line, its VAT ID, then the buyer.
+    lines = [seller, "(address)", "USt-IdNr. (in the XML)", buyer]
+    return "\n".join([*lines, TITLE_FOR_TYPE_CODE.get(code, "Rechnung"), f"Nummer: {number}"])

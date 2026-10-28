@@ -1,0 +1,711 @@
+{
+  "<E01.buerobedarf-rechnung@fixtures.argus.example>": {
+    "category": "incoming_invoice",
+    "confidence": 0.97,
+    "invoices": [
+      {
+        "issuer": "Muster Bürobedarf GmbH",
+        "number": "BB-2026-1187",
+        "document": "Rechnung_BB-2026-1187.pdf"
+      }
+    ],
+    "evidence": [
+      "Rechnung BB-2026-1187",
+      "Muster Bürobedarf GmbH",
+      "USt-IdNr. DE012345601",
+      "Sehr geehrte Damen und Herren,"
+    ]
+  },
+  "<E02.cloud-hosting-rechnung@fixtures.argus.example>": {
+    "category": "incoming_invoice",
+    "confidence": 0.97,
+    "invoices": [
+      {
+        "issuer": "Beispiel Cloud Hosting GmbH",
+        "number": "BCH-26-10-0042",
+        "document": "Rechnung_BCH-26-10-0042.pdf"
+      }
+    ],
+    "evidence": [
+      "Ihre Rechnung BCH-26-10-0042 für Oktober 2026",
+      "Beispiel Cloud Hosting GmbH",
+      "USt-IdNr. DE012345602",
+      "Ihre aktuelle Rechnung finden Sie im Anhang."
+    ]
+  },
+  "<E03.miete-lastschrift@fixtures.argus.example>": {
+    "category": "incoming_invoice",
+    "confidence": 0.97,
+    "invoices": [
+      {
+        "issuer": "Muster Immobilien Verwaltung KG",
+        "number": "MV-2026-11-007",
+        "document": "Rechnung_MV-2026-11-007.pdf"
+      }
+    ],
+    "evidence": [
+      "Mietrechnung November 2026",
+      "Muster Immobilien Verwaltung KG",
+      "USt-IdNr. DE012345603",
+      "Sehr geehrte Damen und Herren,"
+    ]
+  },
+  "<E04.software-uk-invoice-gbp@fixtures.argus.example>": {
+    "category": "incoming_invoice",
+    "confidence": 0.97,
+    "invoices": [
+      {
+        "issuer": "Example Software Ltd",
+        "number": "ESL-INV-10293",
+        "document": "Invoice_ESL-INV-10293.pdf"
+      }
+    ],
+    "evidence": [
+      "Invoice ESL-INV-10293 from Example Software Ltd",
+      "Example Software Ltd",
+      "VAT ID GB000000004",
+      "Please find attached invoice ESL-INV-10293 for your annual team licence."
+    ]
+  },
+  "<E05.beratung-ueber-5000@fixtures.argus.example>": {
+    "category": "incoming_invoice",
+    "confidence": 0.97,
+    "invoices": [
+      {
+        "issuer": "Beispiel Beratung Partner mbB",
+        "number": "BBP-2026-0318",
+        "document": "Rechnung_BBP-2026-0318.pdf"
+      }
+    ],
+    "evidence": [
+      "Rechnung BBP-2026-0318 Beratungsleistungen September",
+      "Beispiel Beratung Partner mbB",
+      "USt-IdNr. DE012345605",
+      "Sehr geehrte Damen und Herren,"
+    ]
+  },
+  "<E06.telekom-neue-bankverbindung@fixtures.argus.example>": {
+    "category": "incoming_invoice",
+    "confidence": 0.97,
+    "invoices": [
+      {
+        "issuer": "Muster Telekom Service GmbH",
+        "number": "MTS-2026-558201",
+        "document": "Rechnung_MTS-2026-558201.pdf"
+      }
+    ],
+    "evidence": [
+      "Rechnung MTS-2026-558201 und neue Bankverbindung",
+      "Muster Telekom Service GmbH",
+      "USt-IdNr. DE012345606",
+      "Sehr geehrte Damen und Herren,"
+    ]
+  },
+  "<E07.reinigung-scan@fixtures.argus.example>": {
+    "category": "incoming_invoice",
+    "confidence": 0.93,
+    "invoices": [
+      {
+        "issuer": "Beispiel Reinigung GmbH",
+        "number": "R-2026-0931",
+        "document": "Scan_2026-10-01.jpg"
+      }
+    ],
+    "evidence": [
+      "Rechnung September",
+      "Beispiel Reinigung GmbH",
+      "USt-IdNr. DE012345607",
+      "anbei die Rechnung als Scan."
+    ]
+  },
+  "<E08.cloud-hosting-xrechnung@fixtures.argus.example>": {
+    "category": "incoming_invoice",
+    "confidence": 0.97,
+    "invoices": [
+      {
+        "issuer": "Beispiel Cloud Hosting GmbH",
+        "number": "BCH-26-10-0057",
+        "document": "Rechnung_BCH-26-10-0057_xrechnung.xml"
+      }
+    ],
+    "evidence": [
+      "XRechnung BCH-26-10-0057",
+      "Beispiel Cloud Hosting GmbH",
+      "(address)",
+      "anbei erhalten Sie Ihre Rechnung als XRechnung."
+    ]
+  },
+  "<E09.buerobedarf-zugferd@fixtures.argus.example>": {
+    "category": "incoming_invoice",
+    "confidence": 0.97,
+    "invoices": [
+      {
+        "issuer": "Muster Bürobedarf GmbH",
+        "number": "BB-2026-1243",
+        "document": "Rechnung_BB-2026-1243_zugferd.pdf"
+      }
+    ],
+    "evidence": [
+      "Rechnung BB-2026-1243 (ZUGFeRD)",
+      "Muster Bürobedarf GmbH",
+      "USt-IdNr. DE012345601",
+      "Sehr geehrte Damen und Herren,"
+    ]
+  },
+  "<E10.buerobedarf-gutschrift@fixtures.argus.example>": {
+    "category": "incoming_invoice",
+    "confidence": 0.97,
+    "invoices": [
+      {
+        "issuer": "Muster Bürobedarf GmbH",
+        "number": "GS-BB-2026-0057",
+        "document": "Gutschrift_GS-BB-2026-0057.pdf"
+      }
+    ],
+    "evidence": [
+      "Gutschrift GS-BB-2026-0057",
+      "Muster Bürobedarf GmbH",
+      "USt-IdNr. DE012345601",
+      "Sehr geehrte Damen und Herren,"
+    ]
+  },
+  "<E11.software-uk-credit-note@fixtures.argus.example>": {
+    "category": "incoming_invoice",
+    "confidence": 0.97,
+    "invoices": [
+      {
+        "issuer": "Example Software Ltd",
+        "number": "ESL-CN-00412",
+        "document": "Credit_note_ESL-CN-00412.pdf"
+      }
+    ],
+    "evidence": [
+      "Credit note ESL-CN-00412",
+      "Example Software Ltd",
+      "VAT ID GB000000004",
+      "As agreed we have reduced your licence by 2 seats. Please find the credit note attached."
+    ]
+  },
+  "<E12.unbekannter-lieferant@fixtures.argus.example>": {
+    "category": "incoming_invoice",
+    "confidence": 0.95,
+    "invoices": [
+      {
+        "issuer": "Beispiel Druckerei GmbH",
+        "number": "DR-2026-0815",
+        "document": "Rechnung_DR-2026-0815.pdf"
+      }
+    ],
+    "evidence": [
+      "Rechnung DR-2026-0815 Flyer und Visitenkarten",
+      "Beispiel Druckerei GmbH",
+      "USt-IdNr. DE012345609",
+      "Sehr geehrte Damen und Herren,"
+    ]
+  },
+  "<E13.lieferant-ohne-freigeber@fixtures.argus.example>": {
+    "category": "incoming_invoice",
+    "confidence": 0.97,
+    "invoices": [
+      {
+        "issuer": "Muster Logistik GmbH",
+        "number": "ML-2026-30412",
+        "document": "Rechnung_ML-2026-30412.pdf"
+      }
+    ],
+    "evidence": [
+      "Rechnung ML-2026-30412",
+      "Muster Logistik GmbH",
+      "USt-IdNr. DE012345608",
+      "Sehr geehrte Damen und Herren,"
+    ]
+  },
+  "<E14.drei-rechnungen-eine-mail@fixtures.argus.example>": {
+    "category": "incoming_invoice",
+    "confidence": 0.97,
+    "invoices": [
+      {
+        "issuer": "Beispiel Reinigung GmbH",
+        "number": "R-2026-0932",
+        "document": "Rechnung_R-2026-0932.pdf"
+      },
+      {
+        "issuer": "Beispiel Reinigung GmbH",
+        "number": "R-2026-0933",
+        "document": "Rechnung_R-2026-0933.pdf"
+      },
+      {
+        "issuer": "Beispiel Reinigung GmbH",
+        "number": "R-2026-0934",
+        "document": "Rechnung_R-2026-0934.pdf"
+      }
+    ],
+    "evidence": [
+      "Rechnungen R-2026-0932, R-2026-0933, R-2026-0934",
+      "Beispiel Reinigung GmbH",
+      "USt-IdNr. DE012345607",
+      "Max ASP GmbH",
+      "Testallee 1"
+    ]
+  },
+  "<E15.doppelte-rechnung@fixtures.argus.example>": {
+    "category": "incoming_invoice",
+    "confidence": 0.97,
+    "invoices": [
+      {
+        "issuer": "Muster Bürobedarf GmbH",
+        "number": "BB-2026-1187",
+        "document": "Rechnung_BB-2026-1187.pdf"
+      }
+    ],
+    "evidence": [
+      "Rechnungskopie BB-2026-1187",
+      "Muster Bürobedarf GmbH",
+      "USt-IdNr. DE012345601",
+      "Sehr geehrte Damen und Herren,"
+    ]
+  },
+  "<E16.rechnung-im-mailtext@fixtures.argus.example>": {
+    "category": "incoming_invoice",
+    "confidence": 0.97,
+    "invoices": [
+      {
+        "issuer": "Muster Telekom Service GmbH",
+        "number": "MTS-2026-560017",
+        "document": "body"
+      }
+    ],
+    "evidence": [
+      "Ihre Rechnung MTS-2026-560017",
+      "hier Ihre Rechnung. Bitte überweisen Sie den Betrag fristgerecht."
+    ]
+  },
+  "<E17.ausgang-inland@fixtures.argus.example>": {
+    "category": "outgoing_invoice",
+    "confidence": 0.98,
+    "invoices": [
+      {
+        "issuer": "Max ASP GmbH",
+        "number": "MA-2026-0101",
+        "document": "Rechnung_MA-2026-0101.pdf"
+      }
+    ],
+    "evidence": [
+      "Ausgangsrechnung MA-2026-0101 an Beispiel Handel GmbH",
+      "Max ASP GmbH",
+      "USt-IdNr. DE099000001",
+      "Automatisch erzeugt vom Rechnungsagenten."
+    ]
+  },
+  "<E18.ausgang-eu-reverse-charge@fixtures.argus.example>": {
+    "category": "outgoing_invoice",
+    "confidence": 0.98,
+    "invoices": [
+      {
+        "issuer": "Max ASP GmbH",
+        "number": "MA-2026-0102",
+        "document": "Invoice_MA-2026-0102.pdf"
+      }
+    ],
+    "evidence": [
+      "Ausgangsrechnung MA-2026-0102 an Example Retail BV",
+      "Max ASP GmbH",
+      "VAT ID DE099000001",
+      "Automatisch erzeugt vom Rechnungsagenten."
+    ]
+  },
+  "<E19.ausgang-usa-usd@fixtures.argus.example>": {
+    "category": "outgoing_invoice",
+    "confidence": 0.98,
+    "invoices": [
+      {
+        "issuer": "Max ASP GmbH",
+        "number": "MA-2026-0103",
+        "document": "Invoice_MA-2026-0103.pdf"
+      }
+    ],
+    "evidence": [
+      "Ausgangsrechnung MA-2026-0103 an Example Tech Inc",
+      "Max ASP GmbH",
+      "VAT ID DE099000001",
+      "Automatisch erzeugt vom Rechnungsagenten."
+    ]
+  },
+  "<E20.ausgang-gutschrift@fixtures.argus.example>": {
+    "category": "outgoing_invoice",
+    "confidence": 0.98,
+    "invoices": [
+      {
+        "issuer": "Max ASP GmbH",
+        "number": "GS-2026-0011",
+        "document": "Gutschrift_GS-2026-0011.pdf"
+      }
+    ],
+    "evidence": [
+      "Gutschrift GS-2026-0011 an Beispiel Handel GmbH",
+      "Max ASP GmbH",
+      "USt-IdNr. DE099000001",
+      "Automatisch erzeugt vom Rechnungsagenten."
+    ]
+  },
+  "<E21.ausgang-xrechnung@fixtures.argus.example>": {
+    "category": "outgoing_invoice",
+    "confidence": 0.98,
+    "invoices": [
+      {
+        "issuer": "Max ASP GmbH",
+        "number": "MA-2026-0104",
+        "document": "Rechnung_MA-2026-0104.pdf"
+      }
+    ],
+    "evidence": [
+      "Ausgangsrechnung MA-2026-0104 an Muster Stadtwerke GmbH",
+      "Max ASP GmbH",
+      "(address)",
+      "USt-IdNr. DE099000001",
+      "Muster Stadtwerke GmbH"
+    ]
+  },
+  "<E22.ausgang-unbekannter-kunde@fixtures.argus.example>": {
+    "category": "outgoing_invoice",
+    "confidence": 0.98,
+    "invoices": [
+      {
+        "issuer": "Max ASP GmbH",
+        "number": "MA-2026-0105",
+        "document": "Rechnung_MA-2026-0105.pdf"
+      }
+    ],
+    "evidence": [
+      "Ausgangsrechnung MA-2026-0105 an Beispiel Neukunde GmbH",
+      "Max ASP GmbH",
+      "USt-IdNr. DE099000001",
+      "Automatisch erzeugt vom Rechnungsagenten."
+    ]
+  },
+  "<E23.ausgang-nummernluecke@fixtures.argus.example>": {
+    "category": "outgoing_invoice",
+    "confidence": 0.98,
+    "invoices": [
+      {
+        "issuer": "Max ASP GmbH",
+        "number": "MA-2026-0107",
+        "document": "Rechnung_MA-2026-0107.pdf"
+      }
+    ],
+    "evidence": [
+      "Ausgangsrechnung MA-2026-0107 an Beispiel Handel GmbH",
+      "Max ASP GmbH",
+      "USt-IdNr. DE099000001",
+      "Automatisch erzeugt vom Rechnungsagenten."
+    ]
+  },
+  "<E24.ausgang-storno@fixtures.argus.example>": {
+    "category": "outgoing_invoice",
+    "confidence": 0.98,
+    "invoices": [
+      {
+        "issuer": "Max ASP GmbH",
+        "number": "GS-2026-0012",
+        "document": "Stornorechnung_GS-2026-0012.pdf"
+      }
+    ],
+    "evidence": [
+      "Stornorechnung GS-2026-0012 zu MA-2026-0104",
+      "Max ASP GmbH",
+      "USt-IdNr. DE099000001",
+      "Automatisch erzeugt vom Rechnungsagenten."
+    ]
+  },
+  "<E25.zahlungserinnerung@fixtures.argus.example>": {
+    "category": "payment_reminder",
+    "confidence": 0.96,
+    "invoices": [],
+    "evidence": [
+      "Zahlungserinnerung Rechnung BB-2026-1101",
+      "Muster Bürobedarf GmbH",
+      "Papierweg 12, 70001 Musterstadt",
+      "Sehr geehrte Damen und Herren,"
+    ]
+  },
+  "<E26.erste-mahnung@fixtures.argus.example>": {
+    "category": "payment_reminder",
+    "confidence": 0.96,
+    "invoices": [],
+    "evidence": [
+      "1. Mahnung zu Rechnung BCH-26-09-0038",
+      "Beispiel Cloud Hosting GmbH",
+      "Serverstraße 3, 70002 Beispielstadt",
+      "leider konnten wir noch keinen Zahlungseingang feststellen. Details entnehmen Sie bitte der beigefügten Mahnung."
+    ]
+  },
+  "<E27.payment-reminder-english@fixtures.argus.example>": {
+    "category": "payment_reminder",
+    "confidence": 0.96,
+    "invoices": [],
+    "evidence": [
+      "Overdue: invoice ESL-INV-09981",
+      "Our records show that invoice ESL-INV-09981 dated 1 August 2026 for GBP 390.00 is now 40 days overdue."
+    ]
+  },
+  "<E28.letzte-mahnung-scan@fixtures.argus.example>": {
+    "category": "payment_reminder",
+    "confidence": 0.96,
+    "invoices": [],
+    "evidence": [
+      "Letzte Mahnung",
+      "Muster Logistik GmbH",
+      "Paketring 40, 70008 Musterstadt",
+      "Muster Logistik GmbH"
+    ]
+  },
+  "<E29.inkasso@fixtures.argus.example>": {
+    "category": "payment_reminder",
+    "confidence": 0.96,
+    "invoices": [],
+    "evidence": [
+      "Aktenzeichen IK-26-77310 Zahlungsaufforderung",
+      "Beispiel Inkasso GmbH",
+      "Forderungsplatz 1, 70011 Beispielstadt",
+      "Sehr geehrte Damen und Herren,"
+    ]
+  },
+  "<E30.erinnerung-im-mailtext@fixtures.argus.example>": {
+    "category": "payment_reminder",
+    "confidence": 0.96,
+    "invoices": [],
+    "evidence": [
+      "Zahlungserinnerung Kundennummer 4471203",
+      "Sehr geehrte Damen und Herren,"
+    ]
+  },
+  "<E31.zweite-mahnung@fixtures.argus.example>": {
+    "category": "payment_reminder",
+    "confidence": 0.96,
+    "invoices": [],
+    "evidence": [
+      "2. Mahnung R-2026-0811",
+      "Beispiel Reinigung GmbH",
+      "Glanzgasse 2, 70007 Beispielstadt",
+      "anbei unsere 2. Mahnung."
+    ]
+  },
+  "<E32.newsletter-bekannter-lieferant@fixtures.argus.example>": {
+    "category": "other",
+    "confidence": 0.98,
+    "invoices": [],
+    "evidence": [
+      "What's new in October: faster sync and a new billing dashboard",
+      "This month we shipped faster sync, a new billing dashboard where you can download every invoice, and dark mode."
+    ]
+  },
+  "<E33.webinar-e-rechnung@fixtures.argus.example>": {
+    "category": "other",
+    "confidence": 0.97,
+    "invoices": [],
+    "evidence": [
+      "Einladung: Webinar zur E-Rechnungspflicht 2027",
+      "ab 2027 wird die E-Rechnung für viele Unternehmen Pflicht. In unserem kostenlosen Webinar am 22.10.2026 erklären wir, was Sie bei Rechnungseingang und Rechnungsausgang beachten müssen."
+    ]
+  },
+  "<E34.phishing-konto@fixtures.argus.example>": {
+    "category": "other",
+    "confidence": 0.98,
+    "invoices": [],
+    "evidence": [
+      "Ihr Konto wurde vorübergehend gesperrt",
+      "Sehr geehrter Kunde,"
+    ]
+  },
+  "<E35.katalog-mit-pdf@fixtures.argus.example>": {
+    "category": "other",
+    "confidence": 0.98,
+    "invoices": [],
+    "evidence": [
+      "Unsere Herbst-Angebote für Ihr Büro",
+      "Muster Bürobedarf GmbH",
+      "Papierweg 12, 70001 Musterstadt",
+      "entdecken Sie unsere Herbst-Angebote im beigefügten Prospekt."
+    ]
+  },
+  "<E36.hausmitteilung@fixtures.argus.example>": {
+    "category": "other",
+    "confidence": 0.98,
+    "invoices": [],
+    "evidence": [
+      "Hausmitteilung: Wartung Aufzug am 20.10.2026",
+      "Liebe Mieterinnen und Mieter,"
+    ]
+  },
+  "<E37.angebot-pdf@fixtures.argus.example>": {
+    "category": "other",
+    "confidence": 0.98,
+    "invoices": [],
+    "evidence": [
+      "Angebot AN-2026-044 Prozessanalyse",
+      "Beispiel Beratung Partner mbB",
+      "Ratgeberweg 5, 70005 Beispielstadt",
+      "Sehr geehrte Damen und Herren,"
+    ]
+  },
+  "<E38.auftragsbestaetigung@fixtures.argus.example>": {
+    "category": "other",
+    "confidence": 0.98,
+    "invoices": [],
+    "evidence": [
+      "Auftragsbestätigung AB-2026-5531",
+      "Muster Bürobedarf GmbH",
+      "Papierweg 12, 70001 Musterstadt",
+      "Sehr geehrte Damen und Herren,"
+    ]
+  },
+  "<E39.lieferschein@fixtures.argus.example>": {
+    "category": "other",
+    "confidence": 0.98,
+    "invoices": [],
+    "evidence": [
+      "Lieferschein LS-2026-88412",
+      "Muster Logistik GmbH",
+      "Paketring 40, 70008 Musterstadt",
+      "Anbei der Lieferschein zu Ihrer Sendung."
+    ]
+  },
+  "<E40.abwesenheitsnotiz@fixtures.argus.example>": {
+    "category": "other",
+    "confidence": 0.98,
+    "invoices": [],
+    "evidence": [
+      "Automatische Antwort: Ausgangsrechnung MA-2026-0101",
+      "Vielen Dank für Ihre Nachricht. Ich bin bis zum 19.10.2026 nicht im Büro. In dringenden Fällen wenden Sie sich bitte an einkauf@beispiel-handel.example."
+    ]
+  },
+  "<E41.interne-einladung@fixtures.argus.example>": {
+    "category": "other",
+    "confidence": 0.98,
+    "invoices": [],
+    "evidence": [
+      "Herbstfest am 30.10.",
+      "am 30.10. feiern wir ab 17 Uhr unser Herbstfest. Bitte tragt euch bis Freitag in die Liste ein."
+    ]
+  },
+  "<E42.steuer-newsletter@fixtures.argus.example>": {
+    "category": "other",
+    "confidence": 0.97,
+    "invoices": [],
+    "evidence": [
+      "Steuer-News Oktober: Vorsteuerabzug und Rechnungsanforderungen",
+      "Liebe Leserinnen und Leser,"
+    ]
+  },
+  "<E43.spam-fake-invoice@fixtures.argus.example>": {
+    "category": "other",
+    "confidence": 0.98,
+    "invoices": [],
+    "evidence": [
+      "Invoice #INV-88812 payment required",
+      "Your invoice #INV-88812 is ready. Click here to view and pay: http://pay-invoice-now.invalid/inv88812"
+    ]
+  },
+  "<E44.kundenfrage-rechnung@fixtures.argus.example>": {
+    "category": "other",
+    "confidence": 0.55,
+    "invoices": [],
+    "evidence": [
+      "Frage zu Ihrer Rechnung MA-2026-0101",
+      "Sehr geehrte Damen und Herren,"
+    ]
+  },
+  "<E45.proforma@fixtures.argus.example>": {
+    "category": "incoming_invoice",
+    "confidence": 0.62,
+    "invoices": [
+      {
+        "issuer": "Example Software Ltd",
+        "number": "PF-2026-0077",
+        "document": "Pro_forma_invoice_PF-2026-0077.pdf"
+      }
+    ],
+    "evidence": [
+      "Pro forma invoice PF-2026-0077 for your support add-on",
+      "Example Software Ltd",
+      "VAT ID GB000000004",
+      "Please find attached a pro forma invoice for the premium support add-on. Once we receive payment we will activate the add-on and send the final invoice."
+    ]
+  },
+  "<E46.unleserlicher-scan@fixtures.argus.example>": {
+    "category": "other",
+    "confidence": 0.3,
+    "invoices": [],
+    "evidence": [
+      "Unterlagen"
+    ]
+  },
+  "<E47.erinnerung-und-neue-rechnung@fixtures.argus.example>": {
+    "category": "incoming_invoice",
+    "confidence": 0.64,
+    "invoices": [
+      {
+        "issuer": "Muster Bürobedarf GmbH",
+        "number": "BB-2026-1290",
+        "document": "Rechnung_BB-2026-1290.pdf"
+      }
+    ],
+    "evidence": [
+      "Offene Posten und neue Rechnung",
+      "Muster Bürobedarf GmbH",
+      "USt-IdNr. DE012345601",
+      "Sehr geehrte Damen und Herren,"
+    ]
+  },
+  "<E48.weitergeleitet-von-kollege@fixtures.argus.example>": {
+    "category": "incoming_invoice",
+    "confidence": 0.81,
+    "invoices": [
+      {
+        "issuer": "Beispiel Catering GmbH",
+        "number": "BC-2026-221",
+        "document": "Rechnung_BC-2026-221.pdf"
+      }
+    ],
+    "evidence": [
+      "WG: Rechnung Catering",
+      "Beispiel Catering GmbH",
+      "USt-IdNr. DE012345610",
+      "die Rechnung vom Catering für unser Teammeeting kam an meine Adresse. Ich hab sie schon privat bezahlt, wie bekomme ich das Geld zurück?"
+    ]
+  },
+  "<E49.falscher-empfaenger@fixtures.argus.example>": {
+    "category": "incoming_invoice",
+    "confidence": 0.7,
+    "invoices": [
+      {
+        "issuer": "Beispiel Reinigung GmbH",
+        "number": "R-2026-0950",
+        "document": "Rechnung_R-2026-0950.pdf"
+      }
+    ],
+    "evidence": [
+      "Rechnung R-2026-0950",
+      "Beispiel Reinigung GmbH",
+      "USt-IdNr. DE012345607",
+      "anbei die Rechnung für Oktober."
+    ]
+  },
+  "<E50.kunde-schickt-rechnung-zurueck@fixtures.argus.example>": {
+    "category": "outgoing_invoice",
+    "confidence": 0.74,
+    "invoices": [
+      {
+        "issuer": "Max ASP GmbH",
+        "number": "MA-2026-0101",
+        "document": "Rechnung_MA-2026-0101.pdf"
+      }
+    ],
+    "evidence": [
+      "AW: Ausgangsrechnung MA-2026-0101",
+      "Max ASP GmbH",
+      "USt-IdNr. DE099000001",
+      "Sehr geehrte Damen und Herren,"
+    ]
+  }
+}

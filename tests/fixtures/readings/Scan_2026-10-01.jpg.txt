@@ -1,0 +1,19 @@
+Beispiel Reinigung GmbH
+Glanzgasse 2, 70007 Beispielstadt, DE
+USt-IdNr. DE012345607
+Max ASP GmbH
+Testallee 1
+70000 Musterstadt
+DE
+Rechnung
+Nummer: R-2026-0931
+Datum: 01.10.2026
+Leistungszeitraum: 01.09.2026 - 30.09.2026
+Pos. Beschreibung Menge Einzelpreis Betrag
+1 Unterhaltsreinigung Büro September 1 640,00 EUR 640,00 EUR
+2 Fensterreinigung 1 180,00 EUR 180,00 EUR
+Nettobetrag 820,00 EUR
+USt 19 % 155,80 EUR
+Gesamtbetrag 975,80 EUR
+Zahlbar bis 15.10.2026 ohne Abzug.
+Bankverbindung: IBAN DE57 0000 0007 0000 7000 07
