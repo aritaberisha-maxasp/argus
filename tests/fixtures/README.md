@@ -9,7 +9,8 @@ Test data for ARGUS. Everything here is invented. See the [test strategy](../../
 | `emails/` | 50 test emails as `.eml` files for AC-1, and `manifest.csv` with the expected outcome of each |
 | `documents/` | Every invoice and letter on its own, and `expected.json` with the data ARGUS should extract from each invoice (PR-01) |
 | `master-data/` | `vendors.csv` (Kreditoren), `customers.csv` (Debitoren), `approvers.csv` (the ARGUS approver table, AP-01, AP-06, PY-13) and `roles.csv` (who approves above EUR 5,000, who gets reminders and exceptions) |
-| `tools/` | `generate.py` builds everything above, `check.py` checks it |
+| `tools/` | `generate.py` builds everything above except `datev/`, `check.py` checks it |
+| `datev/` | `postings.csv`, past bookings the fake DATEV serves as booking history (PR-04). Written by hand, see [the DATEV gateway](../../docs/design/datev-gateway.md) |
 
 ## The 50 emails
 
