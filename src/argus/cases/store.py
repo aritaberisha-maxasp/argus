@@ -10,7 +10,7 @@ import json
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from psycopg import errors as pg
@@ -59,6 +59,23 @@ class TraceEvent:
     from_status: CaseStatus | None
     to_status: CaseStatus | None
     details: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class OpenException:
+    """One entry in the exception queue that still needs a person (EX-01). Exactly one of
+    ``case_id``, ``email_id`` and ``statement_id`` is set."""
+
+    id: int
+    reason: ExceptionReason
+    detail: str
+    opened_at: datetime
+    age: timedelta
+    case_id: int | None
+    case_kind: CaseKind | None
+    resume_status: CaseStatus | None
+    email_id: int | None
+    statement_id: int | None
 
 
 # Fields the application may change on a case, mapped to their column. Status, closed reason and
@@ -329,6 +346,45 @@ def resolve_exception(
         to=target,
         closed_reason=closed_reason,
     )
+
+
+def list_open_exceptions(
+    connection: Connection, *, reason: ExceptionReason | None = None
+) -> list[OpenException]:
+    """Everything in the exception queue that is not resolved yet, oldest first (EX-01).
+
+    Each entry names its case (or email or bank statement), the reason, how long it has been
+    open and the detail for the person who acts on it. For a case it also says the status the
+    case goes back to once the exception is resolved. ``reason`` narrows the list to one reason.
+    The age is measured by the database clock, the same clock that set ``opened_at``.
+    """
+    rows = _run(
+        connection,
+        """
+        select e.id, e.reason, e.detail, e.opened_at, clock_timestamp() - e.opened_at as age,
+               e.case_id, c.kind as case_kind, c.resume_status, e.email_id, e.statement_id
+        from exception_item e left join invoice_case c on c.id = e.case_id
+        where e.resolved_at is null
+          and (cast(:reason as exception_reason) is null or e.reason = :reason)
+        order by e.opened_at, e.id
+        """,
+        {"reason": reason.value if reason else None},
+    ).mappings()
+    return [
+        OpenException(
+            id=r["id"],
+            reason=ExceptionReason(r["reason"]),
+            detail=r["detail"],
+            opened_at=r["opened_at"],
+            age=r["age"],
+            case_id=r["case_id"],
+            case_kind=CaseKind(r["case_kind"]) if r["case_kind"] else None,
+            resume_status=CaseStatus(r["resume_status"]) if r["resume_status"] else None,
+            email_id=r["email_id"],
+            statement_id=r["statement_id"],
+        )
+        for r in rows
+    ]
 
 
 def record_event(
