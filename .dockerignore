@@ -5,5 +5,7 @@
 .pytest_cache
 .ruff_cache
 spikes
-tests/fixtures/emails
+tests/fixtures/emails/*
+# The fake Graph serves the fixture emails (standins/graph/Dockerfile).
+!tests/fixtures/emails/*.eml
 tests/fixtures/documents
