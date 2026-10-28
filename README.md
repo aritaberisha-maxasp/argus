@@ -18,9 +18,20 @@ docker run -d --name argus-pg -p 5432:5432 -e POSTGRES_PASSWORD=local -e POSTGRE
 ARGUS_TEST_DATABASE_URL=postgresql+psycopg://postgres:local@localhost:5432/argus_test .venv/bin/pytest
 ```
 
+The document store tests also need Azurite, the local stand in for Azure Blob Storage. It needs no password:
+
+```bash
+docker run -d --name argus-azurite -p 10000:10000 mcr.microsoft.com/azure-storage/azurite:3.37.0 azurite-blob --blobHost 0.0.0.0 --skipApiVersionCheck
+ARGUS_TEST_BLOB_CONNECTION_STRING=UseDevelopmentStorage=true .venv/bin/pytest
+```
+
 To create the tables in a database, set `ARGUS_DATABASE_URL` and run `.venv/bin/alembic upgrade head`. The migrations are in `src/argus/db/migrations/`.
 
 CI runs the same tests plus `ruff check`, `ruff format --check`, `mypy`, the fixture check and a secret scan on every PR. Tag each test with the requirements it covers, for example `@pytest.mark.req("IN-04", "IN-09")`. An ID that is not in the catalog fails the run.
+
+## Original documents
+
+Every received email and each attachment is kept byte for byte in blob storage, named by its SHA-256 fingerprint (`src/argus/documents/`, ADR 0001). Storing the same file again finds the first copy and never replaces it, and every read checks the fingerprint again. The database records which file came from which email and which case it belongs to, and writes the fingerprint into the audit log itself. In Azure the connection string comes from Key Vault as `ARGUS_DOCUMENTS_CONNECTION_STRING`.
 
 ## Stand ins
 
