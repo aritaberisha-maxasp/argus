@@ -750,16 +750,28 @@ def test_exception_text_stays_out_of_the_audit_log(app: Engine, owner: Engine) -
 
 @pytest.mark.req("AC-8")
 def test_the_trace_shows_the_email_and_every_step(app: Engine) -> None:
-    email_id = 900_000 + next(_counter)
+    # The email steps are logged by the database as the mailbox sweep records them (#24);
+    # the application cannot write those events itself.
+    n = next(_counter)
     with unit_of_work(app, INTAKE) as db:
-        record_event(db, "email_classified", email_id=email_id, details={"category": "invoice"})
+        email_id: int = db.execute(
+            text("insert into mailbox_email (graph_message_id) values (:id) returning id"),
+            {"id": f"AAk-trace-{n}"},
+        ).scalar_one()
+        db.execute(
+            text(
+                "update mailbox_email set step = 'stored', raw_sha256 = :sha,"
+                " raw_location = 'sha256/' || :sha where id = :id"
+            ),
+            {"id": email_id, "sha": f"{n:064x}"},
+        )
     case_id = new_case(app, source_email_id=email_id)
     walk(app, case_id, S.AWAITING_APPROVAL, S.APPROVED, S.BOOKED, S.IN_PAYMENT_RUN, S.PAID)
 
     with unit_of_work(app, INTAKE) as db:
         events = trace(db, case_id)
 
-    assert [e.event_type for e in events] == ["email_classified", "case_created"] + [
+    assert [e.event_type for e in events] == ["email_seen", "email_stored", "case_created"] + [
         "status_changed"
     ] * 5
     assert events[-1].to_status is S.PAID
