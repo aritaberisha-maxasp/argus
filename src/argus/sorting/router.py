@@ -10,7 +10,7 @@ import re
 
 from argus.sorting.checks import check_email, normalise
 from argus.sorting.config import SortingConfig
-from argus.sorting.language_model import LanguageModel, ModelAnswerInvalid, email_as_text
+from argus.sorting.language_model import LanguageModel, ModelAnswerInvalid
 from argus.sorting.models import (
     ROUTE_FOR,
     Category,
@@ -88,7 +88,10 @@ def _squash(text: str) -> str:
 def quotes_only(evidence: tuple[str, ...], email: EmailToSort) -> tuple[str, ...]:
     """Keep only the snippets that really appear in the email. Email content can steer the
     model, so anything else it writes is not evidence and stays out of the audit log."""
-    text = _squash(email_as_text(email))
+    # Only what the sender wrote: not the From line or the attachment headers we add ourselves,
+    # which hold the address and the file names (NF-03).
+    written = [email.subject, email.body, *(a.text or "" for a in email.attachments)]
+    text = "\n".join(_squash(part) for part in written)
     return tuple(snippet for snippet in evidence if _squash(snippet) and _squash(snippet) in text)
 
 

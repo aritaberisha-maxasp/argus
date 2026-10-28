@@ -30,6 +30,8 @@ from argus.sorting import (
 )
 from argus.sorting.checks import check_email
 from argus.sorting.language_model import ANSWER_SCHEMA, RESPONSE_FORMAT
+from argus.sorting.models import mask_ibans
+from argus.sorting.router import quotes_only
 from tests.unit.sorting_helpers import (
     EMAILS,
     MODEL_ANSWERS,
@@ -488,6 +490,7 @@ def test_ibans_in_the_evidence_are_masked_spaced_or_not() -> None:
         "IBAN DE****************0001",
         "IBAN GB****************0004",
     ]
+    assert mask_ibans("iban de44 0000 0002 0000 7000 01.") == "iban de****************0001."
 
 
 @pytest.mark.req("NF-03", "NF-01")
@@ -498,6 +501,20 @@ def test_only_snippets_that_really_appear_in_the_email_are_kept() -> None:
 
     assert decision.evidence == ("Anbei   unsere\nRechnung.",)  # spacing does not matter
     assert injected not in json.dumps(decision.audit_details())
+
+
+@pytest.mark.req("NF-03")
+def test_quoting_the_sender_line_or_a_file_name_is_not_evidence() -> None:
+    email = EmailToSort(
+        message_id="<p@argus.example>",
+        sender_address="anna.muster@beispiel.example",
+        sender_name="Anna Muster",
+        subject="Rechnung",
+        body="Anbei.",
+        attachments=(Attachment("Gehalt_Anna_Muster.pdf", "application/pdf", "Rechnung 1"),),
+    )
+    quoted = ("Attachment Gehalt_Anna_Muster.pdf", "From: Anna Muster", "Anbei.", "Rechnung 1")
+    assert quotes_only(quoted, email) == ("Anbei.", "Rechnung 1")
 
 
 @pytest.mark.req("AC-1", "IN-09")

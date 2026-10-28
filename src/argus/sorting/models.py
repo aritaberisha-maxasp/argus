@@ -60,7 +60,7 @@ class EmailToSort:
 MAX_EVIDENCE_ITEMS = 10
 MAX_SNIPPET_CHARS = 200
 # An IBAN, with or without the spaces of its printed form.
-IBAN = re.compile(r"\b([A-Z]{2})(\d{2}(?: ?[A-Z0-9]{4}){2,7}(?: ?[A-Z0-9]{1,4})?)\b")
+IBAN = re.compile(r"\b([A-Z]{2})(\d{2}(?: ?[A-Z0-9]{4}){2,7}(?: ?[A-Z0-9]{1,4})?)\b", re.IGNORECASE)
 
 
 def mask_ibans(text: str) -> str:
