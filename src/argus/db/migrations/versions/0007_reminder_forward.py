@@ -44,7 +44,9 @@ create table reminder_forward (
   unclear_numbers integer,       -- numbers that more than one open case carries, not marked
   -- 'sent' when ARGUS sent the draft, 'found_sent' when it found the draft already sent: after
   -- a crash past its own send, or because a person sent it from Outlook (compliance, PR 93).
-  send_outcome text check (send_outcome in ('sent','found_sent')),
+  -- 'by_person' when the draft was gone and a person resolved the exception, having forwarded
+  -- the reminder by hand if it was needed (review of PR 93).
+  send_outcome text check (send_outcome in ('sent','found_sent','by_person')),
   check ((step = 'sent') = (sent_at is not null)),
   check ((step = 'sent') = (send_outcome is not null)),
   check ((step = 'sent') = (matched_case_ids is not null and unclear_numbers is not null)),

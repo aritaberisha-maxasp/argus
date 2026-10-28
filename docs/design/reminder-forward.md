@@ -25,7 +25,10 @@ Graph forwards in two calls: first it saves the forward as a draft, then it send
 
 ## When a person has to look
 
-If the recorded draft is gone (someone deleted it) or was changed (another recipient, a cc or a bcc), ARGUS sends nothing, saves no second draft and opens one exception on the email with the reason `forward_failed` (EX-01). The exception says what happened and what to check. While it is open, ARGUS leaves the email alone; once a person resolves it, the next sweep tries the recorded draft again. If Graph is unreachable or throttles, nothing is opened and the next sweep simply tries again.
+If the recorded draft is gone (someone deleted it) or was changed (another recipient, a cc or a bcc), ARGUS sends nothing, saves no second draft and opens one exception on the email with the reason `forward_failed` (EX-01). The exception says what happened and what to check. While it is open, ARGUS leaves the email alone. Once a person resolves it:
+
+- **Draft gone:** the person has checked Sent Items and forwarded the reminder by hand if needed. The next sweep sends nothing, records the forward as `by_person`, marks the matched invoice cases and routes the email.
+- **Draft changed:** the person has put the draft right. The next sweep checks it again and sends it. If Graph is unreachable or throttles, nothing is opened and the next sweep simply tries again.
 
 Graph's documentation does not say clearly whether a draft keeps its immutable ID once it is sent. If it does not, a crash right after ARGUS's own send would show up as "draft gone" and land in the queue instead of being recorded as `found_sent`. That is safe (nothing is sent twice) and is to be checked against the real mailbox with the Azure setup (#65).
 
@@ -46,7 +49,7 @@ The sender is not used yet, because vendor email addresses are not in the master
 The database writes every event itself, and the application cannot write them:
 
 - `reminder_forward_drafted` with the draft's Graph ID
-- `reminder_forwarded` with the draft's Graph ID, the matched case IDs, the number of unclear numbers and the send outcome (`sent` or `found_sent`)
+- `reminder_forwarded` with the draft's Graph ID, the matched case IDs, the number of unclear numbers and the send outcome (`sent`, `found_sent`, or `by_person` when a person handled a lost draft)
 - `exception_opened` when the draft is gone or was changed, with the problem and the draft's ID
 - `email_routed` from the email steps of #24
 - `case_changed` on each marked case, with the old and new `reminder_received_at`

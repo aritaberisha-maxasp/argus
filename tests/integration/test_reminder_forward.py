@@ -416,6 +416,50 @@ def test_a_recorded_draft_that_is_gone_opens_an_exception_and_sends_nothing(
     assert FORWARD_TO not in json.dumps(opened)
 
 
+@pytest.mark.req("IN-05", "PY-06", "EX-01", "NF-01")
+@pytest.mark.usefixtures("clean")
+def test_after_a_person_resolves_a_gone_draft_the_email_is_routed_without_sending(
+    app: Engine,
+) -> None:
+    fake = fake_graph_with("E30")
+    mailbox = CrashingMailbox(graph_for(fake), "after recording the draft, before sending it")
+    email = classified(app, mailbox.graph)
+    number = unique_number()
+    case_id = new_invoice(app, number)
+    reminder = reminder_naming(number)
+    with pytest.raises(RuntimeError):
+        forward_reminder(app, mailbox, email, reminder, DECISION)
+    draft_id, _ = recorded_draft(app, email.id)
+    TestClient(fake).delete(f"/_standin/drafts/{draft_id}")
+    waiting = forward_reminder(app, mailbox, email, reminder, DECISION)
+    assert waiting.exception_id is not None
+    # The person forwards the reminder by hand and resolves the exception.
+    with unit_of_work(app, Actor.user("benjamin-entra-id")) as db:
+        resolve_exception(db, waiting.exception_id, Outcome.ANSWERED)
+
+    result = forward_reminder(app, mailbox, email, reminder, DECISION)
+    again = forward_reminder(app, mailbox, email, reminder, DECISION)
+
+    assert result.exception_id is None and not result.sent_now
+    assert result.match.case_ids == (case_id,)
+    assert again.exception_id is None
+    assert mailbox_of(fake).sent == []
+    assert list(mailbox_of(fake).drafts) == []
+    assert open_forward_exceptions(app, email.id) == []
+    assert recorded_draft(app, email.id) == (draft_id, "sent")
+    assert forwarded_details(app, email.id)["send_outcome"] == "by_person"
+    assert reminder_received_at(app, case_id) is not None
+    with app.connect() as connection:
+        routed = connection.execute(
+            text("select step, route from mailbox_email where id = :id"), {"id": email.id}
+        ).one()
+        exceptions: int = connection.execute(
+            text("select count(*) from exception_item where email_id = :id"), {"id": email.id}
+        ).scalar_one()
+    assert tuple(routed) == ("routed", Route.FORWARD_REMINDER.value)
+    assert exceptions == 1
+
+
 @pytest.mark.req("IN-05", "EX-01")
 @pytest.mark.usefixtures("clean")
 def test_after_a_person_resolves_a_changed_draft_argus_sends_it_once(app: Engine) -> None:

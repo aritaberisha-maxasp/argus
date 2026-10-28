@@ -220,7 +220,7 @@ def _draft(engine: Engine, graph: ReminderMailbox, email: EmailRecord) -> _Forwa
 
 
 def _finish(
-    engine: Engine, email: EmailRecord, reminder: EmailToSort, draft_id: str, sent_now: bool
+    engine: Engine, email: EmailRecord, reminder: EmailToSort, draft_id: str, outcome: str
 ) -> ReminderMatch | None:
     """Step 4: mark the forward sent, mark the matched cases and move the email to routed, in
     one unit of work. Returns None when another worker finished it first."""
@@ -239,7 +239,7 @@ def _finish(
             {
                 "cases": list(match.case_ids),
                 "unclear": match.unclear_numbers,
-                "outcome": "sent" if sent_now else "found_sent",
+                "outcome": outcome,
                 "email_id": email.id,
                 "draft": draft_id,
             },
@@ -285,6 +285,24 @@ def _open_exception_id(engine: Engine, email: EmailRecord) -> int | None:
     return found
 
 
+def _handled_by_person(engine: Engine, email: EmailRecord, draft_id: str) -> bool:
+    """Whether a person resolved a "draft gone" exception for this draft. Then nothing is left
+    for ARGUS to send: the person forwarded the reminder by hand if it was needed."""
+    with engine.connect() as connection:
+        found = connection.execute(
+            text(
+                """
+                select 1 from exception_item
+                where email_id = :id and reason = :reason and resolved_at is not null
+                  and facts ->> 'problem' = 'draft_gone' and facts ->> 'draft_message_id' = :draft
+                limit 1
+                """
+            ),
+            {"id": email.id, "reason": ExceptionReason.FORWARD_FAILED.value, "draft": draft_id},
+        ).first()
+    return found is not None
+
+
 def _send(engine: Engine, graph: ReminderMailbox, email: EmailRecord, draft_id: str) -> int | bool:
     """Step 3. Returns True when ARGUS sent the draft now, False when it was already sent, or
     the ID of the exception opened because the draft is gone or was changed."""
@@ -318,7 +336,9 @@ def forward_reminder(
     to find the invoice numbers it names.
 
     If the recorded draft is gone or was changed, ARGUS does not send anything and opens an
-    exception on the email (EX-01). While that exception is open, the email is left alone.
+    exception on the email (EX-01). While that exception is open, the email is left alone. Once
+    a person resolves a "draft gone" exception, the forward is recorded as ``by_person`` and the
+    email is routed without sending; a changed draft is sent once it is fixed.
     """
     if decision.route is not Route.FORWARD_REMINDER:
         raise ForwardRefused(f"email {email.id} is routed to {decision.route}, not forwarded")
@@ -330,11 +350,16 @@ def forward_reminder(
         waiting = _open_exception_id(engine, email)
         if waiting is not None:
             return ForwardResult(forward.draft_message_id, False, NO_MATCH, waiting)
-        sent = _send(engine, graph, email, forward.draft_message_id)
-        if not isinstance(sent, bool):
-            return ForwardResult(forward.draft_message_id, False, NO_MATCH, sent)
-        sent_now = sent
-        match = _finish(engine, email, reminder, forward.draft_message_id, sent_now)
+        if _handled_by_person(engine, email, forward.draft_message_id):
+            log.info("Reminder forward of email %s was handled by a person", email.id)
+            outcome = "by_person"
+        else:
+            sent = _send(engine, graph, email, forward.draft_message_id)
+            if not isinstance(sent, bool):
+                return ForwardResult(forward.draft_message_id, False, NO_MATCH, sent)
+            sent_now = sent
+            outcome = "sent" if sent_now else "found_sent"
+        match = _finish(engine, email, reminder, forward.draft_message_id, outcome)
         if match is not None:
             log.info(
                 "Reminder email %s forwarded, %d open invoice(s) marked, %d unclear number(s)",
