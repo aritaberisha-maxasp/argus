@@ -180,6 +180,7 @@ def test_an_xml_with_a_dtd_joins_the_unreadable_documents(app: Engine) -> None:
 
     with unit_of_work(app, INTAKE) as db:
         exception_id = queue_unreadable(db, email_id, found.refused)
+        assert exception_id is not None
         entry = next(e for e in list_open_exceptions(db) if e.id == exception_id)
 
     assert entry.reason is ExceptionReason.UNREADABLE_DOCUMENT
