@@ -279,9 +279,14 @@ class AzureDocumentIntelligence:
         """Delete the result at once instead of leaving it in the service for 24 hours (NF-03).
         A failure here does not stop the reading."""
         try:
-            self._http.delete(location, headers=self._headers())
+            response = self._http.delete(location, headers=self._headers())
         except httpx.HTTPError:
             log.warning("Could not delete a Document Intelligence result")
+            return
+        if not response.is_success:
+            log.warning(
+                "Could not delete a Document Intelligence result: status %d", response.status_code
+            )
 
 
 def _retry_after(response: httpx.Response) -> float:

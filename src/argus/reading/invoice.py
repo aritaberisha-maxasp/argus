@@ -18,6 +18,7 @@ result in a short one afterwards (PR #79 review).
 """
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -43,6 +44,7 @@ from argus.reading.text_rules import (
     confirm,
     document_kind,
     find_fields,
+    iban_valid,
     invoice_numbers,
     on_page,
     vat_rates,
@@ -225,8 +227,15 @@ def _add_page_text(fields: dict[str, ReadField], pages: tuple[Page, ...]) -> Non
     for name, found in find_fields(pages).items():
         current = fields.get(name)
         if current is None:
+            bad_iban = name == "iban_on_document" and not iban_valid(found.value)
             fields[name] = ReadField(
-                name, found.value, Source.PAGE_TEXT, page=found.page, words=found.words
+                name,
+                found.value,
+                Source.PAGE_TEXT,
+                page=found.page,
+                words=found.words,
+                flag=Flag.FAILED_CHECK if bad_iban else None,
+                note="the IBAN check digits are wrong" if bad_iban else None,
             )
         elif (
             name in COMPARED_FIELDS
@@ -276,11 +285,15 @@ def _add_from_model(
         )
 
 
-def queue_unreadable(connection: Connection, email_id: int, reading: InvoiceReading) -> int | None:
-    """Put an unreadable document in the exception queue with the reason unreadable document
-    (EX-01, EX-02). Run inside a ``unit_of_work``. Returns the exception ID, or None when the
+def queue_unreadable(
+    connection: Connection, email_id: int, readings: Sequence[InvoiceReading]
+) -> int | None:
+    """Put the unreadable documents of one email in the exception queue with the reason
+    unreadable document (EX-01, EX-02), as one exception that names every one of them. Run inside
+    a ``unit_of_work`` with all readings of the email. Returns the exception ID, or None when every
     document was readable. Safe to repeat: an email has at most one open exception for this."""
-    if reading.unreadable is None:
+    unreadable = [r for r in readings if r.unreadable is not None]
+    if not unreadable:
         return None
     existing = connection.execute(
         text(
@@ -291,11 +304,15 @@ def queue_unreadable(connection: Connection, email_id: int, reading: InvoiceRead
     ).scalar_one_or_none()
     if existing is not None:
         return int(existing)
+    detail = " ".join(f"The {r.document} could not be read: {r.unreadable}." for r in unreadable)
     return open_exception(
         connection,
         ExceptionReason.UNREADABLE_DOCUMENT,
-        f"The {reading.document} could not be read: {reading.unreadable}.",
+        detail,
         email_id=email_id,
-        # The audit log gets the position and the reader, never the content (NF-03).
-        facts={"document": reading.document, "reader": reading.reader},
+        # The audit log gets the positions and the readers, never the content (NF-03).
+        facts={
+            "documents": [r.document for r in unreadable],
+            "readers": sorted({r.reader for r in unreadable}),
+        },
     )

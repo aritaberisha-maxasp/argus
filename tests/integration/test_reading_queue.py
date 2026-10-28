@@ -39,7 +39,7 @@ def test_the_unreadable_scan_lands_in_the_queue_with_its_reason(app: Engine) -> 
     assert reading is not None and reading.unreadable
 
     with unit_of_work(app, INTAKE) as db:
-        exception_id = queue_unreadable(db, email_id, reading)
+        exception_id = queue_unreadable(db, email_id, [reading])
 
     with unit_of_work(app, INTAKE) as db:
         queue = list_open_exceptions(db, reason=ExceptionReason.UNREADABLE_DOCUMENT)
@@ -57,12 +57,15 @@ def test_the_audit_log_gets_the_position_never_the_content(app: Engine) -> None:
     assert reading is not None
 
     with unit_of_work(app, INTAKE) as db:
-        exception_id = queue_unreadable(db, email_id, reading)
+        exception_id = queue_unreadable(db, email_id, [reading])
         details: dict[str, Any] = db.execute(
             text("select details from audit_event where exception_id = :id"), {"id": exception_id}
         ).scalar_one()
 
-    assert details["facts"] == {"document": "attachment 1", "reader": "document_intelligence"}
+    assert details["facts"] == {
+        "documents": ["attachment 1"],
+        "readers": ["document_intelligence"],
+    }
 
 
 @pytest.mark.req("EX-01")
@@ -74,9 +77,9 @@ def test_queueing_the_same_document_twice_opens_one_exception(app: Engine) -> No
     assert reading is not None
 
     with unit_of_work(app, INTAKE) as db:
-        first = queue_unreadable(db, email_id, reading)
+        first = queue_unreadable(db, email_id, [reading])
     with unit_of_work(app, INTAKE) as db:
-        second = queue_unreadable(db, email_id, reading)
+        second = queue_unreadable(db, email_id, [reading])
 
     assert first == second
 
@@ -89,6 +92,23 @@ def test_a_readable_document_goes_nowhere_near_the_queue(app: Engine) -> None:
     assert reading is not None and reading.unreadable is None
 
     with unit_of_work(app, INTAKE) as db:
-        assert queue_unreadable(db, email_id, reading) is None
+        assert queue_unreadable(db, email_id, [reading]) is None
         open_for_email = [e for e in list_open_exceptions(db) if e.email_id == email_id]
     assert open_for_email == []
+
+
+@pytest.mark.req("EX-01", "EX-02")
+def test_two_unreadable_attachments_are_named_in_one_exception(app: Engine) -> None:
+    email_id = new_email(app, "AAk-reading-two")
+    scan = (FIXTURES / "documents" / "L46_scan_0001.jpg").read_bytes()
+    pdf = (FIXTURES / "documents" / "D01_Rechnung_BB-2026-1187.pdf").read_bytes()
+    readings = [
+        read_attachment(n, data, recorded()) for n, data in ((1, scan), (2, pdf), (3, scan))
+    ]
+
+    with unit_of_work(app, INTAKE) as db:
+        exception_id = queue_unreadable(db, email_id, [r for r in readings if r is not None])
+        entry = next(e for e in list_open_exceptions(db) if e.id == exception_id)
+
+    assert "attachment 1" in entry.detail and "attachment 3" in entry.detail
+    assert "attachment 2" not in entry.detail

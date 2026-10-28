@@ -23,11 +23,10 @@ from argus.sorting.language_model import (
     complete,
 )
 
-# Only fields with one plain value. The service period and the discount are not taken from the
-# model; a person fills them when the readers miss them.
+# Only fields with one plain value that our own rules can check in the quoted words. The issuer
+# and recipient names, the service period and the discount are not taken from the model: a
+# quote cannot show that a name is the issuer's, so a person fills them when the readers miss them.
 MODEL_FIELDS = (
-    "issuer_name",
-    "recipient_name",
     "vendor_vat_id",
     "invoice_number",
     "invoice_date",

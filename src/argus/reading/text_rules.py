@@ -258,38 +258,59 @@ def vat_rates(pages: tuple[Page, ...]) -> list[str]:
 # ------------------------------------------------------------------ checking a proposed value
 
 
+# Fields the model may fill only when our own label rules read that very field from the words it
+# quotes. A number or an IBAN somewhere in the quote is not enough: the label must say that it is
+# the gross amount, the IBAN to pay or the due date, or the model would choose the field alone.
+LABELLED_FIELDS = frozenset(
+    {
+        "net_amount",
+        "vat_amount",
+        "gross_amount",
+        "vat_rate",
+        "currency",
+        "iban_on_document",
+        "invoice_date",
+        "due_date",
+    }
+)
+VAT_ID = r"\b[A-Z]{2}[ ]?[0-9O][ 0-9A-Z]{4,13}\b"
+
+
+def _normalise(name: str, value: str) -> Any:
+    """The model's value in the format our rules give, or None when it is not one."""
+    if name in ("net_amount", "vat_amount", "gross_amount"):
+        return parse_amount(value)
+    if name == "vat_rate":
+        return parse_rate(value.strip().rstrip("%").strip())
+    if name == "currency":
+        return value.strip().upper()
+    if name == "iban_on_document":
+        return compact_iban(value)
+    return parse_date(value)
+
+
 def confirm(name: str, value: str, words: str) -> Any:
-    """Read ``name`` out of ``words`` with our own parsers and return the value only when it is
-    the one proposed. Returns None when the words do not say that value (ADR 0006 point 3)."""
-    text = squash(words)
-    candidates: list[Any]
-    if name in ("invoice_date", "due_date"):
-        candidates = [parse_date(m[0]) for m in re.finditer(DATE, text)]
-        wanted: Any = parse_date(value)
-    elif name in ("net_amount", "vat_amount", "gross_amount"):
-        candidates = [parse_amount(m[0]) for m in re.finditer(r"-?\d[\d.,]*\d|\d", text)]
-        wanted = parse_amount(value)
-    elif name == "vat_rate":
-        candidates = [parse_rate(m[1]) for m in re.finditer(r"(\d{1,2}(?:[.,]\d+)?)\s*%", text)]
-        wanted = parse_rate(value.strip().rstrip("%").strip())
-    elif name == "iban_on_document":
-        candidates = [compact_iban(m[1]) for m in re.finditer(IBAN, text.upper())]
-        wanted = compact_iban(value)
-        if not iban_valid(wanted):
+    """Read ``name`` out of ``words`` with our own rules and return the value only when it is the
+    one proposed. Returns None when the words do not say that value for that field (ADR 0006
+    point 3)."""
+    if name in LABELLED_FIELDS:
+        found = find_fields((Page(1, words),)).get(name)
+        if name == "iban_on_document" and found is not None and not iban_valid(found.value):
             return None
-    elif name == "vendor_vat_id":
-        candidates = [clean_vat_id(m[0]) for m in re.finditer(r"[A-Z]{2}[ A-Z0-9]{5,14}", text)]
-        wanted = clean_vat_id(value)
-    elif name == "currency":
-        signs = [CURRENCY_SIGNS[c] for c in text if c in CURRENCY_SIGNS]
-        candidates = [*re.findall(r"\b[A-Z]{3}\b", text), *signs]
-        wanted = value.strip().upper() if value.strip().upper() in CURRENCIES else None
-    elif name in ("invoice_number", "issuer_name", "recipient_name"):
-        wanted = squash(value)
-        candidates = [wanted] if wanted and wanted in text else []
-    else:
-        return None  # structured fields (service period, discount) are not taken from the model
-    return wanted if wanted is not None and wanted in candidates else None
+        wanted = _normalise(name, value)
+        return (
+            wanted if found is not None and wanted is not None and found.value == wanted else None
+        )
+    text = squash(words)
+    if name == "vendor_vat_id":
+        candidates = [clean_vat_id(m[0]) for m in re.finditer(VAT_ID, text)]
+        vat_id = clean_vat_id(value)
+        return vat_id if vat_id in candidates and sum(c.isdigit() for c in vat_id) >= 5 else None
+    if name == "invoice_number":
+        number = squash(value)
+        return number if number and number in text else None
+    # Names and the structured fields (service period, discount) are not taken from the model.
+    return None
 
 
 def on_page(words: str, page: Page) -> bool:

@@ -42,6 +42,7 @@ from argus.reading import (
 )
 from argus.reading.invoice import build_reading, sniff_type
 from argus.reading.language_model import ANSWER_SCHEMA
+from argus.reading.text_rules import confirm
 from argus.sorting import ModelAnswerInvalid
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
@@ -123,6 +124,7 @@ Rechnung
 Rechnung Nr. 4711 vom 3. Oktober
 Leistung im Oktober 2026
 Zu zahlen: 1.190,00 EUR (darin 190,00 EUR Umsatzsteuer, netto 1.000,00 EUR)
+Summe Gesamtbetrag 1.190,00 EUR
 Überweisung auf DE44 0000 0002 0000 7000 01 bis Monatsende
 """
 
@@ -353,28 +355,70 @@ def test_the_model_cannot_set_money_fields_the_page_does_not_say(
 
     field = reading.fields[proposal["name"]]
     assert field.value is None, why
-    assert field.flag is Flag.MODEL_NOT_CONFIRMED
+    # Names are not even asked from the model, so they stay simply not found.
+    assert field.flag in (Flag.MODEL_NOT_CONFIRMED, Flag.NOT_FOUND)
 
 
 @pytest.mark.req("PR-01", "NF-03")
-def test_money_fields_from_the_model_are_kept_only_when_our_checks_find_them_on_the_page() -> None:
+def test_a_money_field_from_the_model_is_kept_only_when_our_label_rule_reads_it() -> None:
+    # The page rules miss "Summe Gesamtbetrag", because the label is not at the start of the
+    # line. The model quotes the label and the amount, and our rule reads that field from it.
     model = FixedModel(
         {
-            "name": "iban_on_document",
-            "value": "DE44000000020000700001",
+            "name": "gross_amount",
+            "value": "1190.00",
             "page": 1,
-            "words": "Überweisung auf DE44 0000 0002 0000 7000 01",
+            "words": "Gesamtbetrag 1.190,00 EUR",
         },
-        {"name": "gross_amount", "value": "1190.00", "page": 1, "words": "Zu zahlen: 1.190,00 EUR"},
     )
 
     reading = sparse(model)
 
-    assert reading.value("iban_on_document") == "DE44000000020000700001"
-    assert reading.value("gross_amount") == "1190.00"
-    for name in ("iban_on_document", "gross_amount"):
-        assert reading.fields[name].source is Source.LANGUAGE_MODEL
-        assert reading.fields[name].words and reading.fields[name].page == 1
+    gross = reading.fields["gross_amount"]
+    assert gross.value == "1190.00"
+    assert gross.source is Source.LANGUAGE_MODEL
+    assert gross.page == 1 and gross.words == "Gesamtbetrag 1.190,00 EUR"
+
+
+@pytest.mark.req("PR-01", "NF-03")
+@pytest.mark.parametrize(
+    ("name", "value", "words"),
+    [
+        # The five cases from the review of PR #94: the value is in the quote, but the quote
+        # does not say it is that field.
+        ("gross_amount", "100.00", "Nettobetrag 100,00 EUR"),
+        ("gross_amount", "19.00", "zzgl. 19 % USt 19,00 EUR"),
+        ("issuer_name", "Max ASP GmbH", "Rechnung an: Max ASP GmbH"),
+        (
+            "iban_on_document",
+            "DE89370400440532013000",
+            "Wir buchen den Betrag von Ihrem Konto DE89 3704 0044 0532 0130 00 ab",
+        ),
+        ("due_date", "2026-10-01", "Rechnungsdatum: 01.10.2026"),
+    ],
+)
+def test_the_quote_must_name_the_field_not_only_contain_the_value(
+    name: str, value: str, words: str
+) -> None:
+    assert confirm(name, value, words) is None
+    page = Page(1, f"Beispiel Lieferant GmbH\nRechnung\n{words}\n")
+    model = FixedModel({"name": name, "value": value, "page": 1, "words": words})
+
+    reading = build_reading("attachment 1", "test", Analysis((page,)), model, ReadingSettings())
+
+    assert reading.value(name) is None
+    assert reading.fields[name].flag in (Flag.MODEL_NOT_CONFIRMED, Flag.NOT_FOUND)
+
+
+@pytest.mark.req("PR-01")
+def test_an_iban_on_the_page_with_wrong_check_digits_is_flagged() -> None:
+    text = SPARSE_INVOICE + "IBAN DE45 0000 0002 0000 7000 01\n"
+
+    reading = build_reading(
+        "attachment 1", "test", Analysis((Page(1, text),)), None, ReadingSettings()
+    )
+
+    assert reading.fields["iban_on_document"].flag is Flag.FAILED_CHECK
 
 
 @pytest.mark.req("PR-01", "NF-03")

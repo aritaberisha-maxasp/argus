@@ -56,6 +56,7 @@ class Flag(StrEnum):
     READERS_DISAGREE = "readers_disagree"
     MODEL_NOT_CONFIRMED = "model_not_confirmed"
     SEVERAL_VALUES = "several_values"
+    FAILED_CHECK = "failed_check"
 
 
 @dataclass(frozen=True)
