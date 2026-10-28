@@ -12,6 +12,7 @@ Comments and processing instructions are dropped and the text around them is joi
 comment in the middle of an amount cannot cut it short.
 """
 
+from typing import Any, NoReturn
 from xml.etree.ElementTree import Element, TreeBuilder
 from xml.parsers import expat
 
@@ -36,7 +37,7 @@ def parse(data: bytes) -> Element:
     def start(tag: str, attributes: dict[str, str]) -> None:
         builder.start(name(tag), {name(key): value for key, value in attributes.items()})
 
-    def refuse_dtd(*_: object) -> None:
+    def refuse_dtd(*_: Any) -> NoReturn:
         raise XmlRefused("the XML has a DTD, which ARGUS refuses")
 
     parser.StartElementHandler = start
@@ -49,6 +50,8 @@ def parse(data: bytes) -> Element:
     try:
         parser.Parse(data, True)
     except expat.ExpatError as error:
-        raise XmlRefused(f"the XML is not well formed: {expat.errors.messages[error.code]}") from error
+        raise XmlRefused(
+            f"the XML is not well formed: {expat.errors.messages[error.code]}"
+        ) from error
     root: Element = builder.close()
     return root

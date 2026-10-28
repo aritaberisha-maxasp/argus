@@ -177,31 +177,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: List releases
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh api repos/itplr-kosit/validator-configuration-xrechnung/releases --jq '.[0:3][] | .tag_name + " " + .published_at + " " + ([.assets[] | .name + " " + .browser_download_url] | join(" | "))'
       - name: Download the newest configuration and the engine
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          url=$(gh api repos/itplr-kosit/validator-configuration-xrechnung/releases --jq '.[0].assets[] | select(.name | endswith(".zip")) | .browser_download_url' | head -1)
-          echo "URL $url"
-          curl -sSfL -o config.zip "$url"
-          echo "SHA256 $(sha256sum config.zip)"
-          unzip -l config.zip | head -40
+          curl -sSfL -o config.zip https://github.com/itplr-kosit/validator-configuration-xrechnung/releases/download/v2026-08-31/xrechnung-3.0.2-validator-configuration-2026-08-31.zip
+          echo "2530cd107c414511c5d0462ec10f886910395abfca820db82e83d70bf01221a8  config.zip" | sha256sum -c
+          unzip -l config.zip | grep -v "codelist\|/$" | awk '{print $4}' | grep -v "^resources/ubl/2.1/xsd/common"
           unzip -o -q config.zip -d config
           curl -sSfL -o validator.jar https://repo.maven.apache.org/maven2/de/kosit/validationtool/1.5.0/validationtool-1.5.0-standalone.jar
           sha256sum validator.jar
       - name: Try the daemon
         run: |
+          cat config/docs/usage.md
           cd config
-          java -jar ../validator.jar --help 2>&1 | head -60 || true
-          nohup java -jar ../validator.jar -s scenarios.xml -r . -D -H 0.0.0.0 -P 8080 > ../daemon.log 2>&1 &
+          nohup java -jar ../validator.jar -s "$PWD/scenarios.xml" -r "$PWD" -D -H 0.0.0.0 -P 8080 > ../daemon.log 2>&1 &
           for i in $(seq 1 60); do curl -s -o /dev/null http://localhost:8080/ && break; sleep 1; done
           cd ..
-          head -30 daemon.log
+          head -c 4000 daemon.log
           curl -s -i http://localhost:8080/ | head -20
           python3 -c "from pypdf import PdfReader" 2>/dev/null || pip install -q pypdf
           python3 -c "

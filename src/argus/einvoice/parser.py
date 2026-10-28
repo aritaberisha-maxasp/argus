@@ -70,6 +70,7 @@ class EInvoice:
     direct_debit: bool
     refers_to: str | None  # the invoice a credit note or a corrected invoice refers to
     xml: bytes
+    container: str | None = None  # the PDF the XML is embedded in (ZUGFeRD, Factur-X)
 
     @property
     def invoice_number(self) -> str:
@@ -84,7 +85,7 @@ def looks_like_xml(data: bytes) -> bool:
     return head.startswith(b"<")
 
 
-def read_xml(document: str, data: bytes) -> EInvoice | None:
+def read_xml(document: str, data: bytes, container: str | None = None) -> EInvoice | None:
     """Read one XML document. Returns None when it is well formed XML but not an invoice or
     credit note in UBL or CII, so other XML files are left alone. Raises
     :class:`EInvoiceRefused` when the XML cannot be read safely."""
@@ -135,6 +136,7 @@ def read_xml(document: str, data: bytes) -> EInvoice | None:
         direct_debit=extra["direct_debit"],
         refers_to=extra["refers_to"],
         xml=data,
+        container=container,
     )
 
 
@@ -404,15 +406,21 @@ def _cii(root: Element) -> tuple[dict[str, ReadField], dict[str, Any]]:
     ):
         value = _text(root, path)
         out.set(name, _money(value) if value else None)
-    out.one_of("vat_amount", _in_currency(_all(root, f"{totals}/ram:TaxTotalAmount"), currency), _money)
     out.one_of(
-        "vat_rate", _texts(root, f"{settlement}/ram:ApplicableTradeTax/ram:RateApplicablePercent"), _rate
+        "vat_amount", _in_currency(_all(root, f"{totals}/ram:TaxTotalAmount"), currency), _money
+    )
+    out.one_of(
+        "vat_rate",
+        _texts(root, f"{settlement}/ram:ApplicableTradeTax/ram:RateApplicablePercent"),
+        _rate,
     )
     _zero_rate_without_percent(out)
     out.set("currency", currency)
 
     terms = _all(root, f"{settlement}/ram:SpecifiedTradePaymentTerms")
-    dues = [d for t in terms if (d := _cii_date(t.find("ram:DueDateDateTime/udt:DateTimeString", NS)))]
+    dues = [
+        d for t in terms if (d := _cii_date(t.find("ram:DueDateDateTime/udt:DateTimeString", NS)))
+    ]
     out.one_of("due_date", dues, str)
     means = _all(root, f"{settlement}/ram:SpecifiedTradeSettlementPaymentMeans")
     codes = {_text(m, "ram:TypeCode") for m in means}
@@ -428,10 +436,13 @@ def _cii(root: Element) -> tuple[dict[str, ReadField], dict[str, Any]]:
     return out.fields, {
         "type_code": _text(root, f"{doc}/ram:TypeCode") or "",
         "specification": _text(
-            root, "rsm:ExchangedDocumentContext/ram:GuidelineSpecifiedDocumentContextParameter/ram:ID"
+            root,
+            "rsm:ExchangedDocumentContext/ram:GuidelineSpecifiedDocumentContextParameter/ram:ID",
         ),
         "direct_debit": bool(codes & DIRECT_DEBIT_CODES),
-        "refers_to": _text(root, f"{settlement}/ram:InvoiceReferencedDocument/ram:IssuerAssignedID"),
+        "refers_to": _text(
+            root, f"{settlement}/ram:InvoiceReferencedDocument/ram:IssuerAssignedID"
+        ),
     }
 
 
