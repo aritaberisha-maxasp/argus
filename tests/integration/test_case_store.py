@@ -36,7 +36,7 @@ from argus.cases.store import (
     unit_of_work,
     verify_chain,
 )
-from tests.integration.conftest import migrate
+from tests.integration.conftest import head, migrate
 
 S = CaseStatus
 INTAKE = Actor.system("intake")
@@ -132,7 +132,7 @@ def test_migrations_refuse_to_drop_a_filled_audit_log(owner: Engine, app: Engine
         migrate(owner, "base", down=True)
 
     with owner.connect() as db:
-        assert db.execute(text("select version_num from alembic_version")).scalar() == "0002"
+        assert db.execute(text("select version_num from alembic_version")).scalar() == head()
 
 
 # 2. A move that is not in the transition table is refused
@@ -968,6 +968,8 @@ def test_a_temporary_table_cannot_stand_in_for_the_real_ones(app: Engine, owner:
         )
         db.commit()
         fake_events = db.execute(text("select count(*) from pg_temp.audit_event")).scalar()
+        # Temporary tables live as long as the session, so keep this one out of the pool.
+        db.invalidate()
 
     assert fake_events == 0
     assert events_of(app, case_id)[-1] == "status_changed"

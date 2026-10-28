@@ -34,6 +34,8 @@ jobs:
           --health-retries 10
     env:
       ARGUS_TEST_DATABASE_URL: postgresql+psycopg://argus_owner@localhost:5432/argus_test
+      # Azurite, the local stand in for Azure Blob Storage (ADR 0001). No real account or key.
+      ARGUS_TEST_BLOB_CONNECTION_STRING: UseDevelopmentStorage=true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -48,6 +50,18 @@ jobs:
         run: ruff format --check .
       - name: Type check
         run: mypy
+      # The document store tests need Azurite. A service container cannot take the flag that
+      # lets Azurite accept the newest storage API version, so it is started here instead.
+      - name: Start Azurite
+        run: |
+          docker run -d --name azurite -p 10000:10000 mcr.microsoft.com/azure-storage/azurite:3.37.0 \
+            azurite-blob --blobHost 0.0.0.0 --skipApiVersionCheck
+          for i in $(seq 1 30); do
+            curl -s -o /dev/null http://localhost:10000/ && exit 0
+            sleep 1
+          done
+          docker logs azurite
+          exit 1
       - name: Tests
         run: pytest --cov=argus --cov-report=term
       - name: Fixture check

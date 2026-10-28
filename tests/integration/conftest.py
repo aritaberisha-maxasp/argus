@@ -1,23 +1,39 @@
-"""A real PostgreSQL for the case store tests.
+"""A real PostgreSQL for the case store tests, and Azurite for the document store tests.
 
 Set ``ARGUS_TEST_DATABASE_URL`` to an empty database the tests may wipe. Its name must end in
 ``_test``, for example
 ``postgresql+psycopg://postgres@localhost/argus_test``. The README shows how to start one.
 Locally the tests are skipped without it; in CI (``CI`` is set) a missing database fails the run,
 so these tests can never be skipped there.
+
+The document store tests need Azurite, the local Azure Blob Storage emulator. Set
+``ARGUS_TEST_BLOB_CONNECTION_STRING`` to ``UseDevelopmentStorage=true``; the README shows how to
+start it. The same rule applies: skipped locally without it, a failure in CI.
 """
 
 import os
+import uuid
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import Engine, create_engine, make_url, text
 
+from argus.documents.store import AzureDocumentStore
+
 URL_ENV = "ARGUS_TEST_DATABASE_URL"
+BLOB_ENV = "ARGUS_TEST_BLOB_CONNECTION_STRING"
 ALEMBIC_INI = Path(__file__).resolve().parents[2] / "alembic.ini"
+
+
+def head() -> str:
+    """The newest migration, so tests need no change when a story adds one."""
+    revision = ScriptDirectory.from_config(Config(str(ALEMBIC_INI))).get_current_head()
+    assert revision is not None
+    return revision
 
 
 def migrate(engine: Engine, revision: str, *, down: bool = False) -> None:
@@ -64,3 +80,23 @@ def app(owner: Engine, database_url: str) -> Iterator[Engine]:
     engine = create_engine(database_url, connect_args={"options": "-c role=argus_app"})
     yield engine
     engine.dispose()
+
+
+@pytest.fixture(scope="session")
+def blob_connection_string() -> str:
+    value = os.environ.get(BLOB_ENV)
+    if not value:
+        if os.environ.get("CI"):
+            pytest.fail(f"{BLOB_ENV} must be set in CI, the document store tests need Azurite")
+        pytest.skip(f"{BLOB_ENV} is not set, see README.md to run the document store tests")
+    return value
+
+
+@pytest.fixture(scope="session")
+def documents(blob_connection_string: str) -> AzureDocumentStore:
+    """A fresh container in Azurite for this test run, so runs never see each other's files."""
+    store = AzureDocumentStore.from_connection_string(
+        blob_connection_string, f"documents-test-{uuid.uuid4().hex[:12]}"
+    )
+    store.create_container_if_missing()
+    return store
