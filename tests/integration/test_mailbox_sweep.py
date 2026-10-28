@@ -22,7 +22,13 @@ from psycopg import errors as pg
 from sqlalchemy import Connection, Engine, text
 from sqlalchemy.exc import DBAPIError
 
-from argus.cases.store import CaseRuleBroken, NotAllowed, unit_of_work, verify_chain
+from argus.cases.store import (
+    CaseRuleBroken,
+    NotAllowed,
+    record_event,
+    unit_of_work,
+    verify_chain,
+)
 from argus.documents.email import EML_CONTENT_TYPE, StoredEmail, attachments_of
 from argus.documents.store import MemoryDocumentStore
 from argus.intake.graph import GraphClient, InboxMessage
@@ -84,10 +90,15 @@ class MemoryArchive:
 
 @pytest.fixture
 def clean(owner: Engine) -> None:
-    """Each test starts with no email records. The audit log stays (it is append only); tests
+    """Each test starts with no email records. Records cannot be deleted, so the owner turns
+    the guard off for this test cleanup only. The audit log stays (it is append only); tests
     only look at events of their own records."""
     with owner.begin() as connection:
+        connection.execute(
+            text("alter table mailbox_email disable trigger mailbox_email_no_delete")
+        )
         connection.execute(text("delete from mailbox_email"))
+        connection.execute(text("alter table mailbox_email enable trigger mailbox_email_no_delete"))
 
 
 @pytest.fixture
@@ -370,7 +381,61 @@ def test_the_app_cannot_delete_an_email_record(app: Engine, graph: GraphClient) 
         db.execute(text("delete from mailbox_email"))
 
 
+@pytest.mark.req("NF-01")
+@pytest.mark.usefixtures("clean")
+@pytest.mark.parametrize("statement", ["delete from mailbox_email", "truncate mailbox_email"])
+def test_not_even_the_owner_can_remove_an_email_record(
+    owner: Engine, app: Engine, graph: GraphClient, statement: str
+) -> None:
+    sweep(app, graph, MemoryArchive())
+    with pytest.raises(DBAPIError, match="cannot be deleted"), owner.begin() as connection:
+        connection.execute(text(statement))
+    assert len(records(app)) == FIXTURE_COUNT
+
+
 # Each step is recorded and safe to repeat after a crash -------------------------------------
+
+
+@pytest.mark.req("NF-01")
+@pytest.mark.usefixtures("clean")
+@pytest.mark.parametrize(
+    "event_type",
+    ["email_seen", "email_stored", "email_classified", "email_routed", "email_filed"],
+)
+def test_the_application_cannot_write_an_email_event_itself(
+    app: Engine, graph: GraphClient, event_type: str
+) -> None:
+    """Only the database writes the step events, so the log can never claim a step that did
+    not happen."""
+    sweep(app, graph, MemoryArchive())
+    email_id = records(app)[0]["id"]
+    with (
+        pytest.raises(CaseRuleBroken, match="written by the database"),
+        unit_of_work(app, SWEEP_ACTOR) as db,
+    ):
+        record_event(db, event_type, email_id=email_id, details={"raw_sha256": "0" * 64})
+    with (
+        pytest.raises(CaseRuleBroken, match="written by the database"),
+        unit_of_work(app, SWEEP_ACTOR) as db,
+    ):
+        db.execute(
+            text("insert into audit_event (email_id, event_type) values (:id, :t)"),
+            {"id": email_id, "t": event_type},
+        )
+    assert Counter(t for _, t in email_events(app).elements())[event_type] == (
+        FIXTURE_COUNT if event_type in ("email_seen", "email_stored") else 0
+    )
+
+
+@pytest.mark.req("NF-01")
+@pytest.mark.usefixtures("clean")
+def test_other_application_events_about_an_email_are_still_allowed(
+    app: Engine, graph: GraphClient
+) -> None:
+    """The guard is about the step events only, so later stories can log their own facts."""
+    sweep(app, graph, MemoryArchive())
+    with unit_of_work(app, SWEEP_ACTOR) as db:
+        record_event(db, "classification_suggested", email_id=records(app)[0]["id"])
 
 
 @pytest.mark.req("IN-01", "NF-01")

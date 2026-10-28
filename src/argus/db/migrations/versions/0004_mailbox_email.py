@@ -3,7 +3,8 @@
 Covers IN-01 and NF-01. The record is keyed by the immutable Graph message ID with a unique
 constraint, so an email can never get two records. The database checks the order of the steps
 (seen, stored, classified, routed, filed): no step can be skipped, so nothing can happen to an
-email before it is stored. Each step writes its audit event in the same transaction.
+email before it is stored. Each step writes its audit event in the same transaction, and the
+application cannot write those events itself. Records cannot be deleted, not even by the owner.
 
 The fingerprints of the raw email and each attachment are recorded by the document store
 (stored_document, migration 0003) with their own audit events. This table keeps the fingerprint
@@ -98,6 +99,29 @@ end $$;
 create trigger mailbox_email_audit after insert or update on mailbox_email
   for each row execute function mailbox_email_audit();
 
+-- A record stays as long as its audit events point at it (NF-01). The step moves forward by
+-- update, so only delete and truncate are refused, for the owner too.
+create function mailbox_email_no_removal() returns trigger language plpgsql
+set search_path = pg_catalog, public, pg_temp as $$
+begin raise exception 'email records cannot be deleted, their audit trail points at them'; end $$;
+create trigger mailbox_email_no_delete before delete on mailbox_email
+  for each row execute function mailbox_email_no_removal();
+create trigger mailbox_email_no_truncate before truncate on mailbox_email
+  execute function mailbox_email_no_removal();
+
+-- Like the case events (0001) and the document events (0003): only the triggers above write the
+-- email step events, so the log can never say an email was stored when it was not. Replaces the
+-- function from 0003, keeping its rule.
+create or replace function audit_document_events() returns trigger language plpgsql
+set search_path = pg_catalog, public, pg_temp as $$
+begin
+  if pg_trigger_depth() = 1 and (new.event_type in ('document_stored','document_linked')
+                                 or new.event_type like 'email\_%') then
+    raise exception 'event % is written by the database, not by the application', new.event_type;
+  end if;
+  return new;
+end $$;
+
 grant select on mailbox_email to argus_app;
 grant insert (graph_message_id, internet_message_id, received_at) on mailbox_email to argus_app;
 grant update (step, raw_sha256, raw_location) on mailbox_email to argus_app;
@@ -109,7 +133,16 @@ do $$ begin
     raise exception 'email records exist; their audit trail is kept for ten years (NF-01)';
   end if;
 end $$;
+create or replace function audit_document_events() returns trigger language plpgsql
+set search_path = pg_catalog, public, pg_temp as $$
+begin
+  if pg_trigger_depth() = 1 and new.event_type in ('document_stored','document_linked') then
+    raise exception 'event % is written by the database, not by the application', new.event_type;
+  end if;
+  return new;
+end $$;
 drop table mailbox_email;
+drop function mailbox_email_no_removal();
 drop function mailbox_email_audit();
 drop function mailbox_email_guard();
 """
