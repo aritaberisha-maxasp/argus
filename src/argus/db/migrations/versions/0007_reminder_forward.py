@@ -30,6 +30,9 @@ branch_labels = None
 depends_on = None
 
 UPGRADE = r"""
+-- A reminder whose saved forward is gone or was changed goes to the exception queue (EX-01).
+alter type exception_reason add value 'forward_failed';
+
 create table reminder_forward (
   id bigint generated always as identity primary key,
   email_id bigint not null unique,  -- one forward per email; the guard checks it exists
@@ -39,7 +42,11 @@ create table reminder_forward (
   sent_at timestamptz,                                        -- set by the database
   matched_case_ids bigint[],     -- open invoice cases the reminder names, once sent (PY-06)
   unclear_numbers integer,       -- numbers that more than one open case carries, not marked
+  -- 'sent' when ARGUS sent the draft, 'found_sent' when it found the draft already sent: after
+  -- a crash past its own send, or because a person sent it from Outlook (compliance, PR 93).
+  send_outcome text check (send_outcome in ('sent','found_sent')),
   check ((step = 'sent') = (sent_at is not null)),
+  check ((step = 'sent') = (send_outcome is not null)),
   check ((step = 'sent') = (matched_case_ids is not null and unclear_numbers is not null)),
   check (unclear_numbers is null or unclear_numbers >= 0)
 );
@@ -50,7 +57,7 @@ set search_path = pg_catalog, public, pg_temp as $$
 begin
   if tg_op = 'INSERT' then
     if new.step <> 'drafted' or new.matched_case_ids is not null
-       or new.unclear_numbers is not null then
+       or new.unclear_numbers is not null or new.send_outcome is not null then
       raise exception 'a reminder forward starts as a draft';
     end if;
     if not exists (select 1 from mailbox_email where id = new.email_id and step = 'classified') then
@@ -86,7 +93,8 @@ begin
     values (new.email_id, 'reminder_forwarded',
             jsonb_build_object('draft_message_id', new.draft_message_id,
                                'matched_case_ids', to_jsonb(new.matched_case_ids),
-                               'unclear_numbers', new.unclear_numbers));
+                               'unclear_numbers', new.unclear_numbers,
+                               'send_outcome', new.send_outcome));
   end if;
   return null;
 end $$;
@@ -119,7 +127,8 @@ create trigger audit_reminder_events before insert on audit_event
 
 grant select on reminder_forward to argus_app;
 grant insert (email_id, draft_message_id) on reminder_forward to argus_app;
-grant update (step, matched_case_ids, unclear_numbers) on reminder_forward to argus_app;
+grant update (step, matched_case_ids, unclear_numbers, send_outcome) on reminder_forward
+  to argus_app;
 """
 
 DOWNGRADE = r"""
@@ -134,6 +143,23 @@ drop table reminder_forward;
 drop function reminder_forward_no_removal();
 drop function reminder_forward_audit();
 drop function reminder_forward_guard();
+-- Postgres cannot drop one value of an enum, so the type is built again without it.
+do $$ begin
+  if exists (select 1 from exception_item where reason::text = 'forward_failed') then
+    raise exception 'forward exceptions exist; their audit trail is kept for ten years (NF-01)';
+  end if;
+end $$;
+alter type exception_reason rename to exception_reason_0007;
+create type exception_reason as enum (
+  'uncertain_classification','unreadable_document','unknown_vendor','unknown_customer',
+  'vendor_without_approver','duplicate','iban_mismatch','invoice_check_failed','booking_error',
+  'unmatched_bank_transaction','bank_balance_difference',
+  'number_sequence_gap','payment_failed','customer_query');
+alter table exception_item
+  alter column reason type exception_reason using reason::text::exception_reason;
+alter table exception_exit
+  alter column reason type exception_reason using reason::text::exception_reason;
+drop type exception_reason_0007;
 """
 
 

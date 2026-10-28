@@ -13,8 +13,11 @@ Never two forwards, even after a crash:
    between 1 and 2) is never sent; it stays in the mailbox's Drafts folder.
 3. The recorded draft is sent. Before sending, ARGUS asks Graph whether it is still a draft, so
    a crash after sending (between 3 and 4) does not send again. Graph itself sends a draft once.
-4. A short unit of work marks the forward sent, marks the matched invoice cases and moves the
-   email to step ``routed``. The database writes the audit events.
+   Right before sending, the Graph client reads the draft's recipients again and refuses unless
+   it goes to the forward address only, because a person could change the draft meanwhile.
+4. A short unit of work marks the forward sent, records whether ARGUS sent it or found it
+   already sent (the log must not claim ARGUS sent what a person sent), marks the matched
+   invoice cases and moves the email to step ``routed``. The database writes the audit events.
 
 Graph is never called inside a unit of work (PR #79 review). The application logs hold IDs
 only, never the sender, subject, content or the forward address (NF-03).
@@ -29,8 +32,9 @@ from typing import Protocol
 
 from sqlalchemy import Connection, Engine, text
 
-from argus.cases.model import Actor, CaseKind, CaseStatus
-from argus.cases.store import change_case, unit_of_work
+from argus.cases.model import Actor, CaseKind, CaseStatus, ExceptionReason
+from argus.cases.store import change_case, open_exception, unit_of_work
+from argus.intake.graph import GraphApiError, GraphCallRefused
 from argus.intake.records import EmailRecord, EmailStep
 from argus.sorting.models import EmailToSort, Route, SortingDecision
 
@@ -85,8 +89,25 @@ class ReminderMatch:
 @dataclass(frozen=True)
 class ForwardResult:
     draft_message_id: str
-    sent_now: bool  # False when an earlier run had already sent it
+    sent_now: bool  # False when it was found already sent, or not sent at all
     match: ReminderMatch
+    exception_id: int | None = None  # set when a person has to look at the forward
+
+
+NO_MATCH = ReminderMatch(case_ids=(), unclear_numbers=0)
+
+# What the person in the exception queue reads (EX-01). It stays on the exception, never in the
+# audit log; the facts that go into the log name the problem only.
+DRAFT_GONE = (
+    "The saved forward of this payment reminder is gone from the Drafts folder, so ARGUS cannot "
+    "tell whether it was sent. Check Sent Items, forward the reminder by hand if it was not "
+    "sent, then resolve this. ARGUS does not save a second forward on its own."
+)
+DRAFT_CHANGED = (
+    "The saved forward of this payment reminder was changed before ARGUS sent it: it no longer "
+    "goes to the reminder address alone. ARGUS did not send it. Check the draft, then resolve "
+    "this. ARGUS sends it only if it goes to the reminder address and nobody else."
+)
 
 
 class ForwardRefused(RuntimeError):
@@ -199,7 +220,7 @@ def _draft(engine: Engine, graph: ReminderMailbox, email: EmailRecord) -> _Forwa
 
 
 def _finish(
-    engine: Engine, email: EmailRecord, reminder: EmailToSort, draft_id: str
+    engine: Engine, email: EmailRecord, reminder: EmailToSort, draft_id: str, sent_now: bool
 ) -> ReminderMatch | None:
     """Step 4: mark the forward sent, mark the matched cases and move the email to routed, in
     one unit of work. Returns None when another worker finished it first."""
@@ -209,7 +230,8 @@ def _finish(
             text(
                 """
                 update reminder_forward
-                set step = 'sent', matched_case_ids = :cases, unclear_numbers = :unclear
+                set step = 'sent', matched_case_ids = :cases, unclear_numbers = :unclear,
+                    send_outcome = :outcome
                 where email_id = :email_id and draft_message_id = :draft and step = 'drafted'
                 returning id
                 """
@@ -217,6 +239,7 @@ def _finish(
             {
                 "cases": list(match.case_ids),
                 "unclear": match.unclear_numbers,
+                "outcome": "sent" if sent_now else "found_sent",
                 "email_id": email.id,
                 "draft": draft_id,
             },
@@ -242,6 +265,51 @@ def _finish(
     return match
 
 
+def _open_forward_exception(
+    engine: Engine, email: EmailRecord, draft_id: str, problem: str, detail: str
+) -> int:
+    with unit_of_work(engine, FORWARD_ACTOR) as db:
+        return open_exception(
+            db,
+            ExceptionReason.FORWARD_FAILED,
+            detail,
+            email_id=email.id,
+            facts={"problem": problem, "draft_message_id": draft_id},
+        )
+
+
+def _open_exception_id(engine: Engine, email: EmailRecord) -> int | None:
+    """The open forward exception of this email, if a person has not resolved it yet."""
+    with engine.connect() as connection:
+        found: int | None = connection.execute(
+            text(
+                "select id from exception_item where email_id = :id and reason = :reason"
+                " and resolved_at is null"
+            ),
+            {"id": email.id, "reason": ExceptionReason.FORWARD_FAILED.value},
+        ).scalar()
+    return found
+
+
+def _send(engine: Engine, graph: ReminderMailbox, email: EmailRecord, draft_id: str) -> int | bool:
+    """Step 3. Returns True when ARGUS sent the draft now, False when it was already sent, or
+    the ID of the exception opened because the draft is gone or was changed."""
+    try:
+        if not graph.is_draft(draft_id):
+            log.info("Reminder forward for email %s was found already sent", email.id)
+            return False
+        graph.send_draft(draft_id)
+    except GraphApiError as error:
+        if error.status != 404:
+            raise  # Graph unreachable or throttled: the next sweep tries again
+        log.warning("Reminder forward draft of email %s is gone, opening an exception", email.id)
+        return _open_forward_exception(engine, email, draft_id, "draft_gone", DRAFT_GONE)
+    except GraphCallRefused:
+        log.warning("Reminder forward draft of email %s was changed, not sent", email.id)
+        return _open_forward_exception(engine, email, draft_id, "draft_changed", DRAFT_CHANGED)
+    return True
+
+
 def forward_reminder(
     engine: Engine,
     graph: ReminderMailbox,
@@ -254,6 +322,9 @@ def forward_reminder(
     Safe to call again after a crash at any point: it carries on from the last recorded step
     and never sends a second forward. ``reminder`` is the email as the sorting read it, used
     to find the invoice numbers it names.
+
+    If the recorded draft is gone or was changed, ARGUS does not send anything and opens an
+    exception on the email (EX-01). While that exception is open, the email is left alone.
     """
     if decision.route is not Route.FORWARD_REMINDER:
         raise ForwardRefused(f"email {email.id} is routed to {decision.route}, not forwarded")
@@ -262,12 +333,14 @@ def forward_reminder(
     forward = _draft(engine, graph, email)
     sent_now = False
     if not forward.sent:
-        if graph.is_draft(forward.draft_message_id):
-            graph.send_draft(forward.draft_message_id)
-            sent_now = True
-        else:
-            log.info("Reminder forward for email %s was already sent, recording it", email.id)
-        match = _finish(engine, email, reminder, forward.draft_message_id)
+        waiting = _open_exception_id(engine, email)
+        if waiting is not None:
+            return ForwardResult(forward.draft_message_id, False, NO_MATCH, waiting)
+        sent = _send(engine, graph, email, forward.draft_message_id)
+        if not isinstance(sent, bool):
+            return ForwardResult(forward.draft_message_id, False, NO_MATCH, sent)
+        sent_now = sent
+        match = _finish(engine, email, reminder, forward.draft_message_id, sent_now)
         if match is not None:
             log.info(
                 "Reminder email %s forwarded, %d open invoice(s) marked, %d unclear number(s)",

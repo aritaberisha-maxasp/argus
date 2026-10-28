@@ -318,9 +318,45 @@ class GraphClient:
         return bool(answer.get("isDraft")) if isinstance(answer, dict) else False
 
     def send_draft(self, message_id: str) -> None:
-        """Send a saved draft. Graph sends a draft only once."""
+        """Send a saved draft. Graph sends a draft only once.
+
+        The draft sits in the shared mailbox until it is sent, so a person could change it in
+        the meantime. Right before sending, ARGUS reads its recipients again and refuses unless
+        it goes to the one forward address only, with no copy (compliance review of PR 93)."""
         _check_message_id(message_id)
+        answer = self._get(
+            f"{self._user}/messages/{message_id}",
+            {"$select": "isDraft,toRecipients,ccRecipients,bccRecipients"},
+        ).json()
+        problem = draft_recipient_problem(answer, self.forward_to or "")
+        if problem:
+            log.warning("Refused to send draft %s: %s", message_id, problem)
+            raise GraphCallRefused(f"refused to send the draft: {problem}")
         self._post(f"{self._user}/messages/{message_id}/send")
+
+
+def _addresses(recipients: Any) -> list[Any]:
+    if not isinstance(recipients, list):
+        return []
+    found = []
+    for recipient in recipients:
+        address = recipient.get("emailAddress") if isinstance(recipient, dict) else None
+        found.append(address.get("address") if isinstance(address, dict) else None)
+    return found
+
+
+def draft_recipient_problem(message: Any, forward_to: str) -> str | None:
+    """Why a draft must not be sent, or None when it goes to ``forward_to`` only."""
+    if not isinstance(message, dict) or message.get("isDraft") is not True:
+        return "it is not a draft"
+    if _addresses(message.get("ccRecipients")) or _addresses(message.get("bccRecipients")):
+        return "it has a copy recipient"
+    to = _addresses(message.get("toRecipients"))
+    if len(to) != 1:
+        return "it must have exactly one recipient"
+    if not isinstance(to[0], str) or not forward_to or to[0].lower() != forward_to.lower():
+        return "it goes to an address that is not the one set for reminders"
+    return None
 
 
 def _check_message_id(message_id: str) -> None:

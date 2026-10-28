@@ -17,9 +17,10 @@ from typing import Any
 
 import pytest
 from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from sqlalchemy import Engine, text
 
-from argus.cases.model import Actor, CaseKind, CaseStatus
+from argus.cases.model import Actor, CaseKind, CaseStatus, Outcome
 from argus.cases.store import (
     CaseRuleBroken,
     NotAllowed,
@@ -28,13 +29,14 @@ from argus.cases.store import (
     get_case,
     move_case,
     record_event,
+    resolve_exception,
     trace,
     unit_of_work,
     verify_chain,
 )
 from argus.documents.email import attachments_of
 from argus.documents.store import MemoryDocumentStore
-from argus.intake.graph import GraphApiError, GraphClient
+from argus.intake.graph import GraphCallRefused, GraphClient
 from argus.intake.records import EmailRecord, EmailStep, get_email
 from argus.intake.reminders import (
     FORWARD_ACTOR,
@@ -310,19 +312,198 @@ def test_after_a_crash_past_sending_the_next_run_records_without_sending(app: En
 
     assert not result.sent_now
     assert len(mailbox_of(fake).sent) == 1
+    assert forwarded_details(app, email.id)["send_outcome"] == "found_sent"
+
+
+def forwarded_details(app: Engine, email_id: int) -> dict[str, Any]:
+    return next(d for e, d in email_events(app, email_id) if e == "reminder_forwarded")
+
+
+def recorded_draft(app: Engine, email_id: int) -> tuple[str, str]:
+    with app.connect() as connection:
+        row = connection.execute(
+            text("select draft_message_id, step from reminder_forward where email_id = :id"),
+            {"id": email_id},
+        ).one()
+    return row[0], row[1]
+
+
+@pytest.mark.req("IN-05", "NF-06")
+@pytest.mark.usefixtures("clean")
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"cc": ["someone@example.test"]},
+        {"bcc": ["someone@example.test"]},
+        {"to": ["someone@example.test"]},
+        {"to": [FORWARD_TO, "someone@example.test"]},
+        {"to": []},
+    ],
+    ids=["cc added", "bcc added", "other recipient", "second recipient", "no recipient"],
+)
+def test_a_draft_changed_before_sending_is_not_sent(app: Engine, change: dict[str, Any]) -> None:
+    fake = fake_graph_with("E25")
+    mailbox = CrashingMailbox(graph_for(fake), "after recording the draft, before sending it")
+    email = classified(app, mailbox.graph)
+    reminder = read_fixture_email(fixture_path("E25"))
+    with pytest.raises(RuntimeError):
+        forward_reminder(app, mailbox, email, reminder, DECISION)
+    draft_id, _ = recorded_draft(app, email.id)
+    # A person with access to the shared mailbox changes the draft before the next sweep.
+    TestClient(fake).patch(f"/_standin/drafts/{draft_id}", json=change)
+
+    result = forward_reminder(app, mailbox, email, reminder, DECISION)
+
+    assert mailbox_of(fake).sent == []
+    assert recorded_draft(app, email.id) == (draft_id, "drafted")
+    assert "reminder_forwarded" not in [e for e, _ in email_events(app, email.id)]
+    assert open_forward_exceptions(app, email.id) == [(result.exception_id, "draft_changed")]
+
+
+def open_forward_exceptions(app: Engine, email_id: int) -> list[tuple[int, str]]:
+    with app.connect() as connection:
+        rows = connection.execute(
+            text(
+                "select id, facts ->> 'problem' from exception_item where email_id = :id"
+                " and reason = 'forward_failed' and resolved_at is null order by id"
+            ),
+            {"id": email_id},
+        ).all()
+    return [(r[0], r[1]) for r in rows]
+
+
+@pytest.mark.req("IN-05", "EX-01")
+@pytest.mark.usefixtures("clean")
+def test_a_recorded_draft_that_is_gone_opens_an_exception_and_sends_nothing(
+    app: Engine,
+) -> None:
+    fake = fake_graph_with("E25")
+    mailbox = CrashingMailbox(graph_for(fake), "after recording the draft, before sending it")
+    email = classified(app, mailbox.graph)
+    reminder = read_fixture_email(fixture_path("E25"))
+    with pytest.raises(RuntimeError):
+        forward_reminder(app, mailbox, email, reminder, DECISION)
+    draft_id, _ = recorded_draft(app, email.id)
+    TestClient(fake).delete(f"/_standin/drafts/{draft_id}")  # a person deleted it
+
+    result = forward_reminder(app, mailbox, email, reminder, DECISION)
+    again = forward_reminder(app, mailbox, email, reminder, DECISION)  # the next sweep
+
+    box = mailbox_of(fake)
+    assert box.sent == []
+    assert list(box.drafts) == []  # no second draft saved on its own
+    assert result.exception_id is not None
+    assert again.exception_id == result.exception_id  # one exception, not one per sweep
+    assert open_forward_exceptions(app, email.id) == [(result.exception_id, "draft_gone")]
+    assert recorded_draft(app, email.id) == (draft_id, "drafted")
+    with app.connect() as connection:
+        step: str = connection.execute(
+            text("select step from mailbox_email where id = :id"), {"id": email.id}
+        ).scalar_one()
+        opened: dict[str, Any] = connection.execute(
+            text(
+                "select details from audit_event where exception_id = :id"
+                " and event_type = 'exception_opened'"
+            ),
+            {"id": result.exception_id},
+        ).scalar_one()
+    assert step == "classified"
+    assert FORWARD_TO not in json.dumps(opened)
+
+
+@pytest.mark.req("IN-05", "EX-01")
+@pytest.mark.usefixtures("clean")
+def test_after_a_person_resolves_a_changed_draft_argus_sends_it_once(app: Engine) -> None:
+    fake = fake_graph_with("E25")
+    mailbox = CrashingMailbox(graph_for(fake), "after recording the draft, before sending it")
+    email = classified(app, mailbox.graph)
+    reminder = read_fixture_email(fixture_path("E25"))
+    with pytest.raises(RuntimeError):
+        forward_reminder(app, mailbox, email, reminder, DECISION)
+    draft_id, _ = recorded_draft(app, email.id)
+    standin = TestClient(fake)
+    standin.patch(f"/_standin/drafts/{draft_id}", json={"cc": ["someone@example.test"]})
+    waiting = forward_reminder(app, mailbox, email, reminder, DECISION)
+    assert waiting.exception_id is not None
+
+    standin.patch(f"/_standin/drafts/{draft_id}", json={"cc": []})  # the person fixes it
+    with unit_of_work(app, Actor.user("benjamin-entra-id")) as db:
+        resolve_exception(db, waiting.exception_id, Outcome.DATA_CORRECTED)
+    result = forward_reminder(app, mailbox, email, reminder, DECISION)
+
+    assert result.sent_now and result.exception_id is None
+    assert len(mailbox_of(fake).sent) == 1
+    assert mailbox_of(fake).sent[0].cc == []
+
+
+@pytest.mark.req("IN-05", "NF-01")
+@pytest.mark.usefixtures("clean")
+def test_a_draft_a_person_sent_is_logged_as_found_sent_not_as_sent_by_argus(app: Engine) -> None:
+    fake = fake_graph_with("E25")
+    mailbox = CrashingMailbox(graph_for(fake), "after recording the draft, before sending it")
+    email = classified(app, mailbox.graph)
+    reminder = read_fixture_email(fixture_path("E25"))
+    with pytest.raises(RuntimeError):
+        forward_reminder(app, mailbox, email, reminder, DECISION)
+    draft_id, _ = recorded_draft(app, email.id)
+    TestClient(fake).post(f"/_standin/drafts/{draft_id}/send")  # sent from Outlook
+
+    result = forward_reminder(app, mailbox, email, reminder, DECISION)
+
+    assert not result.sent_now
+    assert len(mailbox_of(fake).sent) == 1  # the person's send, none from ARGUS
+    assert forwarded_details(app, email.id)["send_outcome"] == "found_sent"
+
+
+@pytest.mark.req("IN-05", "NF-01")
+@pytest.mark.usefixtures("clean")
+def test_a_draft_argus_sent_is_logged_as_sent(app: Engine) -> None:
+    fake = fake_graph_with("E25")
+    graph = graph_for(fake)
+    email = classified(app, graph)
+
+    result = forward_reminder(app, graph, email, read_fixture_email(fixture_path("E25")), DECISION)
+
+    assert result.sent_now
+    assert forwarded_details(app, email.id)["send_outcome"] == "sent"
+
+
+@pytest.mark.req("NF-01")
+@pytest.mark.usefixtures("clean")
+def test_a_sent_forward_needs_its_outcome(app: Engine) -> None:
+    fake = fake_graph_with("E25")
+    mailbox = CrashingMailbox(graph_for(fake), "after recording the draft, before sending it")
+    email = classified(app, mailbox.graph)
+    with pytest.raises(RuntimeError):
+        forward_reminder(app, mailbox, email, read_fixture_email(fixture_path("E25")), DECISION)
+
+    with pytest.raises(CaseRuleBroken), unit_of_work(app, FORWARD_ACTOR) as db:
+        db.execute(
+            text(
+                "update reminder_forward set step = 'sent', matched_case_ids = '{}',"
+                " unclear_numbers = 0 where email_id = :id"
+            ),
+            {"id": email.id},
+        )
 
 
 @pytest.mark.req("IN-05")
 @pytest.mark.usefixtures("clean")
-def test_graph_refuses_to_send_a_draft_twice(app: Engine) -> None:
+def test_a_sent_draft_cannot_be_sent_again(app: Engine) -> None:
     fake = fake_graph_with("E25")
     graph = graph_for(fake)
     email = classified(app, graph)
     forward_reminder(app, graph, email, read_fixture_email(fixture_path("E25")), DECISION)
+    sent_id = mailbox_of(fake).sent[0].id
 
-    with pytest.raises(GraphApiError) as refused:
-        graph.send_draft(mailbox_of(fake).sent[0].id)
-    assert refused.value.status == 400
+    # ARGUS refuses before asking Graph, and Graph would refuse too.
+    with pytest.raises(GraphCallRefused, match="not a draft"):
+        graph.send_draft(sent_id)
+    answer = TestClient(fake).post(
+        f"/v1.0/users/{MAILBOX}/messages/{sent_id}/send",
+        headers={"Authorization": f"Bearer {TOKEN}"},
+    )
+    assert answer.status_code == 400
     assert len(mailbox_of(fake).sent) == 1
 
 
@@ -477,6 +658,7 @@ def test_the_forward_is_in_the_audit_log_with_ids_only(app: Engine) -> None:
         "draft_message_id": draft_id,
         "matched_case_ids": [case_id],
         "unclear_numbers": 0,
+        "send_outcome": "sent",
     }
     written = json.dumps([d for _, d in events])
     assert FORWARD_TO not in written

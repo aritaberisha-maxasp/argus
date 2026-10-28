@@ -29,4 +29,7 @@ Point the Graph client at `http://localhost:8081/v1.0` with `standin=True`, the 
 - `DELETE /_standin/messages/{id}` takes one out, as if ARGUS had filed it.
 - `POST /_standin/throttle?status=429&retry_after=1&times=1` makes the next calls fail.
 - `GET /_standin/records` shows how many emails are in the Inbox, how often each was read, how many drafts were saved, and every forward that was sent with its recipients and attachment fingerprints.
+- `PATCH /_standin/drafts/{id}` with `{"to": [...], "cc": [...], "bcc": [...]}` changes a saved draft, as a person in Outlook could.
+- `DELETE /_standin/drafts/{id}` deletes a draft, as a person could.
+- `POST /_standin/drafts/{id}/send` sends a draft the way a person would, outside ARGUS.
 - `POST /_standin/reset` goes back to the fixture emails.

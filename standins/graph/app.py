@@ -67,6 +67,8 @@ class Draft:
     comment: str
     attachments: list[tuple[str, bytes]]
     is_draft: bool = True
+    cc: list[str] = field(default_factory=list)
+    bcc: list[str] = field(default_factory=list)
 
 
 def attachments_of(raw: bytes) -> list[tuple[str, bytes]]:
@@ -253,7 +255,19 @@ def create_app(
             return refused
         draft = box.drafts.get(message_id)
         if draft is not None:
-            return JSONResponse({"id": draft.id, "isDraft": draft.is_draft})
+
+            def recipients(addresses: list[str]) -> list[dict[str, Any]]:
+                return [{"emailAddress": {"address": a}} for a in addresses]
+
+            return JSONResponse(
+                {
+                    "id": draft.id,
+                    "isDraft": draft.is_draft,
+                    "toRecipients": recipients(draft.to),
+                    "ccRecipients": recipients(draft.cc),
+                    "bccRecipients": recipients(draft.bcc),
+                }
+            )
         message = box.find(message_id)
         if message is None:
             return _error(404, "ErrorItemNotFound", "The specified object was not found.")
@@ -279,6 +293,30 @@ def create_app(
         draft.is_draft = False
         box.sent.append(draft)
         return Response(status_code=202)
+
+    @app.patch("/_standin/drafts/{draft_id}")
+    async def change_draft(draft_id: str, request: Request) -> dict[str, str]:
+        """Change a draft's recipients, as a person in Outlook could before it is sent."""
+        draft = box.drafts[draft_id]
+        changes = await request.json()
+        draft.to = changes.get("to", draft.to)
+        draft.cc = changes.get("cc", draft.cc)
+        draft.bcc = changes.get("bcc", draft.bcc)
+        return {"changed": draft_id}
+
+    @app.delete("/_standin/drafts/{draft_id}")
+    def delete_draft(draft_id: str) -> dict[str, str]:
+        """Delete a draft, as a person tidying the Drafts folder could."""
+        box.drafts.pop(draft_id, None)
+        return {"deleted": draft_id}
+
+    @app.post("/_standin/drafts/{draft_id}/send")
+    def send_as_person(draft_id: str) -> dict[str, str]:
+        """Send a draft the way a person in Outlook would, outside ARGUS."""
+        draft = box.drafts[draft_id]
+        draft.is_draft = False
+        box.sent.append(draft)
+        return {"sent": draft_id}
 
     @app.post("/_standin/messages")
     async def add_message(request: Request) -> dict[str, str]:

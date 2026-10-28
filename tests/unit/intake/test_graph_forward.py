@@ -5,11 +5,17 @@ forward to any other address is refused before it leaves ARGUS.
 """
 
 import json
+from collections.abc import Iterable
 
 import pytest
 from fastapi import FastAPI
 
-from argus.intake.graph import GraphCallRefused, GraphClient, forward_body_problem
+from argus.intake.graph import (
+    GraphCallRefused,
+    GraphClient,
+    draft_recipient_problem,
+    forward_body_problem,
+)
 from argus.intake.reminders import FORWARD_TO_ENV, forward_address_from_environment
 from standins.graph.app import MAILBOX, Mailbox, create_app
 from tests.unit.intake.graph_helpers import BASE_URL, TOKEN, StaticTokens, standin_transport
@@ -117,3 +123,59 @@ def test_the_forward_address_comes_from_the_settings() -> None:
             forward_address_from_environment({FORWARD_TO_ENV: value})
     with pytest.raises(ValueError):
         forward_address_from_environment({})
+
+
+def draft(
+    to: list[str | None],
+    cc: tuple[str, ...] = (),
+    bcc: tuple[str, ...] = (),
+    **extra: object,
+) -> dict[str, object]:
+    def recipients(items: Iterable[str | None]) -> list[dict[str, dict[str, str | None]]]:
+        return [{"emailAddress": {"address": a}} for a in items]
+
+    return {
+        "isDraft": True,
+        "toRecipients": recipients(to),
+        "ccRecipients": recipients(cc),
+        "bccRecipients": recipients(bcc),
+        **extra,
+    }
+
+
+@pytest.mark.req("IN-05", "NF-06")
+@pytest.mark.parametrize(
+    ("message", "problem"),
+    [
+        (draft([FORWARD_TO]), None),
+        (draft([FORWARD_TO.upper()]), None),
+        (draft([FORWARD_TO], cc=("x@example.test",)), "copy"),
+        (draft([FORWARD_TO], bcc=("x@example.test",)), "copy"),
+        (draft(["x@example.test"]), "not the one set"),
+        (draft([FORWARD_TO, "x@example.test"]), "exactly one"),
+        (draft([]), "exactly one"),
+        (draft([None]), "not the one set"),
+        (draft([FORWARD_TO], isDraft=False), "not a draft"),
+        ({"toRecipients": []}, "not a draft"),
+        ("not a message", "not a draft"),
+    ],
+)
+def test_a_draft_is_sent_only_when_it_goes_to_the_reminder_address_alone(
+    message: object, problem: str | None
+) -> None:
+    found = draft_recipient_problem(message, FORWARD_TO)
+    if problem is None:
+        assert found is None
+    else:
+        assert found is not None and problem in found
+
+
+@pytest.mark.req("IN-05", "NF-06")
+def test_send_reads_the_recipients_again_and_refuses_a_changed_draft(app: FastAPI) -> None:
+    graph = client(app)
+    draft_id = graph.create_forward(first_id(graph), "x")
+    box: Mailbox = app.state.mailbox
+    box.drafts[draft_id].bcc = ["x@example.test"]
+    with pytest.raises(GraphCallRefused, match="copy"):
+        graph.send_draft(draft_id)
+    assert box.sent == []
