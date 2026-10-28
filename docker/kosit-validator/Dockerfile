@@ -21,7 +21,9 @@ ADD --checksum=sha256:${VALIDATOR_SHA256} \
 ADD --checksum=sha256:${CONFIG_SHA256} \
     https://github.com/itplr-kosit/validator-configuration-xrechnung/releases/download/${CONFIG_RELEASE}/${CONFIG_FILE} \
     /fetch/config.zip
-RUN mkdir /fetch/config && cd /fetch/config && jar xf ../config.zip
+# ADD saves downloads readable for root only; the validator runs as its own user.
+RUN mkdir /fetch/config && cd /fetch/config && jar xf ../config.zip \
+    && chmod 0644 /fetch/validator.jar && chmod -R a+rX /fetch/config
 
 FROM eclipse-temurin:21-jre
 
