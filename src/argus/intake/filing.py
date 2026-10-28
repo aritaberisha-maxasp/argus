@@ -31,6 +31,7 @@ from argus.cases.model import Actor
 from argus.cases.store import unit_of_work
 from argus.intake.graph import GraphClient
 from argus.intake.records import (
+    DeletionOutcome,
     EmailRecord,
     EmailStep,
     due_for_deletion,
@@ -162,11 +163,14 @@ def remove_due(
         try:
             if removed_folder is None:
                 raise RuntimeError("ARGUS/Removed is missing from the mailbox")
-            # False means it is already gone: deleted just before a crash, or by a person.
-            # Recording it all the same stops the job from trying every day.
-            graph.delete_from(record.graph_message_id, removed_folder)
+            # False means it was already gone: deleted by a person, or by ARGUS just before a
+            # crash. It is recorded as such, so the job stops trying and the log stays true.
+            if graph.delete_from(record.graph_message_id, removed_folder):
+                outcome = DeletionOutcome.DELETED
+            else:
+                outcome = DeletionOutcome.ALREADY_GONE
             with unit_of_work(engine, REMOVAL_ACTOR) as db:
-                result.deleted += mark_deleted(db, record.id)
+                result.deleted += mark_deleted(db, record.id, outcome)
         except Exception:
             log.exception("Removal failed on email record %s, next run retries", record.id)
             result.failed += 1

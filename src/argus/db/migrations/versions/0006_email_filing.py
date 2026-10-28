@@ -5,7 +5,10 @@ Adds to the email records of 0004:
 - ``route``: where the sorting sent the email, set when it moves to the step ``routed``.
 - ``folder``: the ARGUS folder it was moved to, set when it moves to the step ``filed``.
 - ``filed_at``: when it was moved there, set by the database.
-- ``deleted_at``: when ARGUS deleted it from the mailbox, set by the database.
+- ``deleted_at``: when ARGUS recorded it as gone from the mailbox, set by the database.
+- ``deletion_outcome``: ``deleted`` when ARGUS deleted it, ``already_gone`` when ARGUS found it
+  already gone (a person deleted it, or ARGUS stopped right after its own delete). The log must
+  never claim ARGUS deleted an email it did not delete (compliance review of PR 92).
 
 The database holds the rules that keep an invoice from being lost (IN-06 note): only an email
 routed to the deletion folder can be filed in ARGUS/Removed, only an email in ARGUS/Removed can be
@@ -40,9 +43,11 @@ alter table mailbox_email
   add column folder text check (folder ~ '^ARGUS/[^/]+$'),
   add column filed_at timestamptz,   -- set by the database
   add column deleted_at timestamptz, -- set by the database
+  add column deletion_outcome text check (deletion_outcome in ('deleted','already_gone')),
   add check ((route is null) = (step in ('seen','stored','classified'))),
   add check ((folder is null) = (step <> 'filed')),
   add check ((folder is null) = (filed_at is null)),
+  add check ((deleted_at is null) = (deletion_outcome is null)),
   -- Only Other goes to ARGUS/Removed, and everything routed to the deletion folder goes there.
   add check (folder is null or (folder = 'ARGUS/Removed') = (route = 'deletion_folder')),
   add check (deleted_at is null or (folder = 'ARGUS/Removed'
@@ -54,8 +59,9 @@ create function mailbox_email_filing_guard() returns trigger language plpgsql
 set search_path = pg_catalog, public, pg_temp as $$
 begin
   if tg_op = 'INSERT' then
-    if (new.route, new.folder, new.filed_at, new.deleted_at) is distinct from
-       (null::text, null::text, null::timestamptz, null::timestamptz) then
+    if (new.route, new.folder, new.filed_at, new.deleted_at, new.deletion_outcome)
+       is distinct from (null::text, null::text, null::timestamptz, null::timestamptz, null::text)
+    then
       raise exception 'a new email record is not routed, filed or deleted';
     end if;
     return new;
@@ -74,7 +80,8 @@ begin
     new.filed_at := old.filed_at;
   end if;
   if old.deleted_at is not null then
-    if new.deleted_at is distinct from old.deleted_at then
+    if (new.deleted_at, new.deletion_outcome) is distinct from
+       (old.deleted_at, old.deletion_outcome) then
       raise exception 'email % is already deleted from the mailbox', old.id;
     end if;
   elsif new.deleted_at is not null then
@@ -84,7 +91,12 @@ begin
     if clock_timestamp() < old.filed_at + interval '30 days' then
       raise exception 'email % went to ARGUS/Removed less than 30 days ago', old.id;
     end if;
+    if new.deletion_outcome is null then
+      raise exception 'the deletion of email % needs its outcome', old.id;
+    end if;
     new.deleted_at := clock_timestamp();
+  elsif new.deletion_outcome is not null then
+    raise exception 'the deletion outcome of email % is set with its deletion', old.id;
   end if;
   return new;
 end $$;
@@ -99,13 +111,13 @@ begin
   if old.folder is null and new.folder is not null then
     insert into audit_event (email_id, event_type, details)
     values (new.id, 'email_moved',
-            jsonb_build_object('from_folder', 'Inbox', 'to_folder', new.folder,
-                               'route', new.route));
+            jsonb_build_object('to_folder', new.folder, 'route', new.route));
   end if;
   if old.deleted_at is null and new.deleted_at is not null then
     insert into audit_event (email_id, event_type, details)
     values (new.id, 'email_deleted',
-            jsonb_build_object('folder', new.folder, 'filed_at', new.filed_at,
+            jsonb_build_object('outcome', new.deletion_outcome,
+                               'folder', new.folder, 'filed_at', new.filed_at,
                                'days_in_folder',
                                extract(day from new.deleted_at - new.filed_at)::int));
   end if;
@@ -114,7 +126,7 @@ end $$;
 create trigger mailbox_email_filing_audit after update on mailbox_email
   for each row execute function mailbox_email_filing_audit();
 
-grant update (route, folder, deleted_at) on mailbox_email to argus_app;
+grant update (route, folder, deleted_at, deletion_outcome) on mailbox_email to argus_app;
 """
 
 DOWNGRADE = r"""
@@ -123,13 +135,14 @@ do $$ begin
     raise exception 'emails are routed or filed; their audit trail is kept for ten years (NF-01)';
   end if;
 end $$;
-revoke update (route, folder, deleted_at) on mailbox_email from argus_app;
+revoke update (route, folder, deleted_at, deletion_outcome) on mailbox_email from argus_app;
 drop trigger mailbox_email_filing_audit on mailbox_email;
 drop trigger mailbox_email_filing_guard on mailbox_email;
 drop function mailbox_email_filing_audit();
 drop function mailbox_email_filing_guard();
 alter table mailbox_email
-  drop column deleted_at, drop column filed_at, drop column folder, drop column route;
+  drop column deletion_outcome, drop column deleted_at, drop column filed_at,
+  drop column folder, drop column route;
 """
 
 

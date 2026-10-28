@@ -26,7 +26,13 @@ from argus.intake.filing import (
     remove_due,
 )
 from argus.intake.graph import GraphCallRefused, GraphClient
-from argus.intake.records import EmailRecord, get_email, mark_deleted, mark_routed
+from argus.intake.records import (
+    DeletionOutcome,
+    EmailRecord,
+    get_email,
+    mark_deleted,
+    mark_routed,
+)
 from argus.intake.sweep import SWEEP_ACTOR, sweep
 from argus.sorting.models import Route
 from standins.graph.app import INBOX_ID
@@ -324,7 +330,7 @@ def test_the_database_refuses_a_deletion_before_30_days(
         pytest.raises(CaseRuleBroken, match="less than 30 days"),
         unit_of_work(app, REMOVAL_ACTOR) as db,
     ):
-        mark_deleted(db, other.id)
+        mark_deleted(db, other.id, DeletionOutcome.DELETED)
 
 
 @pytest.mark.req("IN-06")
@@ -340,7 +346,7 @@ def test_the_database_refuses_to_delete_an_email_outside_removed(
         pytest.raises(CaseRuleBroken, match="not in ARGUS/Removed"),
         unit_of_work(app, REMOVAL_ACTOR) as db,
     ):
-        mark_deleted(db, invoice.id)
+        mark_deleted(db, invoice.id, DeletionOutcome.DELETED)
 
 
 @pytest.mark.req("IN-06")
@@ -374,7 +380,10 @@ def test_an_email_deleted_just_before_a_crash_is_recorded_on_the_next_run(
     result = remove_due(app, graph, folders)
 
     assert (result.deleted, result.failed) == (1, 0)
-    assert [e["event_type"] for e in events(app, other.id)].count("email_deleted") == 1
+    deleted = [e for e in events(app, other.id) if e["event_type"] == "email_deleted"]
+    assert len(deleted) == 1
+    assert deleted[0]["details"]["outcome"] == "already_gone"
+    assert row(app, other.id)["deletion_outcome"] == "already_gone"
     again = remove_due(app, graph, folders)
     assert (again.due, again.deleted) == (0, 0)
 
@@ -418,15 +427,12 @@ def test_filing_and_removal_are_in_the_audit_log(
     ]
     moved, deleted = logged[-2], logged[-1]
     assert moved["actor"] == str(FILING_ACTOR)
-    assert moved["details"] == {
-        "from_folder": "Inbox",
-        "to_folder": "ARGUS/Removed",
-        "route": "deletion_folder",
-    }
+    assert moved["details"] == {"to_folder": "ARGUS/Removed", "route": "deletion_folder"}
     assert deleted["actor"] == str(REMOVAL_ACTOR)
+    assert deleted["details"]["outcome"] == "deleted"
     assert deleted["details"]["folder"] == "ARGUS/Removed"
     assert deleted["details"]["days_in_folder"] == 30
-    assert set(deleted["details"]) == {"folder", "filed_at", "days_in_folder"}
+    assert set(deleted["details"]) == {"outcome", "folder", "filed_at", "days_in_folder"}
     with app.connect() as connection:
         assert verify_chain(connection) is None
 
@@ -478,7 +484,10 @@ def test_a_deletion_is_recorded_once_and_its_time_set_by_the_database(
     move_filing_back(owner, other.id, days=30)
     with unit_of_work(app, REMOVAL_ACTOR) as db:
         db.execute(
-            text("update mailbox_email set deleted_at = '2000-01-01' where id = :id"),
+            text(
+                "update mailbox_email set deleted_at = '2000-01-01',"
+                " deletion_outcome = 'deleted' where id = :id"
+            ),
             {"id": other.id},
         )
     deleted_at = row(app, other.id)["deleted_at"]
@@ -490,3 +499,67 @@ def test_a_deletion_is_recorded_once_and_its_time_set_by_the_database(
         db.execute(
             text("update mailbox_email set deleted_at = now() where id = :id"), {"id": other.id}
         )
+
+
+@pytest.mark.req("IN-06", "NF-01")
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        ("deleted_at = now()", "needs its outcome"),
+        ("deletion_outcome = 'deleted'", "set with its deletion"),
+        ("deleted_at = now(), deletion_outcome = 'removed'", "deletion_outcome"),
+    ],
+)
+@pytest.mark.usefixtures("clean")
+def test_a_deletion_always_says_whether_argus_deleted_the_email(
+    app: Engine, owner: Engine, graph: GraphClient, change: str, message: str
+) -> None:
+    other = filed_other(app, graph)
+    move_filing_back(owner, other.id, days=30)
+    with (
+        pytest.raises(CaseRuleBroken, match=message),
+        unit_of_work(app, REMOVAL_ACTOR) as db,
+    ):
+        db.execute(text(f"update mailbox_email set {change} where id = :id"), {"id": other.id})  # noqa: S608
+
+
+@pytest.mark.req("IN-06", "NF-01")
+@pytest.mark.usefixtures("clean")
+def test_the_deletion_outcome_cannot_be_changed_afterwards(
+    app: Engine, owner: Engine, graph: GraphClient
+) -> None:
+    other = filed_other(app, graph)
+    move_filing_back(owner, other.id, days=30)
+    remove_due(app, graph, Folders(graph))
+    assert row(app, other.id)["deletion_outcome"] == "deleted"
+    with (
+        pytest.raises(CaseRuleBroken, match="already deleted"),
+        unit_of_work(app, REMOVAL_ACTOR) as db,
+    ):
+        db.execute(
+            text("update mailbox_email set deletion_outcome = 'already_gone' where id = :id"),
+            {"id": other.id},
+        )
+
+
+@pytest.mark.req("IN-06", "NF-01")
+@pytest.mark.usefixtures("clean")
+def test_moved_names_only_where_the_email_went_wherever_it_came_from(
+    app: Engine, graph: GraphClient, fake_graph: FastAPI
+) -> None:
+    record = stored_emails(app, graph)[0]
+    route(app, record, Route.INVOICE_PROCESSING)
+    folders = Folders(graph)
+    # A person dragged the email into another folder before ARGUS filed it.
+    elsewhere = graph.create_folder(None, "Archive")
+    graph.move(record.graph_message_id, elsewhere)
+
+    assert file_routed(app, graph, folders).filed == 1
+
+    assert fake_graph.state.mailbox.in_folder("ARGUS/Incoming invoices") == {
+        record.graph_message_id
+    }
+    moved = [e for e in events(app, record.id) if e["event_type"] == "email_moved"]
+    assert [e["details"] for e in moved] == [
+        {"to_folder": "ARGUS/Incoming invoices", "route": "invoice_processing"}
+    ]

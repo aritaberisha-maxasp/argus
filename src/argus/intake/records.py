@@ -19,6 +19,14 @@ from argus.sorting.models import Route
 REMOVAL_DELAY = timedelta(days=30)
 
 
+class DeletionOutcome(StrEnum):
+    """How an email left ARGUS/Removed, so the audit log never claims ARGUS deleted an email it
+    found already gone (migration 0006)."""
+
+    DELETED = "deleted"  # ARGUS deleted it
+    ALREADY_GONE = "already_gone"  # gone before ARGUS asked: a person, or a crash after delete
+
+
 class EmailStep(StrEnum):
     """The steps of ADR 0003, in order. The database refuses to skip one."""
 
@@ -139,19 +147,19 @@ def mark_filed(connection: Connection, email_id: int, folder: str) -> bool:
     return result.first() is not None
 
 
-def mark_deleted(connection: Connection, email_id: int) -> bool:
-    """Record that the email was deleted from the mailbox. The database sets the time, checks
-    the 30 days in ARGUS/Removed by its own clock and logs ``email_deleted``. Returns False when
-    it was already recorded as deleted."""
+def mark_deleted(connection: Connection, email_id: int, outcome: DeletionOutcome) -> bool:
+    """Record that the email is gone from the mailbox, and whether ARGUS deleted it. The
+    database sets the time, checks the 30 days in ARGUS/Removed by its own clock and logs
+    ``email_deleted`` with the outcome. Returns False when it was already recorded."""
     result = connection.execute(
         text(
             """
-            update mailbox_email set deleted_at = clock_timestamp()
+            update mailbox_email set deleted_at = clock_timestamp(), deletion_outcome = :outcome
             where id = :id and deleted_at is null
             returning id
             """
         ),
-        {"id": email_id},
+        {"id": email_id, "outcome": outcome.value},
     )
     return result.first() is not None
 

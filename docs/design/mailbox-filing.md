@@ -33,8 +33,8 @@ Three layers keep an invoice from being deleted:
 The database writes every event itself, in the same transaction as the change. The application cannot write any `email_*` event (migration 0004).
 
 - `email_routed` and `email_filed`: the steps of ADR 0003 (migration 0004).
-- `email_moved`: where the email went, with `from_folder`, `to_folder` and `route`. Actor `system:mailbox-filing`.
-- `email_deleted`: the folder, when it was filed there and how many days it stayed. Actor `system:mailbox-removal`.
+- `email_moved`: where the email went, with `to_folder` and `route`. It does not name a source folder, because a person may have moved the email before ARGUS filed it. Actor `system:mailbox-filing`.
+- `email_deleted`: the outcome, the folder, when it was filed there and how many days it stayed. The outcome is `deleted` when ARGUS deleted the email and `already_gone` when ARGUS found it already gone, so the log never claims a deletion ARGUS did not make. Actor `system:mailbox-removal`.
 
 No sender, subject or content goes into the events or the logs. Logs name the internal email record ID only.
 
@@ -43,7 +43,7 @@ No sender, subject or content goes into the events or the logs. Logs name the in
 Graph is called first, outside any transaction, and the result is recorded afterwards in a short one (PR #79 review). If ARGUS stops in between:
 
 - **After a move:** the next run finds the record still at `routed` and moves it again. Moving an email into the folder it is already in changes nothing, and immutable IDs keep the email's ID the same.
-- **After a delete:** the next daily run finds the record still due. Graph says the email is gone, and ARGUS records the deletion. It does the same if a person deleted the email by hand, so the job does not try again every day.
+- **After a delete:** the next daily run finds the record still due. Graph says the email is gone, and ARGUS records it with the outcome `already_gone`. The same happens if a person deleted the email by hand. Either way the job stops trying, and the log does not claim ARGUS deleted it.
 
 ## New Graph calls
 
