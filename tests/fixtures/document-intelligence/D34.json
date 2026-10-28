@@ -1,0 +1,613 @@
+{
+ "sha256": "d6072331c58782a66b12fd72a2c75676b882716a7c3282865e1c07cd5df6a224",
+ "file": "D34_Rechnung_R-2026-0950.pdf",
+ "recorded": "written by hand from expected.json until the Azure setup (#65) exists",
+ "status": "succeeded",
+ "analyzeResult": {
+  "apiVersion": "2024-11-30",
+  "modelId": "prebuilt-invoice",
+  "content": "Beispiel Reinigung GmbH\nGlanzgasse 2, 70007 Beispielstadt, DE\nUSt-IdNr. DE012345607\nMax Muster AG\nAndere Straße 99\n70099 Anderstadt\nDE\nRechnung\nNummer: R-2026-0950\nDatum: 13.10.2026\nLeistungszeitraum: 01.10.2026 - 31.10.2026\nPos.\nBeschreibung\nMenge\nEinzelpreis\nBetrag\n1\nUnterhaltsreinigung Oktober\n1\n410,00 EUR\n410,00 EUR\nNettobetrag\n410,00 EUR\nUSt 19 %\n77,90 EUR\nGesamtbetrag\n487,90 EUR\nZahlbar bis 27.10.2026 ohne Abzug.\nBankverbindung: IBAN DE57 0000 0007 0000 7000 07\nSynthetic test document for ARGUS. Not a real invoice.",
+  "pages": [
+   {
+    "pageNumber": 1,
+    "lines": [
+     {
+      "content": "Beispiel Reinigung GmbH"
+     },
+     {
+      "content": "Glanzgasse 2, 70007 Beispielstadt, DE"
+     },
+     {
+      "content": "USt-IdNr. DE012345607"
+     },
+     {
+      "content": "Max Muster AG"
+     },
+     {
+      "content": "Andere Straße 99"
+     },
+     {
+      "content": "70099 Anderstadt"
+     },
+     {
+      "content": "DE"
+     },
+     {
+      "content": "Rechnung"
+     },
+     {
+      "content": "Nummer: R-2026-0950"
+     },
+     {
+      "content": "Datum: 13.10.2026"
+     },
+     {
+      "content": "Leistungszeitraum: 01.10.2026 - 31.10.2026"
+     },
+     {
+      "content": "Pos."
+     },
+     {
+      "content": "Beschreibung"
+     },
+     {
+      "content": "Menge"
+     },
+     {
+      "content": "Einzelpreis"
+     },
+     {
+      "content": "Betrag"
+     },
+     {
+      "content": "1"
+     },
+     {
+      "content": "Unterhaltsreinigung Oktober"
+     },
+     {
+      "content": "1"
+     },
+     {
+      "content": "410,00 EUR"
+     },
+     {
+      "content": "410,00 EUR"
+     },
+     {
+      "content": "Nettobetrag"
+     },
+     {
+      "content": "410,00 EUR"
+     },
+     {
+      "content": "USt 19 %"
+     },
+     {
+      "content": "77,90 EUR"
+     },
+     {
+      "content": "Gesamtbetrag"
+     },
+     {
+      "content": "487,90 EUR"
+     },
+     {
+      "content": "Zahlbar bis 27.10.2026 ohne Abzug."
+     },
+     {
+      "content": "Bankverbindung: IBAN DE57 0000 0007 0000 7000 07"
+     },
+     {
+      "content": "Synthetic test document for ARGUS. Not a real invoice."
+     }
+    ],
+    "words": [
+     {
+      "content": "Beispiel",
+      "confidence": 0.99
+     },
+     {
+      "content": "Reinigung",
+      "confidence": 0.99
+     },
+     {
+      "content": "GmbH",
+      "confidence": 0.99
+     },
+     {
+      "content": "Glanzgasse",
+      "confidence": 0.99
+     },
+     {
+      "content": "2,",
+      "confidence": 0.99
+     },
+     {
+      "content": "70007",
+      "confidence": 0.99
+     },
+     {
+      "content": "Beispielstadt,",
+      "confidence": 0.99
+     },
+     {
+      "content": "DE",
+      "confidence": 0.99
+     },
+     {
+      "content": "USt-IdNr.",
+      "confidence": 0.99
+     },
+     {
+      "content": "DE012345607",
+      "confidence": 0.99
+     },
+     {
+      "content": "Max",
+      "confidence": 0.99
+     },
+     {
+      "content": "Muster",
+      "confidence": 0.99
+     },
+     {
+      "content": "AG",
+      "confidence": 0.99
+     },
+     {
+      "content": "Andere",
+      "confidence": 0.99
+     },
+     {
+      "content": "Straße",
+      "confidence": 0.99
+     },
+     {
+      "content": "99",
+      "confidence": 0.99
+     },
+     {
+      "content": "70099",
+      "confidence": 0.99
+     },
+     {
+      "content": "Anderstadt",
+      "confidence": 0.99
+     },
+     {
+      "content": "DE",
+      "confidence": 0.99
+     },
+     {
+      "content": "Rechnung",
+      "confidence": 0.99
+     },
+     {
+      "content": "Nummer:",
+      "confidence": 0.99
+     },
+     {
+      "content": "R-2026-0950",
+      "confidence": 0.99
+     },
+     {
+      "content": "Datum:",
+      "confidence": 0.99
+     },
+     {
+      "content": "13.10.2026",
+      "confidence": 0.99
+     },
+     {
+      "content": "Leistungszeitraum:",
+      "confidence": 0.99
+     },
+     {
+      "content": "01.10.2026",
+      "confidence": 0.99
+     },
+     {
+      "content": "-",
+      "confidence": 0.99
+     },
+     {
+      "content": "31.10.2026",
+      "confidence": 0.99
+     },
+     {
+      "content": "Pos.",
+      "confidence": 0.99
+     },
+     {
+      "content": "Beschreibung",
+      "confidence": 0.99
+     },
+     {
+      "content": "Menge",
+      "confidence": 0.99
+     },
+     {
+      "content": "Einzelpreis",
+      "confidence": 0.99
+     },
+     {
+      "content": "Betrag",
+      "confidence": 0.99
+     },
+     {
+      "content": "1",
+      "confidence": 0.99
+     },
+     {
+      "content": "Unterhaltsreinigung",
+      "confidence": 0.99
+     },
+     {
+      "content": "Oktober",
+      "confidence": 0.99
+     },
+     {
+      "content": "1",
+      "confidence": 0.99
+     },
+     {
+      "content": "410,00",
+      "confidence": 0.99
+     },
+     {
+      "content": "EUR",
+      "confidence": 0.99
+     },
+     {
+      "content": "410,00",
+      "confidence": 0.99
+     },
+     {
+      "content": "EUR",
+      "confidence": 0.99
+     },
+     {
+      "content": "Nettobetrag",
+      "confidence": 0.99
+     },
+     {
+      "content": "410,00",
+      "confidence": 0.99
+     },
+     {
+      "content": "EUR",
+      "confidence": 0.99
+     },
+     {
+      "content": "USt",
+      "confidence": 0.99
+     },
+     {
+      "content": "19",
+      "confidence": 0.99
+     },
+     {
+      "content": "%",
+      "confidence": 0.99
+     },
+     {
+      "content": "77,90",
+      "confidence": 0.99
+     },
+     {
+      "content": "EUR",
+      "confidence": 0.99
+     },
+     {
+      "content": "Gesamtbetrag",
+      "confidence": 0.99
+     },
+     {
+      "content": "487,90",
+      "confidence": 0.99
+     },
+     {
+      "content": "EUR",
+      "confidence": 0.99
+     },
+     {
+      "content": "Zahlbar",
+      "confidence": 0.99
+     },
+     {
+      "content": "bis",
+      "confidence": 0.99
+     },
+     {
+      "content": "27.10.2026",
+      "confidence": 0.99
+     },
+     {
+      "content": "ohne",
+      "confidence": 0.99
+     },
+     {
+      "content": "Abzug.",
+      "confidence": 0.99
+     },
+     {
+      "content": "Bankverbindung:",
+      "confidence": 0.99
+     },
+     {
+      "content": "IBAN",
+      "confidence": 0.99
+     },
+     {
+      "content": "DE57",
+      "confidence": 0.99
+     },
+     {
+      "content": "0000",
+      "confidence": 0.99
+     },
+     {
+      "content": "0007",
+      "confidence": 0.99
+     },
+     {
+      "content": "0000",
+      "confidence": 0.99
+     },
+     {
+      "content": "7000",
+      "confidence": 0.99
+     },
+     {
+      "content": "07",
+      "confidence": 0.99
+     },
+     {
+      "content": "Synthetic",
+      "confidence": 0.99
+     },
+     {
+      "content": "test",
+      "confidence": 0.99
+     },
+     {
+      "content": "document",
+      "confidence": 0.99
+     },
+     {
+      "content": "for",
+      "confidence": 0.99
+     },
+     {
+      "content": "ARGUS.",
+      "confidence": 0.99
+     },
+     {
+      "content": "Not",
+      "confidence": 0.99
+     },
+     {
+      "content": "a",
+      "confidence": 0.99
+     },
+     {
+      "content": "real",
+      "confidence": 0.99
+     },
+     {
+      "content": "invoice.",
+      "confidence": 0.99
+     }
+    ]
+   }
+  ],
+  "documents": [
+   {
+    "docType": "invoice",
+    "fields": {
+     "VendorName": {
+      "type": "string",
+      "valueString": "Beispiel Reinigung GmbH",
+      "content": "Beispiel Reinigung GmbH",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "CustomerName": {
+      "type": "string",
+      "valueString": "Max Muster AG",
+      "content": "Max Muster AG",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "VendorTaxId": {
+      "type": "string",
+      "valueString": "DE012345607",
+      "content": "DE012345607",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "InvoiceId": {
+      "type": "string",
+      "valueString": "R-2026-0950",
+      "content": "R-2026-0950",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "InvoiceDate": {
+      "type": "date",
+      "valueDate": "2026-10-13",
+      "content": "2026-10-13",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "ServiceStartDate": {
+      "type": "date",
+      "valueDate": "2026-10-01",
+      "content": "2026-10-01",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "ServiceEndDate": {
+      "type": "date",
+      "valueDate": "2026-10-31",
+      "content": "2026-10-31",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "SubTotal": {
+      "type": "currency",
+      "valueCurrency": {
+       "amount": 410.0,
+       "currencyCode": "EUR"
+      },
+      "content": "410.00 EUR",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "TotalTax": {
+      "type": "currency",
+      "valueCurrency": {
+       "amount": 77.9,
+       "currencyCode": "EUR"
+      },
+      "content": "77.90 EUR",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "InvoiceTotal": {
+      "type": "currency",
+      "valueCurrency": {
+       "amount": 487.9,
+       "currencyCode": "EUR"
+      },
+      "content": "487.90 EUR",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "TaxDetails": {
+      "type": "array",
+      "valueArray": [
+       {
+        "type": "object",
+        "valueObject": {
+         "Rate": {
+          "type": "string",
+          "valueString": "19%",
+          "content": "19 %",
+          "boundingRegions": [
+           {
+            "pageNumber": 1,
+            "polygon": []
+           }
+          ],
+          "confidence": 0.98
+         },
+         "Amount": {
+          "type": "currency",
+          "valueCurrency": {
+           "amount": 77.9,
+           "currencyCode": "EUR"
+          },
+          "content": "77.90 EUR",
+          "boundingRegions": [
+           {
+            "pageNumber": 1,
+            "polygon": []
+           }
+          ],
+          "confidence": 0.98
+         }
+        }
+       }
+      ]
+     },
+     "PaymentDetails": {
+      "type": "array",
+      "valueArray": [
+       {
+        "type": "object",
+        "valueObject": {
+         "IBAN": {
+          "type": "string",
+          "valueString": "DE57000000070000700007",
+          "content": "DE57000000070000700007",
+          "boundingRegions": [
+           {
+            "pageNumber": 1,
+            "polygon": []
+           }
+          ],
+          "confidence": 0.98
+         }
+        }
+       }
+      ]
+     },
+     "DueDate": {
+      "type": "date",
+      "valueDate": "2026-10-27",
+      "content": "2026-10-27",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     }
+    }
+   }
+  ]
+ }
+}

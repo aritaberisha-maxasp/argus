@@ -167,32 +167,52 @@ class AzureOpenAIModel:
         self._http.close()
 
     def propose(self, email: EmailToSort) -> ModelAnswer:
-        try:
-            response = self._http.post(
-                f"/openai/deployments/{self.deployment}/chat/completions",
-                params={"api-version": self._api_version},
-                headers={"api-key": self._api_key.get_secret_value()},
-                json=request_body(email, self._own_company),
-            )
-        except httpx.HTTPError as error:
-            reason = type(error).__name__
-            raise ModelUnavailable(f"Azure OpenAI could not be reached: {reason}") from None
-        if response.status_code == 400 and _error_code(response) == "content_filter":
-            raise ModelAnswerInvalid("Azure OpenAI's content filter stopped the request")
-        if response.status_code != 200:
-            raise ModelUnavailable(f"Azure OpenAI answered with status {response.status_code}")
-        try:
-            choice = response.json()["choices"][0]
-            message = choice["message"]
-        except (ValueError, KeyError, IndexError, TypeError):
-            raise ModelAnswerInvalid("the Azure OpenAI response has no answer") from None
-        if choice.get("finish_reason") != "stop" or message.get("refusal"):
-            raise ModelAnswerInvalid(
-                f"the model did not finish its answer: {choice.get('finish_reason')}"
-            )
-        answer = parse_answer(message.get("content") or "")
+        content = complete(
+            self._http,
+            self.deployment,
+            self._api_version,
+            self._api_key,
+            request_body(email, self._own_company),
+        )
+        answer = parse_answer(content)
         log.info("Model proposed %s for email %s", answer.category, email.message_id)
         return answer
+
+
+def complete(
+    http: httpx.Client,
+    deployment: str,
+    api_version: str,
+    api_key: SecretStr,
+    body: dict[str, Any],
+) -> str:
+    """One chat completion with a fixed JSON answer. Returns the answer text. Raises
+    :class:`ModelUnavailable` or :class:`ModelAnswerInvalid`; neither message holds content."""
+    try:
+        response = http.post(
+            f"/openai/deployments/{deployment}/chat/completions",
+            params={"api-version": api_version},
+            headers={"api-key": api_key.get_secret_value()},
+            json=body,
+        )
+    except httpx.HTTPError as error:
+        reason = type(error).__name__
+        raise ModelUnavailable(f"Azure OpenAI could not be reached: {reason}") from None
+    if response.status_code == 400 and _error_code(response) == "content_filter":
+        raise ModelAnswerInvalid("Azure OpenAI's content filter stopped the request")
+    if response.status_code != 200:
+        raise ModelUnavailable(f"Azure OpenAI answered with status {response.status_code}")
+    try:
+        choice = response.json()["choices"][0]
+        message = choice["message"]
+    except (ValueError, KeyError, IndexError, TypeError):
+        raise ModelAnswerInvalid("the Azure OpenAI response has no answer") from None
+    if choice.get("finish_reason") != "stop" or message.get("refusal"):
+        raise ModelAnswerInvalid(
+            f"the model did not finish its answer: {choice.get('finish_reason')}"
+        )
+    content: str = message.get("content") or ""
+    return content
 
 
 def _error_code(response: httpx.Response) -> str | None:

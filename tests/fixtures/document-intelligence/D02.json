@@ -1,0 +1,672 @@
+{
+ "sha256": "4b27f97829711985b4a525c65a7829aea9e840af7350b42415a7ecb03f7d60a2",
+ "file": "D02_Rechnung_BCH-26-10-0042.pdf",
+ "recorded": "written by hand from expected.json until the Azure setup (#65) exists",
+ "status": "succeeded",
+ "analyzeResult": {
+  "apiVersion": "2024-11-30",
+  "modelId": "prebuilt-invoice",
+  "content": "Beispiel Cloud Hosting GmbH\nServerstraße 3, 70002 Beispielstadt, DE\nUSt-IdNr. DE012345602\nMax ASP GmbH\nTestallee 1\n70000 Musterstadt\nDE\nRechnung\nNummer: BCH-26-10-0042\nDatum: 01.10.2026\nLeistungszeitraum: 01.10.2026 - 31.10.2026\nPos.\nBeschreibung\nMenge\nEinzelpreis\nBetrag\n1\nManaged Server L\n1\n189,00 EUR\n189,00 EUR\n2\nBackup Speicher 500 GB\n1\n24,90 EUR\n24,90 EUR\nNettobetrag\n213,90 EUR\nUSt 19 %\n40,64 EUR\nGesamtbetrag\n254,54 EUR\nZahlbar bis 15.10.2026 ohne Abzug.\nBankverbindung: IBAN DE52 0000 0003 0000 7000 02\nSynthetic test document for ARGUS. Not a real invoice.",
+  "pages": [
+   {
+    "pageNumber": 1,
+    "lines": [
+     {
+      "content": "Beispiel Cloud Hosting GmbH"
+     },
+     {
+      "content": "Serverstraße 3, 70002 Beispielstadt, DE"
+     },
+     {
+      "content": "USt-IdNr. DE012345602"
+     },
+     {
+      "content": "Max ASP GmbH"
+     },
+     {
+      "content": "Testallee 1"
+     },
+     {
+      "content": "70000 Musterstadt"
+     },
+     {
+      "content": "DE"
+     },
+     {
+      "content": "Rechnung"
+     },
+     {
+      "content": "Nummer: BCH-26-10-0042"
+     },
+     {
+      "content": "Datum: 01.10.2026"
+     },
+     {
+      "content": "Leistungszeitraum: 01.10.2026 - 31.10.2026"
+     },
+     {
+      "content": "Pos."
+     },
+     {
+      "content": "Beschreibung"
+     },
+     {
+      "content": "Menge"
+     },
+     {
+      "content": "Einzelpreis"
+     },
+     {
+      "content": "Betrag"
+     },
+     {
+      "content": "1"
+     },
+     {
+      "content": "Managed Server L"
+     },
+     {
+      "content": "1"
+     },
+     {
+      "content": "189,00 EUR"
+     },
+     {
+      "content": "189,00 EUR"
+     },
+     {
+      "content": "2"
+     },
+     {
+      "content": "Backup Speicher 500 GB"
+     },
+     {
+      "content": "1"
+     },
+     {
+      "content": "24,90 EUR"
+     },
+     {
+      "content": "24,90 EUR"
+     },
+     {
+      "content": "Nettobetrag"
+     },
+     {
+      "content": "213,90 EUR"
+     },
+     {
+      "content": "USt 19 %"
+     },
+     {
+      "content": "40,64 EUR"
+     },
+     {
+      "content": "Gesamtbetrag"
+     },
+     {
+      "content": "254,54 EUR"
+     },
+     {
+      "content": "Zahlbar bis 15.10.2026 ohne Abzug."
+     },
+     {
+      "content": "Bankverbindung: IBAN DE52 0000 0003 0000 7000 02"
+     },
+     {
+      "content": "Synthetic test document for ARGUS. Not a real invoice."
+     }
+    ],
+    "words": [
+     {
+      "content": "Beispiel",
+      "confidence": 0.99
+     },
+     {
+      "content": "Cloud",
+      "confidence": 0.99
+     },
+     {
+      "content": "Hosting",
+      "confidence": 0.99
+     },
+     {
+      "content": "GmbH",
+      "confidence": 0.99
+     },
+     {
+      "content": "Serverstraße",
+      "confidence": 0.99
+     },
+     {
+      "content": "3,",
+      "confidence": 0.99
+     },
+     {
+      "content": "70002",
+      "confidence": 0.99
+     },
+     {
+      "content": "Beispielstadt,",
+      "confidence": 0.99
+     },
+     {
+      "content": "DE",
+      "confidence": 0.99
+     },
+     {
+      "content": "USt-IdNr.",
+      "confidence": 0.99
+     },
+     {
+      "content": "DE012345602",
+      "confidence": 0.99
+     },
+     {
+      "content": "Max",
+      "confidence": 0.99
+     },
+     {
+      "content": "ASP",
+      "confidence": 0.99
+     },
+     {
+      "content": "GmbH",
+      "confidence": 0.99
+     },
+     {
+      "content": "Testallee",
+      "confidence": 0.99
+     },
+     {
+      "content": "1",
+      "confidence": 0.99
+     },
+     {
+      "content": "70000",
+      "confidence": 0.99
+     },
+     {
+      "content": "Musterstadt",
+      "confidence": 0.99
+     },
+     {
+      "content": "DE",
+      "confidence": 0.99
+     },
+     {
+      "content": "Rechnung",
+      "confidence": 0.99
+     },
+     {
+      "content": "Nummer:",
+      "confidence": 0.99
+     },
+     {
+      "content": "BCH-26-10-0042",
+      "confidence": 0.99
+     },
+     {
+      "content": "Datum:",
+      "confidence": 0.99
+     },
+     {
+      "content": "01.10.2026",
+      "confidence": 0.99
+     },
+     {
+      "content": "Leistungszeitraum:",
+      "confidence": 0.99
+     },
+     {
+      "content": "01.10.2026",
+      "confidence": 0.99
+     },
+     {
+      "content": "-",
+      "confidence": 0.99
+     },
+     {
+      "content": "31.10.2026",
+      "confidence": 0.99
+     },
+     {
+      "content": "Pos.",
+      "confidence": 0.99
+     },
+     {
+      "content": "Beschreibung",
+      "confidence": 0.99
+     },
+     {
+      "content": "Menge",
+      "confidence": 0.99
+     },
+     {
+      "content": "Einzelpreis",
+      "confidence": 0.99
+     },
+     {
+      "content": "Betrag",
+      "confidence": 0.99
+     },
+     {
+      "content": "1",
+      "confidence": 0.99
+     },
+     {
+      "content": "Managed",
+      "confidence": 0.99
+     },
+     {
+      "content": "Server",
+      "confidence": 0.99
+     },
+     {
+      "content": "L",
+      "confidence": 0.99
+     },
+     {
+      "content": "1",
+      "confidence": 0.99
+     },
+     {
+      "content": "189,00",
+      "confidence": 0.99
+     },
+     {
+      "content": "EUR",
+      "confidence": 0.99
+     },
+     {
+      "content": "189,00",
+      "confidence": 0.99
+     },
+     {
+      "content": "EUR",
+      "confidence": 0.99
+     },
+     {
+      "content": "2",
+      "confidence": 0.99
+     },
+     {
+      "content": "Backup",
+      "confidence": 0.99
+     },
+     {
+      "content": "Speicher",
+      "confidence": 0.99
+     },
+     {
+      "content": "500",
+      "confidence": 0.99
+     },
+     {
+      "content": "GB",
+      "confidence": 0.99
+     },
+     {
+      "content": "1",
+      "confidence": 0.99
+     },
+     {
+      "content": "24,90",
+      "confidence": 0.99
+     },
+     {
+      "content": "EUR",
+      "confidence": 0.99
+     },
+     {
+      "content": "24,90",
+      "confidence": 0.99
+     },
+     {
+      "content": "EUR",
+      "confidence": 0.99
+     },
+     {
+      "content": "Nettobetrag",
+      "confidence": 0.99
+     },
+     {
+      "content": "213,90",
+      "confidence": 0.99
+     },
+     {
+      "content": "EUR",
+      "confidence": 0.99
+     },
+     {
+      "content": "USt",
+      "confidence": 0.99
+     },
+     {
+      "content": "19",
+      "confidence": 0.99
+     },
+     {
+      "content": "%",
+      "confidence": 0.99
+     },
+     {
+      "content": "40,64",
+      "confidence": 0.99
+     },
+     {
+      "content": "EUR",
+      "confidence": 0.99
+     },
+     {
+      "content": "Gesamtbetrag",
+      "confidence": 0.99
+     },
+     {
+      "content": "254,54",
+      "confidence": 0.99
+     },
+     {
+      "content": "EUR",
+      "confidence": 0.99
+     },
+     {
+      "content": "Zahlbar",
+      "confidence": 0.99
+     },
+     {
+      "content": "bis",
+      "confidence": 0.99
+     },
+     {
+      "content": "15.10.2026",
+      "confidence": 0.99
+     },
+     {
+      "content": "ohne",
+      "confidence": 0.99
+     },
+     {
+      "content": "Abzug.",
+      "confidence": 0.99
+     },
+     {
+      "content": "Bankverbindung:",
+      "confidence": 0.99
+     },
+     {
+      "content": "IBAN",
+      "confidence": 0.99
+     },
+     {
+      "content": "DE52",
+      "confidence": 0.99
+     },
+     {
+      "content": "0000",
+      "confidence": 0.99
+     },
+     {
+      "content": "0003",
+      "confidence": 0.99
+     },
+     {
+      "content": "0000",
+      "confidence": 0.99
+     },
+     {
+      "content": "7000",
+      "confidence": 0.99
+     },
+     {
+      "content": "02",
+      "confidence": 0.99
+     },
+     {
+      "content": "Synthetic",
+      "confidence": 0.99
+     },
+     {
+      "content": "test",
+      "confidence": 0.99
+     },
+     {
+      "content": "document",
+      "confidence": 0.99
+     },
+     {
+      "content": "for",
+      "confidence": 0.99
+     },
+     {
+      "content": "ARGUS.",
+      "confidence": 0.99
+     },
+     {
+      "content": "Not",
+      "confidence": 0.99
+     },
+     {
+      "content": "a",
+      "confidence": 0.99
+     },
+     {
+      "content": "real",
+      "confidence": 0.99
+     },
+     {
+      "content": "invoice.",
+      "confidence": 0.99
+     }
+    ]
+   }
+  ],
+  "documents": [
+   {
+    "docType": "invoice",
+    "fields": {
+     "VendorName": {
+      "type": "string",
+      "valueString": "Beispiel Cloud Hosting GmbH",
+      "content": "Beispiel Cloud Hosting GmbH",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "CustomerName": {
+      "type": "string",
+      "valueString": "Max ASP GmbH",
+      "content": "Max ASP GmbH",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "VendorTaxId": {
+      "type": "string",
+      "valueString": "DE012345602",
+      "content": "DE012345602",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "InvoiceId": {
+      "type": "string",
+      "valueString": "BCH-26-10-0042",
+      "content": "BCH-26-10-0042",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "InvoiceDate": {
+      "type": "date",
+      "valueDate": "2026-10-01",
+      "content": "2026-10-01",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "ServiceStartDate": {
+      "type": "date",
+      "valueDate": "2026-10-01",
+      "content": "2026-10-01",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "ServiceEndDate": {
+      "type": "date",
+      "valueDate": "2026-10-31",
+      "content": "2026-10-31",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "SubTotal": {
+      "type": "currency",
+      "valueCurrency": {
+       "amount": 213.9,
+       "currencyCode": "EUR"
+      },
+      "content": "213.90 EUR",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "TotalTax": {
+      "type": "currency",
+      "valueCurrency": {
+       "amount": 40.64,
+       "currencyCode": "EUR"
+      },
+      "content": "40.64 EUR",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "InvoiceTotal": {
+      "type": "currency",
+      "valueCurrency": {
+       "amount": 254.54,
+       "currencyCode": "EUR"
+      },
+      "content": "254.54 EUR",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "TaxDetails": {
+      "type": "array",
+      "valueArray": [
+       {
+        "type": "object",
+        "valueObject": {
+         "Rate": {
+          "type": "string",
+          "valueString": "19%",
+          "content": "19 %",
+          "boundingRegions": [
+           {
+            "pageNumber": 1,
+            "polygon": []
+           }
+          ],
+          "confidence": 0.98
+         },
+         "Amount": {
+          "type": "currency",
+          "valueCurrency": {
+           "amount": 40.64,
+           "currencyCode": "EUR"
+          },
+          "content": "40.64 EUR",
+          "boundingRegions": [
+           {
+            "pageNumber": 1,
+            "polygon": []
+           }
+          ],
+          "confidence": 0.98
+         }
+        }
+       }
+      ]
+     },
+     "PaymentDetails": {
+      "type": "array",
+      "valueArray": [
+       {
+        "type": "object",
+        "valueObject": {
+         "IBAN": {
+          "type": "string",
+          "valueString": "DE52000000030000700002",
+          "content": "DE52000000030000700002",
+          "boundingRegions": [
+           {
+            "pageNumber": 1,
+            "polygon": []
+           }
+          ],
+          "confidence": 0.98
+         }
+        }
+       }
+      ]
+     },
+     "DueDate": {
+      "type": "date",
+      "valueDate": "2026-10-15",
+      "content": "2026-10-15",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     }
+    }
+   }
+  ]
+ }
+}

@@ -1,0 +1,701 @@
+{
+ "sha256": "14ac10c138a67a1d1eeef4161381021135a774a03874273b3f5057ef5fb54ce0",
+ "file": "D11_Credit_note_ESL-CN-00412.pdf",
+ "recorded": "written by hand from expected.json until the Azure setup (#65) exists",
+ "status": "succeeded",
+ "analyzeResult": {
+  "apiVersion": "2024-11-30",
+  "modelId": "prebuilt-invoice",
+  "content": "Example Software Ltd\n1 Sample Street, XX1 1XX Exampleton, GB\nVAT ID GB000000004\nMax ASP GmbH\nTestallee 1\n70000 Musterstadt\nDE\nCredit note\nNumber: ESL-CN-00412\nDate: 11 Oct 2026\nService period: 01 Oct 2026 - 30 Sep 2027\nRefers to invoice ESL-INV-10293\nNo.\nDescription\nQty\nUnit price\nAmount\n1\nLicence reduction, 2 seats\n2\n39.00 GBP\n78.00 GBP\nNet amount\n78.00 GBP\nVAT 0 %\n0.00 GBP\nTotal\n78.00 GBP\nReverse charge: VAT to be accounted for by the recipient.\nThis amount will be offset against open invoices.\nBank details: IBAN GB83 TEST 0000 0070 0000 04\nSynthetic test document for ARGUS. Not a real invoice.",
+  "pages": [
+   {
+    "pageNumber": 1,
+    "lines": [
+     {
+      "content": "Example Software Ltd"
+     },
+     {
+      "content": "1 Sample Street, XX1 1XX Exampleton, GB"
+     },
+     {
+      "content": "VAT ID GB000000004"
+     },
+     {
+      "content": "Max ASP GmbH"
+     },
+     {
+      "content": "Testallee 1"
+     },
+     {
+      "content": "70000 Musterstadt"
+     },
+     {
+      "content": "DE"
+     },
+     {
+      "content": "Credit note"
+     },
+     {
+      "content": "Number: ESL-CN-00412"
+     },
+     {
+      "content": "Date: 11 Oct 2026"
+     },
+     {
+      "content": "Service period: 01 Oct 2026 - 30 Sep 2027"
+     },
+     {
+      "content": "Refers to invoice ESL-INV-10293"
+     },
+     {
+      "content": "No."
+     },
+     {
+      "content": "Description"
+     },
+     {
+      "content": "Qty"
+     },
+     {
+      "content": "Unit price"
+     },
+     {
+      "content": "Amount"
+     },
+     {
+      "content": "1"
+     },
+     {
+      "content": "Licence reduction, 2 seats"
+     },
+     {
+      "content": "2"
+     },
+     {
+      "content": "39.00 GBP"
+     },
+     {
+      "content": "78.00 GBP"
+     },
+     {
+      "content": "Net amount"
+     },
+     {
+      "content": "78.00 GBP"
+     },
+     {
+      "content": "VAT 0 %"
+     },
+     {
+      "content": "0.00 GBP"
+     },
+     {
+      "content": "Total"
+     },
+     {
+      "content": "78.00 GBP"
+     },
+     {
+      "content": "Reverse charge: VAT to be accounted for by the recipient."
+     },
+     {
+      "content": "This amount will be offset against open invoices."
+     },
+     {
+      "content": "Bank details: IBAN GB83 TEST 0000 0070 0000 04"
+     },
+     {
+      "content": "Synthetic test document for ARGUS. Not a real invoice."
+     }
+    ],
+    "words": [
+     {
+      "content": "Example",
+      "confidence": 0.99
+     },
+     {
+      "content": "Software",
+      "confidence": 0.99
+     },
+     {
+      "content": "Ltd",
+      "confidence": 0.99
+     },
+     {
+      "content": "1",
+      "confidence": 0.99
+     },
+     {
+      "content": "Sample",
+      "confidence": 0.99
+     },
+     {
+      "content": "Street,",
+      "confidence": 0.99
+     },
+     {
+      "content": "XX1",
+      "confidence": 0.99
+     },
+     {
+      "content": "1XX",
+      "confidence": 0.99
+     },
+     {
+      "content": "Exampleton,",
+      "confidence": 0.99
+     },
+     {
+      "content": "GB",
+      "confidence": 0.99
+     },
+     {
+      "content": "VAT",
+      "confidence": 0.99
+     },
+     {
+      "content": "ID",
+      "confidence": 0.99
+     },
+     {
+      "content": "GB000000004",
+      "confidence": 0.99
+     },
+     {
+      "content": "Max",
+      "confidence": 0.99
+     },
+     {
+      "content": "ASP",
+      "confidence": 0.99
+     },
+     {
+      "content": "GmbH",
+      "confidence": 0.99
+     },
+     {
+      "content": "Testallee",
+      "confidence": 0.99
+     },
+     {
+      "content": "1",
+      "confidence": 0.99
+     },
+     {
+      "content": "70000",
+      "confidence": 0.99
+     },
+     {
+      "content": "Musterstadt",
+      "confidence": 0.99
+     },
+     {
+      "content": "DE",
+      "confidence": 0.99
+     },
+     {
+      "content": "Credit",
+      "confidence": 0.99
+     },
+     {
+      "content": "note",
+      "confidence": 0.99
+     },
+     {
+      "content": "Number:",
+      "confidence": 0.99
+     },
+     {
+      "content": "ESL-CN-00412",
+      "confidence": 0.99
+     },
+     {
+      "content": "Date:",
+      "confidence": 0.99
+     },
+     {
+      "content": "11",
+      "confidence": 0.99
+     },
+     {
+      "content": "Oct",
+      "confidence": 0.99
+     },
+     {
+      "content": "2026",
+      "confidence": 0.99
+     },
+     {
+      "content": "Service",
+      "confidence": 0.99
+     },
+     {
+      "content": "period:",
+      "confidence": 0.99
+     },
+     {
+      "content": "01",
+      "confidence": 0.99
+     },
+     {
+      "content": "Oct",
+      "confidence": 0.99
+     },
+     {
+      "content": "2026",
+      "confidence": 0.99
+     },
+     {
+      "content": "-",
+      "confidence": 0.99
+     },
+     {
+      "content": "30",
+      "confidence": 0.99
+     },
+     {
+      "content": "Sep",
+      "confidence": 0.99
+     },
+     {
+      "content": "2027",
+      "confidence": 0.99
+     },
+     {
+      "content": "Refers",
+      "confidence": 0.99
+     },
+     {
+      "content": "to",
+      "confidence": 0.99
+     },
+     {
+      "content": "invoice",
+      "confidence": 0.99
+     },
+     {
+      "content": "ESL-INV-10293",
+      "confidence": 0.99
+     },
+     {
+      "content": "No.",
+      "confidence": 0.99
+     },
+     {
+      "content": "Description",
+      "confidence": 0.99
+     },
+     {
+      "content": "Qty",
+      "confidence": 0.99
+     },
+     {
+      "content": "Unit",
+      "confidence": 0.99
+     },
+     {
+      "content": "price",
+      "confidence": 0.99
+     },
+     {
+      "content": "Amount",
+      "confidence": 0.99
+     },
+     {
+      "content": "1",
+      "confidence": 0.99
+     },
+     {
+      "content": "Licence",
+      "confidence": 0.99
+     },
+     {
+      "content": "reduction,",
+      "confidence": 0.99
+     },
+     {
+      "content": "2",
+      "confidence": 0.99
+     },
+     {
+      "content": "seats",
+      "confidence": 0.99
+     },
+     {
+      "content": "2",
+      "confidence": 0.99
+     },
+     {
+      "content": "39.00",
+      "confidence": 0.99
+     },
+     {
+      "content": "GBP",
+      "confidence": 0.99
+     },
+     {
+      "content": "78.00",
+      "confidence": 0.99
+     },
+     {
+      "content": "GBP",
+      "confidence": 0.99
+     },
+     {
+      "content": "Net",
+      "confidence": 0.99
+     },
+     {
+      "content": "amount",
+      "confidence": 0.99
+     },
+     {
+      "content": "78.00",
+      "confidence": 0.99
+     },
+     {
+      "content": "GBP",
+      "confidence": 0.99
+     },
+     {
+      "content": "VAT",
+      "confidence": 0.99
+     },
+     {
+      "content": "0",
+      "confidence": 0.99
+     },
+     {
+      "content": "%",
+      "confidence": 0.99
+     },
+     {
+      "content": "0.00",
+      "confidence": 0.99
+     },
+     {
+      "content": "GBP",
+      "confidence": 0.99
+     },
+     {
+      "content": "Total",
+      "confidence": 0.99
+     },
+     {
+      "content": "78.00",
+      "confidence": 0.99
+     },
+     {
+      "content": "GBP",
+      "confidence": 0.99
+     },
+     {
+      "content": "Reverse",
+      "confidence": 0.99
+     },
+     {
+      "content": "charge:",
+      "confidence": 0.99
+     },
+     {
+      "content": "VAT",
+      "confidence": 0.99
+     },
+     {
+      "content": "to",
+      "confidence": 0.99
+     },
+     {
+      "content": "be",
+      "confidence": 0.99
+     },
+     {
+      "content": "accounted",
+      "confidence": 0.99
+     },
+     {
+      "content": "for",
+      "confidence": 0.99
+     },
+     {
+      "content": "by",
+      "confidence": 0.99
+     },
+     {
+      "content": "the",
+      "confidence": 0.99
+     },
+     {
+      "content": "recipient.",
+      "confidence": 0.99
+     },
+     {
+      "content": "This",
+      "confidence": 0.99
+     },
+     {
+      "content": "amount",
+      "confidence": 0.99
+     },
+     {
+      "content": "will",
+      "confidence": 0.99
+     },
+     {
+      "content": "be",
+      "confidence": 0.99
+     },
+     {
+      "content": "offset",
+      "confidence": 0.99
+     },
+     {
+      "content": "against",
+      "confidence": 0.99
+     },
+     {
+      "content": "open",
+      "confidence": 0.99
+     },
+     {
+      "content": "invoices.",
+      "confidence": 0.99
+     },
+     {
+      "content": "Bank",
+      "confidence": 0.99
+     },
+     {
+      "content": "details:",
+      "confidence": 0.99
+     },
+     {
+      "content": "IBAN",
+      "confidence": 0.99
+     },
+     {
+      "content": "GB83",
+      "confidence": 0.99
+     },
+     {
+      "content": "TEST",
+      "confidence": 0.99
+     },
+     {
+      "content": "0000",
+      "confidence": 0.99
+     },
+     {
+      "content": "0070",
+      "confidence": 0.99
+     },
+     {
+      "content": "0000",
+      "confidence": 0.99
+     },
+     {
+      "content": "04",
+      "confidence": 0.99
+     },
+     {
+      "content": "Synthetic",
+      "confidence": 0.99
+     },
+     {
+      "content": "test",
+      "confidence": 0.99
+     },
+     {
+      "content": "document",
+      "confidence": 0.99
+     },
+     {
+      "content": "for",
+      "confidence": 0.99
+     },
+     {
+      "content": "ARGUS.",
+      "confidence": 0.99
+     },
+     {
+      "content": "Not",
+      "confidence": 0.99
+     },
+     {
+      "content": "a",
+      "confidence": 0.99
+     },
+     {
+      "content": "real",
+      "confidence": 0.99
+     },
+     {
+      "content": "invoice.",
+      "confidence": 0.99
+     }
+    ]
+   }
+  ],
+  "documents": [
+   {
+    "docType": "invoice",
+    "fields": {
+     "VendorName": {
+      "type": "string",
+      "valueString": "Example Software Ltd",
+      "content": "Example Software Ltd",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "CustomerName": {
+      "type": "string",
+      "valueString": "Max ASP GmbH",
+      "content": "Max ASP GmbH",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "InvoiceId": {
+      "type": "string",
+      "valueString": "ESL-CN-00412",
+      "content": "ESL-CN-00412",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "InvoiceDate": {
+      "type": "date",
+      "valueDate": "2026-10-11",
+      "content": "2026-10-11",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "ServiceStartDate": {
+      "type": "date",
+      "valueDate": "2026-10-01",
+      "content": "2026-10-01",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "ServiceEndDate": {
+      "type": "date",
+      "valueDate": "2027-09-30",
+      "content": "2027-09-30",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "SubTotal": {
+      "type": "currency",
+      "valueCurrency": {
+       "amount": 78.0,
+       "currencyCode": "GBP"
+      },
+      "content": "78.00 GBP",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "TotalTax": {
+      "type": "currency",
+      "valueCurrency": {
+       "amount": 0.0,
+       "currencyCode": "GBP"
+      },
+      "content": "0.00 GBP",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "InvoiceTotal": {
+      "type": "currency",
+      "valueCurrency": {
+       "amount": 78.0,
+       "currencyCode": "GBP"
+      },
+      "content": "78.00 GBP",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "TaxDetails": {
+      "type": "array",
+      "valueArray": [
+       {
+        "type": "object",
+        "valueObject": {
+         "Rate": {
+          "type": "string",
+          "valueString": "0%",
+          "content": "0 %",
+          "boundingRegions": [
+           {
+            "pageNumber": 1,
+            "polygon": []
+           }
+          ],
+          "confidence": 0.98
+         },
+         "Amount": {
+          "type": "currency",
+          "valueCurrency": {
+           "amount": 0.0,
+           "currencyCode": "GBP"
+          },
+          "content": "0.00 GBP",
+          "boundingRegions": [
+           {
+            "pageNumber": 1,
+            "polygon": []
+           }
+          ],
+          "confidence": 0.98
+         }
+        }
+       }
+      ]
+     }
+    }
+   }
+  ]
+ }
+}
