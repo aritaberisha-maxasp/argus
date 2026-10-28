@@ -45,7 +45,7 @@ Every requirement ID in the [catalog](requirements.md) mapped to the backlog iss
 | PY-05 | [#47](https://github.com/aritaberisha-maxasp/argus/issues/47) | not yet |
 | PY-06 | [#27](https://github.com/aritaberisha-maxasp/argus/issues/27), [#47](https://github.com/aritaberisha-maxasp/argus/issues/47) | not yet |
 | PY-07 | [#48](https://github.com/aritaberisha-maxasp/argus/issues/48) | not yet |
-| PY-08 | [#43](https://github.com/aritaberisha-maxasp/argus/issues/43), [#50](https://github.com/aritaberisha-maxasp/argus/issues/50) | not yet |
+| PY-08 | [#43](https://github.com/aritaberisha-maxasp/argus/issues/43), [#50](https://github.com/aritaberisha-maxasp/argus/issues/50), [#84](https://github.com/aritaberisha-maxasp/argus/issues/84) | not yet |
 | PY-09 | [#49](https://github.com/aritaberisha-maxasp/argus/issues/49) | not yet |
 | PY-10 | [#47](https://github.com/aritaberisha-maxasp/argus/issues/47) | not yet |
 | PY-11 | [#51](https://github.com/aritaberisha-maxasp/argus/issues/51) | not yet |
@@ -75,12 +75,12 @@ Every requirement ID in the [catalog](requirements.md) mapped to the backlog iss
 | EX-01 | [#21](https://github.com/aritaberisha-maxasp/argus/issues/21), [#62](https://github.com/aritaberisha-maxasp/argus/issues/62) | not yet |
 | EX-02 | [#21](https://github.com/aritaberisha-maxasp/argus/issues/21) | not yet |
 | EX-03 | [#61](https://github.com/aritaberisha-maxasp/argus/issues/61) | not yet |
-| NF-01 | [#19](https://github.com/aritaberisha-maxasp/argus/issues/19), [#20](https://github.com/aritaberisha-maxasp/argus/issues/20), [#42](https://github.com/aritaberisha-maxasp/argus/issues/42), [#56](https://github.com/aritaberisha-maxasp/argus/issues/56), [#63](https://github.com/aritaberisha-maxasp/argus/issues/63), [#65](https://github.com/aritaberisha-maxasp/argus/issues/65) | not yet |
+| NF-01 | [#19](https://github.com/aritaberisha-maxasp/argus/issues/19), [#20](https://github.com/aritaberisha-maxasp/argus/issues/20), [#42](https://github.com/aritaberisha-maxasp/argus/issues/42), [#56](https://github.com/aritaberisha-maxasp/argus/issues/56), [#63](https://github.com/aritaberisha-maxasp/argus/issues/63), [#65](https://github.com/aritaberisha-maxasp/argus/issues/65), [#81](https://github.com/aritaberisha-maxasp/argus/issues/81), [#82](https://github.com/aritaberisha-maxasp/argus/issues/82), [#83](https://github.com/aritaberisha-maxasp/argus/issues/83) | not yet |
 | NF-02 | [#20](https://github.com/aritaberisha-maxasp/argus/issues/20), [#28](https://github.com/aritaberisha-maxasp/argus/issues/28) | not yet |
-| NF-03 | [#23](https://github.com/aritaberisha-maxasp/argus/issues/23), [#25](https://github.com/aritaberisha-maxasp/argus/issues/25), [#29](https://github.com/aritaberisha-maxasp/argus/issues/29), [#62](https://github.com/aritaberisha-maxasp/argus/issues/62), [#65](https://github.com/aritaberisha-maxasp/argus/issues/65) | not yet |
-| NF-04 | [#43](https://github.com/aritaberisha-maxasp/argus/issues/43), [#50](https://github.com/aritaberisha-maxasp/argus/issues/50) | not yet |
+| NF-03 | [#23](https://github.com/aritaberisha-maxasp/argus/issues/23), [#25](https://github.com/aritaberisha-maxasp/argus/issues/25), [#29](https://github.com/aritaberisha-maxasp/argus/issues/29), [#62](https://github.com/aritaberisha-maxasp/argus/issues/62), [#65](https://github.com/aritaberisha-maxasp/argus/issues/65), [#81](https://github.com/aritaberisha-maxasp/argus/issues/81), [#82](https://github.com/aritaberisha-maxasp/argus/issues/82) | not yet |
+| NF-04 | [#43](https://github.com/aritaberisha-maxasp/argus/issues/43), [#50](https://github.com/aritaberisha-maxasp/argus/issues/50), [#81](https://github.com/aritaberisha-maxasp/argus/issues/81), [#84](https://github.com/aritaberisha-maxasp/argus/issues/84) | not yet |
 | NF-05 | [#19](https://github.com/aritaberisha-maxasp/argus/issues/19), [#62](https://github.com/aritaberisha-maxasp/argus/issues/62) | not yet |
-| NF-06 | [#24](https://github.com/aritaberisha-maxasp/argus/issues/24), [#33](https://github.com/aritaberisha-maxasp/argus/issues/33), [#43](https://github.com/aritaberisha-maxasp/argus/issues/43), [#65](https://github.com/aritaberisha-maxasp/argus/issues/65) | not yet |
+| NF-06 | [#24](https://github.com/aritaberisha-maxasp/argus/issues/24), [#33](https://github.com/aritaberisha-maxasp/argus/issues/33), [#43](https://github.com/aritaberisha-maxasp/argus/issues/43), [#65](https://github.com/aritaberisha-maxasp/argus/issues/65), [#81](https://github.com/aritaberisha-maxasp/argus/issues/81), [#84](https://github.com/aritaberisha-maxasp/argus/issues/84) | not yet |
 | NF-07 | [#64](https://github.com/aritaberisha-maxasp/argus/issues/64) | not yet |
 
 ## Acceptance criteria

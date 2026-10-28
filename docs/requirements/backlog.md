@@ -12,6 +12,8 @@ Requirement coverage is in [coverage.md](coverage.md). Open business questions a
 4. **Then the money path in order:** approval, booking, payment runs, outgoing invoices, bank import.
 5. **Provisional stories.** Stories marked provisional depend on the DATEV spike (#2). Their order and details are revised when it closes. The stories on reading emails and invoices were revised after the document spike (#5) closed with ADR 0006. Stories that only need the stand ins can still start.
 
+6. **Azure and the database right after Sprint 1.** On 28 Oct 2026 Arita moved the Azure setup (#65), the deploy from CI (#81), database backups (#82) and the nightly audit copy (#83) up to ranks 14 to 17, so ARGUS runs on its real Azure database early. Deploys run only from CI, never by hand. Switching Wise to the sandbox and the real account (#84) sits just before the payment run hand over (#50).
+
 Sizes: S is about one night, M is two or three nights. Nothing is L.
 
 ## Proposed Sprint 1 (26 Oct to 1 Nov 2026)
@@ -57,43 +59,47 @@ Sprint 1 has seven shifts (five weeknights, Saturday and Sunday) and at most thr
 | 11 | [#66](https://github.com/aritaberisha-maxasp/argus/issues/66) | Run the acceptance tests AC-1 to AC-8 end to end against the stand ins | Quality | M | #24 |  |
 | 12 | [#29](https://github.com/aritaberisha-maxasp/argus/issues/29) | Read the invoice data from PDFs, images and scanned paper invoices | Intake | M | #24 |  |
 | 13 | [#28](https://github.com/aritaberisha-maxasp/argus/issues/28) | Read XRechnung and ZUGFeRD e-invoices | Intake | M | #24 |  |
-| 14 | [#70](https://github.com/aritaberisha-maxasp/argus/issues/70) | Trust a sender only when the email really comes from their domain | Intake | S | #25 |  |
-| 15 | [#71](https://github.com/aritaberisha-maxasp/argus/issues/71) | Send doubtful emails to a person instead of routing them | Intake | M | #25, #29, #28, #70 |  |
-| 16 | [#23](https://github.com/aritaberisha-maxasp/argus/issues/23) | Let approvers and Benjamin sign in with their Microsoft account and see only what their role allows | Foundation | M | #8 |  |
-| 17 | [#72](https://github.com/aritaberisha-maxasp/argus/issues/72) | Run ARGUS for two weeks in shadow mode before it routes anything | Intake | S | #25, #26, #27, #23 |  |
-| 18 | [#30](https://github.com/aritaberisha-maxasp/argus/issues/30) | Split an email with several invoices into one case per invoice | Intake | S | #29 |  |
-| 19 | [#31](https://github.com/aritaberisha-maxasp/argus/issues/31) | Catch invoices that arrive twice | Intake | S | #29, #21 |  |
-| 20 | [#32](https://github.com/aritaberisha-maxasp/argus/issues/32) | Check incoming invoices for the formal requirements of §14 UStG | Intake | S | #29, #21 |  |
-| 21 | [#34](https://github.com/aritaberisha-maxasp/argus/issues/34) | Keep the approver, deputy and direct debit flag for each vendor | DATEV | M | #23, #33 |  |
-| 22 | [#35](https://github.com/aritaberisha-maxasp/argus/issues/35) | Match each invoice to its vendor account in DATEV | DATEV | M | #33, #34, #29, #21 | yes, #2 |
-| 23 | [#36](https://github.com/aritaberisha-maxasp/argus/issues/36) | Block invoices whose IBAN differs from the one in DATEV | DATEV | S | #35 |  |
-| 24 | [#37](https://github.com/aritaberisha-maxasp/argus/issues/37) | Propose the G/L account and tax key from the vendor's booking history | DATEV | M | #35 | yes, #2 |
-| 25 | [#38](https://github.com/aritaberisha-maxasp/argus/issues/38) | Let the vendor's approver approve, reject or query an invoice without DATEV or Wise | Approval | M | #23, #35, #37 |  |
-| 26 | [#39](https://github.com/aritaberisha-maxasp/argus/issues/39) | Ask Benjamin for a second approval above EUR 5,000 | Approval | S | #38, #43 |  |
-| 27 | [#40](https://github.com/aritaberisha-maxasp/argus/issues/40) | Remind approvers after 3 working days and escalate after 5 | Approval | S | #38, #22 |  |
-| 28 | [#41](https://github.com/aritaberisha-maxasp/argus/issues/41) | Book approved invoices in DATEV automatically | Booking | M | #33, #38 | yes, #2 |
-| 29 | [#42](https://github.com/aritaberisha-maxasp/argus/issues/42) | Attach the invoice image and XML to every DATEV booking | Booking | S | #41 | yes, #2 |
-| 30 | [#61](https://github.com/aritaberisha-maxasp/argus/issues/61) | Send Benjamin a daily digest of open exceptions | Visibility | S | #21 |  |
-| 31 | [#62](https://github.com/aritaberisha-maxasp/argus/issues/62) | Show the status of every invoice at any time | Visibility | M | #23, #21 |  |
-| 32 | [#65](https://github.com/aritaberisha-maxasp/argus/issues/65) | Describe the Azure setup as code so Arita can deploy it | Operations | M | #8 |  |
-| 33 | [#44](https://github.com/aritaberisha-maxasp/argus/issues/44) | Convert foreign currency invoices to EUR at the Wise rate | Booking | S | #43, #41 |  |
-| 34 | [#45](https://github.com/aritaberisha-maxasp/argus/issues/45) | Book supplier credit notes and offset them in the next payment run | Booking | S | #41 |  |
-| 35 | [#46](https://github.com/aritaberisha-maxasp/argus/issues/46) | Collect booked invoices in the payment pool and know the run dates | Payment runs | S | #22, #41 |  |
-| 36 | [#47](https://github.com/aritaberisha-maxasp/argus/issues/47) | Choose which invoices go into each payment run | Payment runs | M | #46, #27 |  |
-| 37 | [#48](https://github.com/aritaberisha-maxasp/argus/issues/48) | Pay each vendor once per run, net of credit notes | Payment runs | S | #47, #45 |  |
-| 38 | [#49](https://github.com/aritaberisha-maxasp/argus/issues/49) | Send Benjamin a summary before each run is handed to Wise | Payment runs | S | #48 |  |
-| 39 | [#50](https://github.com/aritaberisha-maxasp/argus/issues/50) | Hand each payment run to Wise as an unfunded batch | Payment runs | M | #49, #43, #36 |  |
-| 40 | [#51](https://github.com/aritaberisha-maxasp/argus/issues/51) | Mark invoices as paid once Wise has sent the money | Payment runs | S | #50 |  |
-| 41 | [#52](https://github.com/aritaberisha-maxasp/argus/issues/52) | Book outgoing invoices to the right customer account and tax treatment | Outgoing invoices | M | #33, #25, #29, #21, #42, #44 | yes, #2 |
-| 42 | [#53](https://github.com/aritaberisha-maxasp/argus/issues/53) | Check outgoing invoice numbers for gaps and duplicates | Outgoing invoices | S | #52 |  |
-| 43 | [#54](https://github.com/aritaberisha-maxasp/argus/issues/54) | Book outgoing credit notes and cancellations linked to the original invoice | Outgoing invoices | S | #52 |  |
-| 44 | [#56](https://github.com/aritaberisha-maxasp/argus/issues/56) | Import the monthly Wise statement safely, once, with balances that add up | Bank import | M | #19, #20, #21 |  |
-| 45 | [#57](https://github.com/aritaberisha-maxasp/argus/issues/57) | Book bank transactions and clear supplier payments | Bank import | M | #56, #33, #51 | yes, #2 |
-| 46 | [#58](https://github.com/aritaberisha-maxasp/argus/issues/58) | Match customer payments to open invoices | Bank import | M | #57, #52 |  |
-| 47 | [#59](https://github.com/aritaberisha-maxasp/argus/issues/59) | Book fees, conversions, own transfers, taxes and payroll by rule | Bank import | M | #57 |  |
-| 48 | [#60](https://github.com/aritaberisha-maxasp/argus/issues/60) | Ask Benjamin about bank transactions ARGUS cannot match | Bank import | M | #59 |  |
-| 49 | [#63](https://github.com/aritaberisha-maxasp/argus/issues/63) | Show the full trail of a case from receipt to payment | Visibility | S | #62 |  |
-| 50 | [#64](https://github.com/aritaberisha-maxasp/argus/issues/64) | Measure how many invoices go through without manual work | Visibility | S | #62 |  |
+| 14 | [#65](https://github.com/aritaberisha-maxasp/argus/issues/65) | Describe the Azure setup as code so Arita can deploy it | Operations | M | #8 |  |
+| 15 | [#81](https://github.com/aritaberisha-maxasp/argus/issues/81) | Deploy ARGUS to Azure from CI so nobody deploys by hand | Operations | M | #65 |  |
+| 16 | [#82](https://github.com/aritaberisha-maxasp/argus/issues/82) | Keep backups of the invoice database for the legal retention period | Operations | S | #65, #81 |  |
+| 17 | [#83](https://github.com/aritaberisha-maxasp/argus/issues/83) | Copy the audit log every night to the locked document storage | Foundation | S | #19, #20, #21 |  |
+| 18 | [#70](https://github.com/aritaberisha-maxasp/argus/issues/70) | Trust a sender only when the email really comes from their domain | Intake | S | #25 |  |
+| 19 | [#71](https://github.com/aritaberisha-maxasp/argus/issues/71) | Send doubtful emails to a person instead of routing them | Intake | M | #25, #29, #28, #70 |  |
+| 20 | [#23](https://github.com/aritaberisha-maxasp/argus/issues/23) | Let approvers and Benjamin sign in with their Microsoft account and see only what their role allows | Foundation | M | #8 |  |
+| 21 | [#72](https://github.com/aritaberisha-maxasp/argus/issues/72) | Run ARGUS for two weeks in shadow mode before it routes anything | Intake | S | #25, #26, #27, #23 |  |
+| 22 | [#30](https://github.com/aritaberisha-maxasp/argus/issues/30) | Split an email with several invoices into one case per invoice | Intake | S | #29 |  |
+| 23 | [#31](https://github.com/aritaberisha-maxasp/argus/issues/31) | Catch invoices that arrive twice | Intake | S | #29, #21 |  |
+| 24 | [#32](https://github.com/aritaberisha-maxasp/argus/issues/32) | Check incoming invoices for the formal requirements of §14 UStG | Intake | S | #29, #21 |  |
+| 25 | [#34](https://github.com/aritaberisha-maxasp/argus/issues/34) | Keep the approver, deputy and direct debit flag for each vendor | DATEV | M | #23, #33 |  |
+| 26 | [#35](https://github.com/aritaberisha-maxasp/argus/issues/35) | Match each invoice to its vendor account in DATEV | DATEV | M | #33, #34, #29, #21 | yes, #2 |
+| 27 | [#36](https://github.com/aritaberisha-maxasp/argus/issues/36) | Block invoices whose IBAN differs from the one in DATEV | DATEV | S | #35 |  |
+| 28 | [#37](https://github.com/aritaberisha-maxasp/argus/issues/37) | Propose the G/L account and tax key from the vendor's booking history | DATEV | M | #35 | yes, #2 |
+| 29 | [#38](https://github.com/aritaberisha-maxasp/argus/issues/38) | Let the vendor's approver approve, reject or query an invoice without DATEV or Wise | Approval | M | #23, #35, #37 |  |
+| 30 | [#39](https://github.com/aritaberisha-maxasp/argus/issues/39) | Ask Benjamin for a second approval above EUR 5,000 | Approval | S | #38, #43 |  |
+| 31 | [#40](https://github.com/aritaberisha-maxasp/argus/issues/40) | Remind approvers after 3 working days and escalate after 5 | Approval | S | #38, #22 |  |
+| 32 | [#41](https://github.com/aritaberisha-maxasp/argus/issues/41) | Book approved invoices in DATEV automatically | Booking | M | #33, #38 | yes, #2 |
+| 33 | [#42](https://github.com/aritaberisha-maxasp/argus/issues/42) | Attach the invoice image and XML to every DATEV booking | Booking | S | #41 | yes, #2 |
+| 34 | [#61](https://github.com/aritaberisha-maxasp/argus/issues/61) | Send Benjamin a daily digest of open exceptions | Visibility | S | #21 |  |
+| 35 | [#62](https://github.com/aritaberisha-maxasp/argus/issues/62) | Show the status of every invoice at any time | Visibility | M | #23, #21 |  |
+| 36 | [#44](https://github.com/aritaberisha-maxasp/argus/issues/44) | Convert foreign currency invoices to EUR at the Wise rate | Booking | S | #43, #41 |  |
+| 37 | [#45](https://github.com/aritaberisha-maxasp/argus/issues/45) | Book supplier credit notes and offset them in the next payment run | Booking | S | #41 |  |
+| 38 | [#46](https://github.com/aritaberisha-maxasp/argus/issues/46) | Collect booked invoices in the payment pool and know the run dates | Payment runs | S | #22, #41 |  |
+| 39 | [#47](https://github.com/aritaberisha-maxasp/argus/issues/47) | Choose which invoices go into each payment run | Payment runs | M | #46, #27 |  |
+| 40 | [#48](https://github.com/aritaberisha-maxasp/argus/issues/48) | Pay each vendor once per run, net of credit notes | Payment runs | S | #47, #45 |  |
+| 41 | [#49](https://github.com/aritaberisha-maxasp/argus/issues/49) | Send Benjamin a summary before each run is handed to Wise | Payment runs | S | #48 |  |
+| 42 | [#84](https://github.com/aritaberisha-maxasp/argus/issues/84) | Switch the Wise client from the stand in to the Wise sandbox and then to Max ASP's real Wise account | Payment runs | M | #43, #81, #50 for the live run |  |
+| 43 | [#50](https://github.com/aritaberisha-maxasp/argus/issues/50) | Hand each payment run to Wise as an unfunded batch | Payment runs | M | #49, #43, #36 |  |
+| 44 | [#51](https://github.com/aritaberisha-maxasp/argus/issues/51) | Mark invoices as paid once Wise has sent the money | Payment runs | S | #50 |  |
+| 45 | [#52](https://github.com/aritaberisha-maxasp/argus/issues/52) | Book outgoing invoices to the right customer account and tax treatment | Outgoing invoices | M | #33, #25, #29, #21, #42, #44 | yes, #2 |
+| 46 | [#53](https://github.com/aritaberisha-maxasp/argus/issues/53) | Check outgoing invoice numbers for gaps and duplicates | Outgoing invoices | S | #52 |  |
+| 47 | [#54](https://github.com/aritaberisha-maxasp/argus/issues/54) | Book outgoing credit notes and cancellations linked to the original invoice | Outgoing invoices | S | #52 |  |
+| 48 | [#56](https://github.com/aritaberisha-maxasp/argus/issues/56) | Import the monthly Wise statement safely, once, with balances that add up | Bank import | M | #19, #20, #21 |  |
+| 49 | [#57](https://github.com/aritaberisha-maxasp/argus/issues/57) | Book bank transactions and clear supplier payments | Bank import | M | #56, #33, #51 | yes, #2 |
+| 50 | [#58](https://github.com/aritaberisha-maxasp/argus/issues/58) | Match customer payments to open invoices | Bank import | M | #57, #52 |  |
+| 51 | [#59](https://github.com/aritaberisha-maxasp/argus/issues/59) | Book fees, conversions, own transfers, taxes and payroll by rule | Bank import | M | #57 |  |
+| 52 | [#60](https://github.com/aritaberisha-maxasp/argus/issues/60) | Ask Benjamin about bank transactions ARGUS cannot match | Bank import | M | #59 |  |
+| 53 | [#63](https://github.com/aritaberisha-maxasp/argus/issues/63) | Show the full trail of a case from receipt to payment | Visibility | S | #62 |  |
+| 54 | [#64](https://github.com/aritaberisha-maxasp/argus/issues/64) | Measure how many invoices go through without manual work | Visibility | S | #62 |  |
 
 ## What changes when the DATEV spike closes
 
