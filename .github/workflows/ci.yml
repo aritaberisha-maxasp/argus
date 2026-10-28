@@ -169,3 +169,27 @@ jobs:
       # does not turn this run red. Each branch is checked by its own runs.
       - name: Scan the git history
         run: ./gitleaks git --redact --no-banner --verbose --log-opts="--full-history HEAD" .
+
+  # TEMPORARY (#28): finds the KoSIT XRechnung configuration release and its checksum, so the
+  # validator image can pin it. Removed before the PR leaves draft.
+  kosit-discovery:
+    name: KoSIT discovery (temporary)
+    runs-on: ubuntu-latest
+    steps:
+      - name: List releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api repos/itplr-kosit/validator-configuration-xrechnung/releases --jq '.[0:4][] | .tag_name + " " + .published_at + " " + ([.assets[] | .name + " " + .browser_download_url] | join(" | "))'
+          gh api repos/itplr-kosit/validator/releases --jq '.[0:3][] | .tag_name + " " + ([.assets[] | .name] | join(" | "))'
+      - name: Download and list the newest configuration
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          url=$(gh api repos/itplr-kosit/validator-configuration-xrechnung/releases --jq '.[0].assets[] | select(.name | endswith(".zip")) | .browser_download_url' | head -1)
+          echo "$url"
+          curl -sSfL -o config.zip "$url"
+          sha256sum config.zip
+          unzip -l config.zip
+          unzip -o -q config.zip -d config
+          cat config/scenarios.xml || find config -name 'scenarios*.xml' -exec cat {} \;
