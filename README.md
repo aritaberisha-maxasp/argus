@@ -11,6 +11,15 @@ python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 .venv/bin/pytest
 ```
 
+The case store tests (`tests/integration/`) need an empty PostgreSQL 16 that they may wipe. Without one they are skipped locally; in CI they always run.
+
+```bash
+docker run -d --name argus-pg -p 5432:5432 -e POSTGRES_PASSWORD=local -e POSTGRES_DB=argus_test postgres:16
+ARGUS_TEST_DATABASE_URL=postgresql+psycopg://postgres:local@localhost:5432/argus_test .venv/bin/pytest
+```
+
+To create the tables in a database, set `ARGUS_DATABASE_URL` and run `.venv/bin/alembic upgrade head`. The migrations are in `src/argus/db/migrations/`.
+
 CI runs the same tests plus `ruff check`, `ruff format --check`, `mypy`, the fixture check and a secret scan on every PR. Tag each test with the requirements it covers, for example `@pytest.mark.req("IN-04", "IN-09")`. An ID that is not in the catalog fails the run.
 
 ## Stand ins
