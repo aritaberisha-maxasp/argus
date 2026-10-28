@@ -1,12 +1,13 @@
 # Fake Microsoft Graph
 
-A fake Graph for development and CI, so the mailbox sweep runs without a Microsoft account (ADR 0003). It serves the accounts mailbox from the 50 synthetic fixture emails in `tests/fixtures/emails` and answers the two Graph calls ARGUS makes today: list the Inbox (with paging) and read one email as its raw `.eml` file.
+A fake Graph for development and CI, so the mailbox sweep runs without a Microsoft account (ADR 0003). It serves the accounts mailbox from the 50 synthetic fixture emails in `tests/fixtures/emails` and answers the Graph calls ARGUS makes today: list the Inbox (with paging), read one email as its raw `.eml` file, and forward a payment reminder through a saved draft (save the forward, check it is still a draft, send it).
 
 It behaves like Graph where it matters for ARGUS:
 
 - IDs are immutable only when the request sends `Prefer: IdType="ImmutableId"`. Without the header you get different IDs, as with Graph after a move.
 - Only the one mailbox (`accounts@maxasp.example`) is open. Any other mailbox gets `403 ErrorAccessDenied`, like an app scoped by Exchange.
 - It can answer with `429` and `Retry-After` on demand, to test throttling.
+- A forward is saved as a draft that carries every attachment of the original. A draft can be sent once; sending it again gets `400`, as with Graph.
 
 All data is synthetic and lives in memory until the container stops.
 
@@ -27,5 +28,5 @@ Point the Graph client at `http://localhost:8081/v1.0` with `standin=True`, the 
 - `POST /_standin/messages` with a raw `.eml` body adds an email to the Inbox.
 - `DELETE /_standin/messages/{id}` takes one out, as if ARGUS had filed it.
 - `POST /_standin/throttle?status=429&retry_after=1&times=1` makes the next calls fail.
-- `GET /_standin/records` shows how many emails are in the Inbox and how often each was read.
+- `GET /_standin/records` shows how many emails are in the Inbox, how often each was read, how many drafts were saved, and every forward that was sent with its recipients and attachment fingerprints.
 - `POST /_standin/reset` goes back to the fixture emails.

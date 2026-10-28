@@ -1,9 +1,10 @@
 """The Microsoft Graph client that reads the accounts mailbox (ADR 0003, IN-01, NF-06).
 
 It signs in as the ARGUS app and needs only two application permissions, Mail.ReadWrite and
-Mail.Send, limited by Exchange to the one mailbox. Every token is checked before use: if it
-carries any other Graph permission, the client refuses to send anything, so a too wide grant is
-noticed at once instead of going unused and unseen.
+Mail.Send, limited by Exchange to the one mailbox. Mail.Send is used for one thing only:
+forwarding payment reminders to the one address set for them (IN-05, #27). Every token is
+checked before use: if it carries any other Graph permission, the client refuses to send
+anything, so a too wide grant is noticed at once instead of going unused and unseen.
 
 Every request asks for immutable message IDs, which stay the same when an email moves to
 another folder, and passes the allowlist below inside the HTTP transport. Calls for another
@@ -103,14 +104,46 @@ def check_token(token: SecretStr) -> None:
         )
 
 
-def allowed_paths(base_path: str, mailbox: str) -> tuple[tuple[str, re.Pattern[str]], ...]:
-    """The only Graph calls ARGUS makes, all on the one mailbox. Later stories add moving,
-    forwarding and deleting (ADR 0003), each with a review."""
+def allowed_paths(
+    base_path: str, mailbox: str, forward_to: str | None = None
+) -> tuple[tuple[str, re.Pattern[str]], ...]:
+    """The only Graph calls ARGUS makes, all on the one mailbox. Later stories add moving and
+    deleting (ADR 0003), each with a review.
+
+    Forwarding (#27) is only allowed when a forward address is set: save a forward as a draft,
+    check whether a message is still a draft, and send a draft."""
     user = re.escape(f"{base_path.rstrip('/')}/users/{quote(mailbox, safe='@')}")
-    return (
+    paths: tuple[tuple[str, re.Pattern[str]], ...] = (
         ("GET", re.compile(f"{user}/mailFolders/inbox/messages")),
         ("GET", re.compile(f"{user}/messages/{_MESSAGE_ID}/\\$value")),
     )
+    if forward_to:
+        paths += (
+            ("POST", re.compile(f"{user}/messages/{_MESSAGE_ID}/createForward")),
+            ("GET", re.compile(f"{user}/messages/{_MESSAGE_ID}")),
+            ("POST", re.compile(f"{user}/messages/{_MESSAGE_ID}/send")),
+        )
+    return paths
+
+
+def forward_body_problem(content: bytes, forward_to: str) -> str | None:
+    """Why a createForward body is refused, or None when it is fine. A forward goes to the one
+    set address and nowhere else: no other recipient, no copy, no changed message."""
+    try:
+        body = json.loads(content)
+    except ValueError:
+        return "the forward body is not JSON"
+    if not isinstance(body, dict) or set(body) - {"comment", "toRecipients"}:
+        return "the forward may only carry a comment and its recipient"
+    recipients = body.get("toRecipients")
+    if not isinstance(recipients, list) or len(recipients) != 1:
+        return "the forward must have exactly one recipient"
+    recipient = recipients[0]
+    address = recipient.get("emailAddress") if isinstance(recipient, dict) else None
+    address = address.get("address") if isinstance(address, dict) else None
+    if not isinstance(address, str) or not forward_to or address.lower() != forward_to.lower():
+        return "the forward goes to an address that is not the one set for reminders"
+    return None
 
 
 class _AppToken(httpx.Auth):
@@ -127,12 +160,20 @@ class _AppToken(httpx.Auth):
 
 
 class _GuardedTransport(httpx.BaseTransport):
-    """Checks every request against the allowlist, the mailbox and the Graph host."""
+    """Checks every request against the allowlist, the mailbox and the Graph host, and every
+    forward against the one address set for reminders."""
 
-    def __init__(self, inner: httpx.BaseTransport, base_url: httpx.URL, mailbox: str) -> None:
+    def __init__(
+        self,
+        inner: httpx.BaseTransport,
+        base_url: httpx.URL,
+        mailbox: str,
+        forward_to: str | None = None,
+    ) -> None:
         self._inner = inner
         self._origin = (base_url.scheme, base_url.host, base_url.port)
-        self._allowed = allowed_paths(base_url.raw_path.decode("ascii"), mailbox)
+        self._allowed = allowed_paths(base_url.raw_path.decode("ascii"), mailbox, forward_to)
+        self._forward_to = forward_to
 
     def handle_request(self, request: httpx.Request) -> httpx.Response:
         url = request.url
@@ -144,6 +185,11 @@ class _GuardedTransport(httpx.BaseTransport):
         if not allowed:
             log.warning("Refused Graph call %s %s%s", request.method, url.host, path)
             raise GraphCallRefused(f"refused Graph call {request.method} {url.host}{path}")
+        if path.endswith("/createForward"):
+            problem = forward_body_problem(request.read(), self._forward_to or "")
+            if problem:
+                log.warning("Refused Graph forward: %s", problem)
+                raise GraphCallRefused(f"refused Graph forward: {problem}")
         request.headers["Prefer"] = IMMUTABLE_IDS
         return self._inner.handle_request(request)
 
@@ -169,17 +215,24 @@ class GraphClient:
         timeout: float = 60.0,
         standin: bool = False,
         sleep: Callable[[float], None] = time.sleep,
+        forward_to: str | None = None,
     ) -> None:
-        """``standin=True`` allows plain http, for the fake Graph only, never for Graph."""
+        """``standin=True`` allows plain http, for the fake Graph only, never for Graph.
+
+        ``forward_to`` is the one address payment reminders go to (IN-05). Without it the
+        client cannot forward or send anything."""
         if urlsplit(base_url).scheme != "https" and not standin:
             raise ValueError("the Graph base URL must use https unless it is the stand in")
         self.mailbox = mailbox
+        self.forward_to = forward_to
         url = httpx.URL(base_url.rstrip("/") + "/")
         self._user = f"users/{quote(mailbox, safe='@')}"
         self._sleep = sleep
         self._http = httpx.Client(
             base_url=url,
-            transport=_GuardedTransport(transport or httpx.HTTPTransport(), url, mailbox),
+            transport=_GuardedTransport(
+                transport or httpx.HTTPTransport(), url, mailbox, forward_to
+            ),
             timeout=timeout,
             follow_redirects=False,
             auth=_AppToken(tokens),
@@ -208,12 +261,14 @@ class GraphClient:
             except ValueError:
                 wait = 5.0
             self._sleep(min(max(wait, 0.0), MAX_RETRY_AFTER))
-        if response.is_error:
-            try:
-                code = str(response.json()["error"]["code"])
-            except (ValueError, KeyError, TypeError):
-                code = ""
-            raise GraphApiError("GET", response.request.url.path, response.status_code, code)
+        _raise_for_error("GET", response)
+        return response
+
+    def _post(self, url: str, body: dict[str, Any] | None = None) -> httpx.Response:
+        """POST once, without retries. A retried forward or send could act twice; the caller
+        checks the draft instead and tries again on the next sweep (#27)."""
+        response = self._http.post(url, json=body or {})
+        _raise_for_error("POST", response)
         return response
 
     def list_inbox(self) -> Iterator[InboxMessage]:
@@ -237,6 +292,46 @@ class GraphClient:
 
     def get_raw(self, message_id: str) -> bytes:
         """The email exactly as received, as an .eml file with every attachment in it."""
-        if not re.fullmatch(_MESSAGE_ID, message_id):
-            raise GraphCallRefused("refused Graph call: not a message ID")
+        _check_message_id(message_id)
         return self._get(f"{self._user}/messages/{message_id}/$value").content
+
+    def create_forward(self, message_id: str, comment: str) -> str:
+        """Save a forward of this email to the reminder address as a draft, with every original
+        attachment, and return the draft's immutable ID. Nothing is sent yet."""
+        _check_message_id(message_id)
+        if not self.forward_to:
+            raise GraphCallRefused("refused Graph forward: no forward address is set")
+        body = {
+            "comment": comment,
+            "toRecipients": [{"emailAddress": {"address": self.forward_to}}],
+        }
+        draft = self._post(f"{self._user}/messages/{message_id}/createForward", body).json()
+        draft_id = draft.get("id") if isinstance(draft, dict) else None
+        if not isinstance(draft_id, str) or not re.fullmatch(_MESSAGE_ID, draft_id):
+            raise GraphApiError("POST", "createForward", 200, "no draft ID in the answer")
+        return draft_id
+
+    def is_draft(self, message_id: str) -> bool:
+        """Whether this message is still an unsent draft."""
+        _check_message_id(message_id)
+        answer = self._get(f"{self._user}/messages/{message_id}", {"$select": "isDraft"}).json()
+        return bool(answer.get("isDraft")) if isinstance(answer, dict) else False
+
+    def send_draft(self, message_id: str) -> None:
+        """Send a saved draft. Graph sends a draft only once."""
+        _check_message_id(message_id)
+        self._post(f"{self._user}/messages/{message_id}/send")
+
+
+def _check_message_id(message_id: str) -> None:
+    if not re.fullmatch(_MESSAGE_ID, message_id):
+        raise GraphCallRefused("refused Graph call: not a message ID")
+
+
+def _raise_for_error(method: str, response: httpx.Response) -> None:
+    if response.is_error:
+        try:
+            code = str(response.json()["error"]["code"])
+        except (ValueError, KeyError, TypeError):
+            code = ""
+        raise GraphApiError(method, response.request.url.path, response.status_code, code)

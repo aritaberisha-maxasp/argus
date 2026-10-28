@@ -1,8 +1,9 @@
 """A fake Microsoft Graph for development and CI (ADR 0003).
 
 It serves the accounts mailbox from the synthetic fixture emails in ``tests/fixtures/emails``
-and answers the Graph calls ARGUS makes the way Graph does: listing the Inbox with paging and
-reading an email as its raw .eml file. Like Graph with RBAC for Applications, it only lets the
+and answers the Graph calls ARGUS makes the way Graph does: listing the Inbox with paging,
+reading an email as its raw .eml file, and forwarding an email through a saved draft that can
+be sent only once (#27). Like Graph with RBAC for Applications, it only lets the
 app into its one mailbox. IDs are immutable only when the request asks for them with
 ``Prefer: IdType="ImmutableId"``, so a client that forgets the header gets different IDs.
 
@@ -14,9 +15,10 @@ import base64
 import hashlib
 import json
 import os
+import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from email import message_from_bytes
+from email import message_from_bytes, policy
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Annotated, Any
@@ -55,6 +57,28 @@ def _message(raw: bytes) -> Message:
     )
 
 
+@dataclass
+class Draft:
+    """A forward saved as a draft. Like Graph, it carries every attachment of the original."""
+
+    id: str
+    original_id: str
+    to: list[str]
+    comment: str
+    attachments: list[tuple[str, bytes]]
+    is_draft: bool = True
+
+
+def attachments_of(raw: bytes) -> list[tuple[str, bytes]]:
+    parsed = message_from_bytes(raw, policy=policy.default)
+    found: list[tuple[str, bytes]] = []
+    for part in parsed.walk():
+        if part.get_content_disposition() == "attachment":
+            data = part.get_payload(decode=True)
+            found.append((part.get_filename() or "", data if isinstance(data, bytes) else b""))
+    return found
+
+
 def fake_token(roles: list[str] | None = None) -> str:
     """An unsigned token shaped like an Entra app token, for the fake Graph only. ``roles`` are
     the application permissions it claims; the real Graph client checks them."""
@@ -77,6 +101,8 @@ class Mailbox:
     raw_reads: dict[str, int] = field(default_factory=dict)
     prefer_headers: list[str | None] = field(default_factory=list)
     fail_next: list[tuple[int, int]] = field(default_factory=list)
+    drafts: dict[str, Draft] = field(default_factory=dict)
+    sent: list[Draft] = field(default_factory=list)
 
     def add(self, raw: bytes) -> Message:
         message = _message(raw)
@@ -93,6 +119,8 @@ class Mailbox:
         self.raw_reads.clear()
         self.prefer_headers.clear()
         self.fail_next.clear()
+        self.drafts.clear()
+        self.sent.clear()
         for raw in emails:
             self.add(raw)
 
@@ -187,6 +215,71 @@ def create_app(
         box.raw_reads[message.immutable_id] = box.raw_reads.get(message.immutable_id, 0) + 1
         return Response(message.raw, media_type="text/plain")
 
+    @app.post("/v1.0/users/{user}/messages/{message_id}/createForward")
+    async def create_forward(
+        request: Request,
+        user: str,
+        message_id: str,
+        authorization: Annotated[str | None, Header()] = None,
+        prefer: Annotated[str | None, Header()] = None,
+    ) -> Response:
+        refused = check(request, user, authorization, prefer)
+        if refused:
+            return refused
+        message = box.find(message_id)
+        if message is None:
+            return _error(404, "ErrorItemNotFound", "The specified object was not found.")
+        body = await request.json()
+        draft = Draft(
+            id="AAkALgAAAAAAHYQDEapmEc2byACqAC-EWg0B" + uuid.uuid4().hex,
+            original_id=message.immutable_id,
+            to=[r["emailAddress"]["address"] for r in body.get("toRecipients", [])],
+            comment=body.get("comment", ""),
+            attachments=attachments_of(message.raw),
+        )
+        box.drafts[draft.id] = draft
+        return JSONResponse({"id": draft.id, "isDraft": True}, status_code=201)
+
+    @app.get("/v1.0/users/{user}/messages/{message_id}")
+    def get_message(
+        request: Request,
+        user: str,
+        message_id: str,
+        authorization: Annotated[str | None, Header()] = None,
+        prefer: Annotated[str | None, Header()] = None,
+    ) -> Response:
+        refused = check(request, user, authorization, prefer)
+        if refused:
+            return refused
+        draft = box.drafts.get(message_id)
+        if draft is not None:
+            return JSONResponse({"id": draft.id, "isDraft": draft.is_draft})
+        message = box.find(message_id)
+        if message is None:
+            return _error(404, "ErrorItemNotFound", "The specified object was not found.")
+        return JSONResponse({"id": wire_id(message, prefer), "isDraft": False})
+
+    @app.post("/v1.0/users/{user}/messages/{message_id}/send")
+    def send(
+        request: Request,
+        user: str,
+        message_id: str,
+        authorization: Annotated[str | None, Header()] = None,
+        prefer: Annotated[str | None, Header()] = None,
+    ) -> Response:
+        refused = check(request, user, authorization, prefer)
+        if refused:
+            return refused
+        draft = box.drafts.get(message_id)
+        if draft is None:
+            return _error(404, "ErrorItemNotFound", "The specified object was not found.")
+        if not draft.is_draft:
+            # Graph sends a draft once; after that the message is in Sent Items, not a draft.
+            return _error(400, "ErrorInvalidRequest", "Only draft messages can be sent.")
+        draft.is_draft = False
+        box.sent.append(draft)
+        return Response(status_code=202)
+
     @app.post("/_standin/messages")
     async def add_message(request: Request) -> dict[str, str]:
         return {"id": box.add(await request.body()).immutable_id}
@@ -208,7 +301,22 @@ def create_app(
 
     @app.get("/_standin/records")
     def records() -> dict[str, Any]:
-        return {"inbox": len(box.inbox), "raw_reads": box.raw_reads}
+        return {
+            "inbox": len(box.inbox),
+            "raw_reads": box.raw_reads,
+            "drafts": len(box.drafts),
+            "sent": [
+                {
+                    "original_id": d.original_id,
+                    "to": d.to,
+                    "attachments": [
+                        {"filename": name, "sha256": hashlib.sha256(data).hexdigest()}
+                        for name, data in d.attachments
+                    ],
+                }
+                for d in box.sent
+            ],
+        }
 
     return app
 
