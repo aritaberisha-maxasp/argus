@@ -3,10 +3,11 @@
 It serves the accounts mailbox from the synthetic fixture emails in ``tests/fixtures/emails``
 and answers the Graph calls ARGUS makes the way Graph does: listing the Inbox with paging,
 reading an email as its raw .eml file, finding and creating folders, moving an email into a
-folder and deleting it (into Deleted Items, as Graph does). Like Graph with RBAC for
-Applications, it only lets the app into its one mailbox. IDs are immutable only when the
-request asks for them with ``Prefer: IdType="ImmutableId"``, so a client that forgets the header
-gets different IDs.
+folder and deleting it. Like Graph, a deleted email moves to Deleted Items and can still be
+found there; only deleting it again from Deleted Items makes it unfindable (404). Like Graph
+with RBAC for Applications, it only lets the app into its one mailbox. IDs are immutable only
+when the request asks for them with ``Prefer: IdType="ImmutableId"``, so a client that forgets
+the header gets different IDs.
 
 Everything is synthetic and kept in memory. Control calls under ``/_standin`` let tests add or
 remove emails, make the next calls fail with throttling, and read what was asked.
@@ -31,6 +32,8 @@ FIXTURES = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "emails"
 MAILBOX = "accounts@maxasp.example"
 IMMUTABLE = 'IdType="ImmutableId"'
 INBOX_ID = "AAMkAGInbox0000"
+DELETED_ITEMS_ID = "AAMkAGDeleted00"
+WELL_KNOWN = {"inbox": INBOX_ID, "deleteditems": DELETED_ITEMS_ID}
 _NAME_FILTER = re.compile(r"displayName eq '([^']*)'")
 
 
@@ -87,7 +90,6 @@ class Mailbox:
     messages: dict[str, Message] = field(default_factory=dict)
     location: dict[str, str] = field(default_factory=dict)  # message ID to folder ID
     folders: dict[str, Folder] = field(default_factory=dict)
-    deleted: dict[str, Message] = field(default_factory=dict)  # Deleted Items
     by_mutable: dict[str, str] = field(default_factory=dict)
     raw_reads: dict[str, int] = field(default_factory=dict)
     moves: list[tuple[str, str]] = field(default_factory=list)
@@ -97,6 +99,11 @@ class Mailbox:
     @property
     def inbox(self) -> dict[str, Message]:
         return {i: m for i, m in self.messages.items() if self.location[i] == INBOX_ID}
+
+    @property
+    def deleted(self) -> dict[str, Message]:
+        """The emails in Deleted Items."""
+        return {i: m for i, m in self.messages.items() if self.location[i] == DELETED_ITEMS_ID}
 
     def add(self, raw: bytes) -> Message:
         message = _message(raw)
@@ -110,13 +117,14 @@ class Mailbox:
         self.location.pop(message_id, None)
 
     def reset(self, emails: list[bytes]) -> None:
-        for each in (self.messages, self.location, self.folders, self.deleted, self.by_mutable):
+        for each in (self.messages, self.location, self.folders, self.by_mutable):
             each.clear()
         self.raw_reads.clear()
         self.moves.clear()
         self.prefer_headers.clear()
         self.fail_next.clear()
         self.folders[INBOX_ID] = Folder(INBOX_ID, "Inbox", None)
+        self.folders[DELETED_ITEMS_ID] = Folder(DELETED_ITEMS_ID, "Deleted Items", None)
         for raw in emails:
             self.add(raw)
 
@@ -346,9 +354,27 @@ def create_app(
         message = box.find(message_id)
         if message is None:
             return _error(404, "ErrorItemNotFound", "The specified object was not found.")
-        box.remove(message.immutable_id)
-        box.deleted[message.immutable_id] = message
+        if box.location[message.immutable_id] == DELETED_ITEMS_ID:
+            box.remove(message.immutable_id)  # gone for good, as far as Graph shows
+        else:
+            box.location[message.immutable_id] = DELETED_ITEMS_ID
         return Response(status_code=204)
+
+    @app.get("/v1.0/users/{user}/mailFolders/{folder_id}")
+    def get_folder(
+        request: Request,
+        user: str,
+        folder_id: str,
+        authorization: Annotated[str | None, Header()] = None,
+        prefer: Annotated[str | None, Header()] = None,
+    ) -> Response:
+        refused = check(request, user, authorization, prefer)
+        if refused:
+            return refused
+        folder = box.folders.get(WELL_KNOWN.get(folder_id.lower(), folder_id))
+        if folder is None:
+            return _error(404, "ErrorItemNotFound", "The specified folder was not found.")
+        return JSONResponse({"id": folder.id, "displayName": folder.name})
 
     @app.post("/_standin/messages")
     async def add_message(request: Request) -> dict[str, str]:

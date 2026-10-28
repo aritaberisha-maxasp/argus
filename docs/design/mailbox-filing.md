@@ -26,7 +26,7 @@ Three layers keep an invoice from being deleted:
 
 1. **The database.** Only an email routed to the deletion folder can be filed in ARGUS/Removed. Only an email in ARGUS/Removed can be recorded as deleted, and only when it has been there 30 days by the database clock (migration 0006). Where and when an email was filed can never change.
 2. **The Graph client.** Before it deletes, it checks that the email really is in ARGUS/Removed. If a person moved an email out of ARGUS/Removed to keep it, ARGUS refuses to delete it and logs a failure each day, so someone notices.
-3. **The job.** It only picks emails that the database says have been in ARGUS/Removed for 30 days.
+3. **The job.** Right before each delete it asks the database, by the database clock, whether the email is still due. If not, it skips the email, even when the clock the job was given says otherwise. So the 30 day rule holds before the step that cannot be undone, not only when the deletion is recorded.
 
 ## Audit log
 
@@ -43,11 +43,11 @@ No sender, subject or content goes into the events or the logs. Logs name the in
 Graph is called first, outside any transaction, and the result is recorded afterwards in a short one (PR #79 review). If ARGUS stops in between:
 
 - **After a move:** the next run finds the record still at `routed` and moves it again. Moving an email into the folder it is already in changes nothing, and immutable IDs keep the email's ID the same.
-- **After a delete:** the next daily run finds the record still due. Graph says the email is gone, and ARGUS records it with the outcome `already_gone`. The same happens if a person deleted the email by hand. Either way the job stops trying, and the log does not claim ARGUS deleted it.
+- **After a delete:** the next daily run finds the record still due. Graph shows the email in Deleted Items (Graph keeps deleted emails findable there), and ARGUS records it with the outcome `already_gone`. The same happens if a person deleted the email by hand. Either way the job stops trying, and the log does not claim ARGUS deleted it.
 
 ## New Graph calls
 
-The allowlist of the Graph client grows by five calls, all on the one mailbox: list and create folders (at the top and under a folder), read which folder an email is in, move an email, and delete an email. Folder names are plain words only, because they go into a `$filter`. Forwarding (#27) and everything else are still refused.
+The allowlist of the Graph client grows by six calls, all on the one mailbox: list and create folders (at the top and under a folder), read the ID of Deleted Items, read which folder an email is in, move an email, and delete an email. Folder names are plain words only, because they go into a `$filter`. Forwarding (#27) and everything else are still refused.
 
 ## Running it
 

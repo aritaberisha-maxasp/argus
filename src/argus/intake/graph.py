@@ -113,6 +113,7 @@ def allowed_paths(base_path: str, mailbox: str) -> tuple[tuple[str, re.Pattern[s
         ("GET", re.compile(f"{user}/messages/{_MESSAGE_ID}/\\$value")),
         ("GET", re.compile(f"{user}/messages/{_MESSAGE_ID}")),
         ("GET", re.compile(f"{user}/mailFolders(/{_MESSAGE_ID}/childFolders)?")),
+        ("GET", re.compile(f"{user}/mailFolders/deleteditems")),
         ("POST", re.compile(f"{user}/mailFolders(/{_MESSAGE_ID}/childFolders)?")),
         ("POST", re.compile(f"{user}/messages/{_MESSAGE_ID}/move")),
         ("DELETE", re.compile(f"{user}/messages/{_MESSAGE_ID}")),
@@ -182,6 +183,7 @@ class GraphClient:
         self.mailbox = mailbox
         url = httpx.URL(base_url.rstrip("/") + "/")
         self._user = f"users/{quote(mailbox, safe='@')}"
+        self._deleted_items: str | None = None
         self._sleep = sleep
         self._http = httpx.Client(
             base_url=url,
@@ -330,13 +332,22 @@ class GraphClient:
                 "POST", f"{self._user}/messages/{message_id}/move", 200, "IdChangedOnMove"
             )
 
+    def deleted_items(self) -> str:
+        """The ID of the well known folder Deleted Items, read once."""
+        if self._deleted_items is None:
+            folder = self._get(f"{self._user}/mailFolders/deleteditems", {"$select": "id"})
+            self._deleted_items = str(folder.json()["id"])
+        return self._deleted_items
+
     def delete_from(self, message_id: str, folder_id: str) -> bool:
-        """Delete the email, but only if it is in ``folder_id``. Returns False when the email
-        is no longer in the mailbox (deleted before). Exchange keeps it recoverable for at
-        least 14 days (ADR 0003). An email in any other folder is refused, so a mistake can
-        never delete an invoice."""
+        """Delete the email, but only if it is in ``folder_id``. Graph moves it to Deleted
+        Items, where Exchange keeps it recoverable for at least 14 days (ADR 0003).
+
+        Returns False when the email was already deleted: it is in Deleted Items, or no longer
+        in the mailbox at all. An email in any other folder is refused, so a mistake can never
+        delete an invoice."""
         parent = self.folder_of(message_id)
-        if parent is None:
+        if parent is None or parent == self.deleted_items():
             return False
         if parent != folder_id:
             raise GraphCallRefused("refused to delete an email that is not in ARGUS/Removed")

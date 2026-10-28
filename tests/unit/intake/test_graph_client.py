@@ -21,7 +21,7 @@ from argus.intake.graph import (
     check_token,
     token_permissions,
 )
-from standins.graph.app import FIXTURES, MAILBOX, create_app, fake_token
+from standins.graph.app import DELETED_ITEMS_ID, FIXTURES, MAILBOX, create_app, fake_token
 from tests.unit.intake.graph_helpers import TOKEN, StaticTokens, client_for, standin_transport
 
 
@@ -216,6 +216,7 @@ def test_a_folder_is_found_or_created_under_its_parent(app: FastAPI) -> None:
         assert graph.create_folder(argus, "Removed") == removed
     assert sorted(f.name for f in app.state.mailbox.folders.values()) == [
         "ARGUS",
+        "Deleted Items",
         "Inbox",
         "Removed",
     ]
@@ -246,9 +247,21 @@ def test_delete_only_works_on_an_email_in_the_given_folder(app: FastAPI) -> None
         with pytest.raises(GraphCallRefused, match="not in ARGUS/Removed"):
             graph.delete_from(second, removed)
         assert graph.delete_from(first, removed) is True
-        assert graph.delete_from(first, removed) is False  # already gone
-        assert graph.folder_of(first) is None
+        # Like Graph, the email is now in Deleted Items and can still be found there.
+        assert graph.folder_of(first) == graph.deleted_items() == DELETED_ITEMS_ID
+        assert graph.delete_from(first, removed) is False  # already deleted
     assert set(app.state.mailbox.deleted) == {first}
+
+
+@pytest.mark.req("IN-06")
+def test_an_email_gone_from_the_mailbox_counts_as_already_deleted(app: FastAPI) -> None:
+    with client_for(app) as graph:
+        first = next(graph.list_inbox()).id
+        removed = graph.create_folder(None, "Removed")
+        graph.move(first, removed)
+        app.state.mailbox.remove(first)  # purged from Deleted Items, Graph answers 404
+        assert graph.folder_of(first) is None
+        assert graph.delete_from(first, removed) is False
 
 
 @pytest.mark.req("NF-06")

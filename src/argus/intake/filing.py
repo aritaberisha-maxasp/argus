@@ -9,8 +9,10 @@ keeps a deleted email recoverable for at least 14 days more.
 The database checks the same rules (migration 0006): only an email routed to the deletion folder
 can be filed in ARGUS/Removed, and only an email that has been there 30 days by the database
 clock can be recorded as deleted. It writes the ``email_moved`` and ``email_deleted`` audit
-events itself. Before deleting, the Graph client checks that the email really is in
-ARGUS/Removed, so a mistake can never delete an invoice.
+events itself. Right before each delete the job asks the database, by its own clock, whether
+the email is still due, so the rule holds before the step that cannot be undone. The Graph
+client then checks that the email really is in ARGUS/Removed, so a mistake can never delete an
+invoice.
 
 Crash safety: Graph is called first, outside any transaction, and the result is recorded after
 in a short unit of work (PR #79 review). Both steps work from the database records, not from
@@ -38,6 +40,7 @@ from argus.intake.records import (
     mark_deleted,
     mark_filed,
     routed_emails,
+    still_due,
 )
 from argus.sorting.models import Route
 
@@ -104,6 +107,7 @@ class FilingResult:
 class RemovalResult:
     due: int = 0
     deleted: int = 0
+    skipped: int = 0  # picked by the clock passed in, but not due by the database clock
     failed: int = 0
 
 
@@ -163,8 +167,16 @@ def remove_due(
         try:
             if removed_folder is None:
                 raise RuntimeError("ARGUS/Removed is missing from the mailbox")
-            # False means it was already gone: deleted by a person, or by ARGUS just before a
-            # crash. It is recorded as such, so the job stops trying and the log stays true.
+            # The database decides, by its own clock, right before the delete.
+            with unit_of_work(engine, REMOVAL_ACTOR) as db:
+                due_now = still_due(db, record.id)
+            if not due_now:
+                log.warning("Email record %s is not due by the database clock, skipped", record.id)
+                result.skipped += 1
+                continue
+            # False means it was already deleted (in Deleted Items or gone): by a person, or
+            # by ARGUS just before a crash. It is recorded as such, so the job stops trying and
+            # the log stays true.
             if graph.delete_from(record.graph_message_id, removed_folder):
                 outcome = DeletionOutcome.DELETED
             else:
@@ -174,7 +186,13 @@ def remove_due(
         except Exception:
             log.exception("Removal failed on email record %s, next run retries", record.id)
             result.failed += 1
-    log.info("Removal: %d due, %d deleted, %d failed", result.due, result.deleted, result.failed)
+    log.info(
+        "Removal: %d due, %d deleted, %d skipped, %d failed",
+        result.due,
+        result.deleted,
+        result.skipped,
+        result.failed,
+    )
     return result
 
 

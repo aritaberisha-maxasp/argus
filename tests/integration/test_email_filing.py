@@ -35,7 +35,7 @@ from argus.intake.records import (
 )
 from argus.intake.sweep import SWEEP_ACTOR, sweep
 from argus.sorting.models import Route
-from standins.graph.app import INBOX_ID
+from standins.graph.app import DELETED_ITEMS_ID, INBOX_ID
 from tests.integration.test_mailbox_sweep import MemoryArchive
 
 DAY = timedelta(days=1)
@@ -216,7 +216,7 @@ def test_the_argus_folders_are_created_once(
     file_routed(app, graph, Folders(graph))
 
     names = sorted(f.name for f in fake_graph.state.mailbox.folders.values())
-    assert names == ["ARGUS", "Inbox", "Removed"]
+    assert names == ["ARGUS", "Deleted Items", "Inbox", "Removed"]
     assert len(fake_graph.state.mailbox.in_folder(REMOVED_FOLDER)) == 4
 
 
@@ -376,10 +376,13 @@ def test_an_email_deleted_just_before_a_crash_is_recorded_on_the_next_run(
     removed = folders.existing(REMOVED_FOLDER)
     assert removed is not None
     assert graph.delete_from(other.graph_message_id, removed)  # then ARGUS stopped
+    # Like Graph, the email still exists, in Deleted Items, not answered with 404.
+    assert graph.folder_of(other.graph_message_id) == DELETED_ITEMS_ID
 
     result = remove_due(app, graph, folders)
 
     assert (result.deleted, result.failed) == (1, 0)
+    assert set(fake_graph.state.mailbox.deleted) == {other.graph_message_id}, "not deleted twice"
     deleted = [e for e in events(app, other.id) if e["event_type"] == "email_deleted"]
     assert len(deleted) == 1
     assert deleted[0]["details"]["outcome"] == "already_gone"
@@ -563,3 +566,37 @@ def test_moved_names_only_where_the_email_went_wherever_it_came_from(
     assert [e["details"] for e in moved] == [
         {"to_folder": "ARGUS/Incoming invoices", "route": "invoice_processing"}
     ]
+
+
+@pytest.mark.req("IN-06")
+@pytest.mark.usefixtures("clean")
+def test_a_clock_running_ahead_deletes_nothing(
+    app: Engine, graph: GraphClient, fake_graph: FastAPI
+) -> None:
+    # Review of PR 92: the database decides before the delete, not only when it is recorded.
+    other = filed_other(app, graph)
+    filed_at = row(app, other.id)["filed_at"]
+
+    result = remove_due(app, graph, Folders(graph), fixed(filed_at + 31 * DAY))
+
+    assert (result.due, result.deleted, result.skipped, result.failed) == (1, 0, 1, 0)
+    assert fake_graph.state.mailbox.deleted == {}
+    assert fake_graph.state.mailbox.in_folder(REMOVED_FOLDER) == {other.graph_message_id}
+    assert row(app, other.id)["deleted_at"] is None
+
+
+@pytest.mark.req("IN-06", "NF-01")
+@pytest.mark.usefixtures("clean")
+def test_an_email_a_person_deleted_by_hand_is_recorded_as_already_gone(
+    app: Engine, owner: Engine, graph: GraphClient, fake_graph: FastAPI
+) -> None:
+    other = filed_other(app, graph)
+    move_filing_back(owner, other.id, days=30)
+    # A person deleted it in Outlook: like Graph, it now sits in Deleted Items.
+    fake_graph.state.mailbox.location[other.graph_message_id] = DELETED_ITEMS_ID
+
+    result = remove_due(app, graph, Folders(graph))
+
+    assert (result.deleted, result.failed) == (1, 0)
+    assert row(app, other.id)["deletion_outcome"] == "already_gone"
+    assert set(fake_graph.state.mailbox.deleted) == {other.graph_message_id}, "left as it was"

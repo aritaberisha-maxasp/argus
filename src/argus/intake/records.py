@@ -190,3 +190,20 @@ def due_for_deletion(connection: Connection, folder: str, now: datetime) -> list
         {"folder": folder, "cutoff": now - REMOVAL_DELAY},
     ).mappings()
     return [_record(row) for row in rows]
+
+
+def still_due(connection: Connection, email_id: int) -> bool:
+    """Whether the email is in ARGUS/Removed, not deleted yet, and has been there for 30 days
+    by the database clock. Asked right before each delete, so the database rule holds before
+    the step that cannot be undone, not only when it is recorded (review of PR 92)."""
+    found = connection.execute(
+        text(
+            """
+            select 1 from mailbox_email
+            where id = :id and folder = 'ARGUS/Removed' and deleted_at is null
+              and filed_at <= clock_timestamp() - make_interval(days => :days)
+            """
+        ),
+        {"id": email_id, "days": REMOVAL_DELAY.days},
+    ).first()
+    return found is not None

@@ -1,12 +1,13 @@
 # Fake Microsoft Graph
 
-A fake Graph for development and CI, so the mailbox sweep runs without a Microsoft account (ADR 0003). It serves the accounts mailbox from the 50 synthetic fixture emails in `tests/fixtures/emails` and answers the Graph calls ARGUS makes today: list the Inbox (with paging), read one email as its raw `.eml` file, find and create folders, read which folder an email is in, move an email and delete it (into Deleted Items).
+A fake Graph for development and CI, so the mailbox sweep runs without a Microsoft account (ADR 0003). It serves the accounts mailbox from the 50 synthetic fixture emails in `tests/fixtures/emails` and answers the Graph calls ARGUS makes today: list the Inbox (with paging), read one email as its raw `.eml` file, find and create folders, read which folder an email is in, move an email and delete it.
 
 It behaves like Graph where it matters for ARGUS:
 
 - IDs are immutable only when the request sends `Prefer: IdType="ImmutableId"`. Without the header you get different IDs, as with Graph after a move.
 - Only the one mailbox (`accounts@maxasp.example`) is open. Any other mailbox gets `403 ErrorAccessDenied`, like an app scoped by Exchange.
 - It can answer with `429` and `Retry-After` on demand, to test throttling.
+- A deleted email goes to Deleted Items and can still be read there, as in Graph. Deleting it again from Deleted Items makes it answer `404`.
 - Creating a folder that already exists under the same parent gets `409 ErrorFolderExists`, and only `$filter=displayName eq '<name>'` is understood on folder lists.
 
 All data is synthetic and lives in memory until the container stops.
