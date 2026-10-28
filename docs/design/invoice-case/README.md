@@ -4,7 +4,7 @@ Covers: NF-01, NF-05, EX-01, EX-02, AP-08, BK-07, IN-10, BA-07 (also touches IN-
 
 This note holds the detail behind [ADR 0005](../../adr/0005-invoice-case-audit-log-and-exception-queue.md). The ADR says what we decided. This note says how it works, so the developers on the skeleton (#8) and the first stories can build it without guessing.
 
-[schema-sketch.sql](schema-sketch.sql) is a working PostgreSQL 16 sketch of the tables and rules below, and [checks.sql](checks.sql) proves the important rules hold. The skeleton story turns the sketch into Alembic migrations. Until then the sketch is the reference, not production code.
+[schema-sketch.sql](schema-sketch.sql) is the PostgreSQL 16 sketch of the tables and rules below, and [checks.sql](checks.sql) proves the important rules hold. Since #19 the real tables live in the Alembic migrations in `src/argus/db/migrations/versions/`, the checks are tests in `tests/integration/test_case_store.py`, and the Python layer that moves cases is `src/argus/cases/`. The migrations are now the reference; the sketch stays as the record of the design.
 
 ## 1. What a case is
 
