@@ -83,7 +83,7 @@ def _slug(name: str) -> str:
 
 @dataclass(frozen=True)
 class _Document:
-    source: str
+    source: str  # "attachment 2" or "the email text", never a file name (NF-03)
     kind: str
     issuer: str  # normalised
     names_us: bool  # Max ASP is named somewhere other than as the issuer
@@ -134,11 +134,15 @@ def check_email(email: EmailToSort, config: SortingConfig) -> CheckResult:
     def sign(category: Category, why: str) -> None:
         signs.setdefault(category, []).append(why)
 
-    documents = [
-        _read_document(a.filename, a.text or "", own) for a in email.attachments if _readable(a)
-    ]
-    doubts += [f"{a.filename} cannot be read" for a in email.attachments if not _readable(a)]
-    body_document = _read_document("body", email.body, own)
+    # Reasons name attachments by position: file names can hold personal names and the reasons
+    # go into the audit log (NF-03, as for the document store in #20).
+    documents: list[_Document] = []
+    for position, attachment in enumerate(email.attachments, start=1):
+        if _readable(attachment):
+            documents.append(_read_document(f"attachment {position}", attachment.text or "", own))
+        else:
+            doubts.append(f"attachment {position} cannot be read")
+    body_document = _read_document("the email text", email.body, own)
     if body_document.kind in INVOICE_KINDS:
         documents.append(body_document)  # an invoice written in the email itself (E16)
 

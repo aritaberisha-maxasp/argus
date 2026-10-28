@@ -6,10 +6,11 @@ with the reason. Invoices go on to invoice processing, outgoing invoices to the 
 """
 
 import logging
+import re
 
 from argus.sorting.checks import check_email, normalise
 from argus.sorting.config import SortingConfig
-from argus.sorting.language_model import LanguageModel, ModelAnswerInvalid
+from argus.sorting.language_model import LanguageModel, ModelAnswerInvalid, email_as_text
 from argus.sorting.models import (
     ROUTE_FOR,
     Category,
@@ -60,7 +61,11 @@ def sort_email(email: EmailToSort, model: LanguageModel, config: SortingConfig) 
 
     if reasons:
         decision = _review(
-            tuple(reasons), answer.category, answer.confidence, checks.category, answer.evidence
+            tuple(reasons),
+            answer.category,
+            answer.confidence,
+            checks.category,
+            quotes_only(answer.evidence, email),
         )
     else:
         decision = SortingDecision(
@@ -70,10 +75,21 @@ def sort_email(email: EmailToSort, model: LanguageModel, config: SortingConfig) 
             model_category=answer.category,
             model_confidence=answer.confidence,
             check_category=checks.category,
-            evidence=answer.evidence,
+            evidence=quotes_only(answer.evidence, email),
         )
     log.info("Email %s sorted: %s", email.message_id, decision.route)
     return decision
+
+
+def _squash(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def quotes_only(evidence: tuple[str, ...], email: EmailToSort) -> tuple[str, ...]:
+    """Keep only the snippets that really appear in the email. Email content can steer the
+    model, so anything else it writes is not evidence and stays out of the audit log."""
+    text = _squash(email_as_text(email))
+    return tuple(snippet for snippet in evidence if _squash(snippet) and _squash(snippet) in text)
 
 
 def _review(

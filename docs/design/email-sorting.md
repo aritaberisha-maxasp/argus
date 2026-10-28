@@ -32,7 +32,7 @@ The defaults are a careful start. The real values come from the two week shadow 
 
 ## Logs and the audit log
 
-Prompts and model answers are never written to the application logs. The logs say only which route an email got. The audit log gets the decision, the reasons and at most 10 evidence snippets of at most 200 characters each (`SortingDecision.audit_details`).
+Prompts and model answers are never written to the application logs. The logs say only which route an email got. The audit log gets the decision, the reasons and at most 10 evidence snippets of at most 200 characters each (`SortingDecision.audit_details`). Only snippets that really appear in the email are kept, every IBAN in them is masked down to its country code and last four characters, and the reasons name attachments by position ("attachment 2"), never by file name, because file names can hold personal names.
 
 ## What is still to come
 

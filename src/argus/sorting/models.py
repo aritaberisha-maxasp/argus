@@ -4,6 +4,7 @@ The input is deliberately small: the parts of an email the sorting needs, with t
 attachment already read. The mailbox sweep (#24) and the document readers (#28, #29) fill it.
 """
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -58,6 +59,18 @@ class EmailToSort:
 # Evidence goes into the audit log, so it stays short (ADR 0006, NF-03).
 MAX_EVIDENCE_ITEMS = 10
 MAX_SNIPPET_CHARS = 200
+# An IBAN, with or without the spaces of its printed form.
+IBAN = re.compile(r"\b([A-Z]{2})(\d{2}(?: ?[A-Z0-9]{4}){2,7}(?: ?[A-Z0-9]{1,4})?)\b")
+
+
+def mask_ibans(text: str) -> str:
+    """Keep the country code and the last four characters of every IBAN (PR #79 rule)."""
+
+    def mask(match: re.Match[str]) -> str:
+        rest = match[2].replace(" ", "")
+        return match[1] + "*" * (len(rest) - 4) + rest[-4:]
+
+    return IBAN.sub(mask, text)
 
 
 class ModelInvoice(BaseModel):
@@ -111,6 +124,7 @@ class SortingDecision:
             "check_category": self.check_category.value if self.check_category else None,
             "reasons": list(self.reasons),
             "evidence": [
-                snippet[:MAX_SNIPPET_CHARS] for snippet in self.evidence[:MAX_EVIDENCE_ITEMS]
+                mask_ibans(snippet[:MAX_SNIPPET_CHARS])
+                for snippet in self.evidence[:MAX_EVIDENCE_ITEMS]
             ],
         }
