@@ -92,6 +92,31 @@ jobs:
       - name: Smoke test the Wise client against it
         run: python tools/smoke_wise_standin.py http://localhost:8080 "$WISE_STANDIN_TOKEN"
 
+  graph-standin:
+    name: Graph stand in
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: pip install -e .
+      - name: Build the stand in image
+        run: docker build -f standins/graph/Dockerfile -t argus-graph-standin .
+      # The token is shaped like an Entra token but unsigned; it works nowhere but the fake.
+      - name: Start the stand in
+        run: |
+          TOKEN=$(python -c "from standins.graph.app import fake_token; print(fake_token(['Mail.ReadWrite', 'Mail.Send']))")
+          echo "GRAPH_STANDIN_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+          docker run -d --name graph-standin -p 8081:8081 -e GRAPH_STANDIN_TOKEN="$TOKEN" argus-graph-standin
+          for i in $(seq 1 30); do curl -sf http://localhost:8081/_standin/records && exit 0; sleep 1; done
+          docker logs graph-standin
+          exit 1
+      - name: Smoke test the Graph client against it
+        run: python tools/smoke_graph_standin.py http://localhost:8081/v1.0 "$GRAPH_STANDIN_TOKEN"
+
   fake-datev:
     name: DATEV contract tests on the Docker fake
     runs-on: ubuntu-latest
