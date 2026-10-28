@@ -176,20 +176,43 @@ jobs:
     name: KoSIT discovery (temporary)
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - name: List releases
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh api repos/itplr-kosit/validator-configuration-xrechnung/releases --jq '.[0:4][] | .tag_name + " " + .published_at + " " + ([.assets[] | .name + " " + .browser_download_url] | join(" | "))'
-          gh api repos/itplr-kosit/validator/releases --jq '.[0:3][] | .tag_name + " " + ([.assets[] | .name] | join(" | "))'
-      - name: Download and list the newest configuration
+          gh api repos/itplr-kosit/validator-configuration-xrechnung/releases --jq '.[0:3][] | .tag_name + " " + .published_at + " " + ([.assets[] | .name + " " + .browser_download_url] | join(" | "))'
+      - name: Download the newest configuration and the engine
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           url=$(gh api repos/itplr-kosit/validator-configuration-xrechnung/releases --jq '.[0].assets[] | select(.name | endswith(".zip")) | .browser_download_url' | head -1)
-          echo "$url"
+          echo "URL $url"
           curl -sSfL -o config.zip "$url"
-          sha256sum config.zip
-          unzip -l config.zip
+          echo "SHA256 $(sha256sum config.zip)"
+          unzip -l config.zip | head -40
           unzip -o -q config.zip -d config
-          cat config/scenarios.xml || find config -name 'scenarios*.xml' -exec cat {} \;
+          curl -sSfL -o validator.jar https://repo.maven.apache.org/maven2/de/kosit/validationtool/1.5.0/validationtool-1.5.0-standalone.jar
+          sha256sum validator.jar
+      - name: Try the daemon
+        run: |
+          cd config
+          java -jar ../validator.jar --help 2>&1 | head -60 || true
+          nohup java -jar ../validator.jar -s scenarios.xml -r . -D -H 0.0.0.0 -P 8080 > ../daemon.log 2>&1 &
+          for i in $(seq 1 60); do curl -s -o /dev/null http://localhost:8080/ && break; sleep 1; done
+          cd ..
+          head -30 daemon.log
+          curl -s -i http://localhost:8080/ | head -20
+          python3 -c "from pypdf import PdfReader" 2>/dev/null || pip install -q pypdf
+          python3 -c "
+          from pypdf import PdfReader
+          open('d09.xml','wb').write(PdfReader('tests/fixtures/documents/D09_Rechnung_BB-2026-1243_zugferd.pdf').attachments['factur-x.xml'][0])"
+          for f in tests/fixtures/documents/D08_Rechnung_BCH-26-10-0057_xrechnung.xml tests/fixtures/documents/D24_Rechnung_MA-2026-0104_xrechnung.xml d09.xml; do
+            echo "=== $f"
+            curl -s -i -X POST -H "Content-Type: application/xml" --data-binary @"$f" http://localhost:8080/ | head -c 6000
+            echo
+          done
+          echo "=== not an invoice"
+          curl -s -i -X POST -H "Content-Type: application/xml" --data-binary '<a/>' http://localhost:8080/ | head -c 3000
+          echo "=== broken"
+          curl -s -i -X POST -H "Content-Type: application/xml" --data-binary '<a>' http://localhost:8080/ | head -c 3000
