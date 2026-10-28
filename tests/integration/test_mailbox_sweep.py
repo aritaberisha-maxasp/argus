@@ -41,8 +41,7 @@ from argus.intake.sweep import (
     sweep,
     sweep_lock,
 )
-from standins.graph.app import create_app
-from tests.unit.intake.graph_helpers import TOKEN, client_for
+from tests.unit.intake.graph_helpers import client_for
 
 FIXTURE_COUNT = 50
 
@@ -86,29 +85,6 @@ class MemoryArchive:
         DocumentArchive(self.documents).record(connection, email_id, stored)
         with self.lock:
             self.recorded.append((email_id, stored.raw.sha256))
-
-
-@pytest.fixture
-def clean(owner: Engine) -> None:
-    """Each test starts with no email records. Records cannot be deleted, so the owner turns
-    the guard off for this test cleanup only. The audit log stays (it is append only); tests
-    only look at events of their own records."""
-    with owner.begin() as connection:
-        connection.execute(
-            text("alter table mailbox_email disable trigger mailbox_email_no_delete")
-        )
-        connection.execute(text("delete from mailbox_email"))
-        connection.execute(text("alter table mailbox_email enable trigger mailbox_email_no_delete"))
-
-
-@pytest.fixture
-def fake_graph() -> FastAPI:
-    return create_app(token=TOKEN)
-
-
-@pytest.fixture
-def graph(fake_graph: FastAPI) -> GraphClient:
-    return client_for(fake_graph)
 
 
 def records(engine: Engine) -> list[dict[str, Any]]:

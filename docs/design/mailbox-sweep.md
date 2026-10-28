@@ -9,7 +9,7 @@ Every 5 minutes ARGUS looks at the Inbox of the accounts mailbox. For each email
 1. **Seen.** Makes sure the email has one record in the database, keyed by its immutable Graph message ID. The database refuses a second record for the same ID.
 2. **Stored.** Reads the email as its raw `.eml` file and puts it, with every attachment, into the document store of #20, byte for byte, named by its SHA-256 fingerprint. Then, in one short transaction, it records the files and moves the email to `stored`.
 
-Classifying, routing and filing come in later stories. The database already knows all five steps (`seen`, `stored`, `classified`, `routed`, `filed`) and refuses to skip one, so nothing can happen to an email before it is stored.
+Classifying and routing come in later stories. Filing routed emails into the ARGUS folders runs at the end of each sweep, see [Filing emails and removing Other](mailbox-filing.md). The database already knows all five steps (`seen`, `stored`, `classified`, `routed`, `filed`) and refuses to skip one, so nothing can happen to an email before it is stored.
 
 Each step writes an audit event (`email_seen`, `email_stored`) in the same transaction, with the actor `system:mailbox-sweep`. The events hold IDs and fingerprints only, never the sender, subject or content (NF-03). The document store adds its own `document_stored` event per file.
 
@@ -25,7 +25,7 @@ Each step writes an audit event (`email_seen`, `email_stored`) in the same trans
 
 The Graph client (`argus.intake.graph`) needs only the application permissions **Mail.ReadWrite** and **Mail.Send**, limited by Exchange to the accounts mailbox (ADR 0003). It checks every token it gets: if the token carries any other Graph permission, ARGUS refuses to make the call, so a too wide grant is noticed at once. A token without any mail roles is fine, because with Exchange RBAC for Applications the rights are granted in Exchange, not in the token.
 
-Every request asks for immutable IDs (`Prefer: IdType="ImmutableId"`) and passes an allowlist of two calls on the one mailbox: list the Inbox, read one email as `.eml`. Anything else, another mailbox or another host, is refused before it leaves ARGUS. Throttling answers (429, 503) are retried after the time Graph asks for.
+Every request asks for immutable IDs (`Prefer: IdType="ImmutableId"`) and passes an allowlist of calls on the one mailbox: list the Inbox, read one email as `.eml`, and the folder, move and delete calls of [#26](mailbox-filing.md#new-graph-calls). Anything else, another mailbox or another host, is refused before it leaves ARGUS. Throttling answers (429, 503) are retried after the time Graph asks for.
 
 ## Running it
 

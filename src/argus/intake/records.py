@@ -1,4 +1,4 @@
-"""The email records of the mailbox sweep (ADR 0003, migration 0004).
+"""The email records of the mailbox sweep (ADR 0003, migrations 0004 and 0006).
 
 Each function runs inside a short :func:`argus.cases.store.unit_of_work`. None of them calls
 Graph or the document store: those calls happen first, outside the transaction, because every
@@ -6,11 +6,17 @@ transaction that writes an audit event holds the audit lock until it commits (PR
 """
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from enum import StrEnum
 
-from sqlalchemy import Connection, text
+from sqlalchemy import Connection, RowMapping, text
 
 from argus.intake.graph import InboxMessage
+from argus.sorting.models import Route
+
+# Other emails stay this long in ARGUS/Removed before ARGUS deletes them (IN-06, ADR 0003).
+# The database refuses an earlier deletion too (migration 0006).
+REMOVAL_DELAY = timedelta(days=30)
 
 
 class EmailStep(StrEnum):
@@ -29,6 +35,8 @@ class EmailRecord:
     graph_message_id: str
     step: EmailStep
     raw_sha256: str | None
+    route: Route | None = None
+    folder: str | None = None
 
 
 def see_email(connection: Connection, message: InboxMessage) -> tuple[EmailRecord, bool]:
@@ -60,21 +68,25 @@ def get_email(connection: Connection, graph_message_id: str) -> EmailRecord | No
     row = (
         connection.execute(
             text(
-                "select id, graph_message_id, step, raw_sha256 from mailbox_email"
-                " where graph_message_id = :id"
+                "select id, graph_message_id, step, raw_sha256, route, folder"
+                " from mailbox_email where graph_message_id = :id"
             ),
             {"id": graph_message_id},
         )
         .mappings()
         .first()
     )
-    if row is None:
-        return None
+    return None if row is None else _record(row)
+
+
+def _record(row: RowMapping) -> EmailRecord:
     return EmailRecord(
         id=row["id"],
         graph_message_id=row["graph_message_id"],
         step=EmailStep(row["step"]),
         raw_sha256=row["raw_sha256"],
+        route=Route(row["route"]) if row["route"] else None,
+        folder=row["folder"],
     )
 
 
@@ -93,3 +105,80 @@ def mark_stored(connection: Connection, email_id: int, raw_sha256: str, raw_loca
         {"id": email_id, "sha256": raw_sha256, "location": raw_location},
     )
     return result.first() is not None
+
+
+def mark_routed(connection: Connection, email_id: int, route: Route) -> bool:
+    """Record where the sorting sent a classified email. The database logs ``email_routed``.
+    Returns False when the email is not at step classified (already routed by another worker)."""
+    result = connection.execute(
+        text(
+            """
+            update mailbox_email set step = 'routed', route = :route
+            where id = :id and step = 'classified'
+            returning id
+            """
+        ),
+        {"id": email_id, "route": route.value},
+    )
+    return result.first() is not None
+
+
+def mark_filed(connection: Connection, email_id: int, folder: str) -> bool:
+    """Record that the email was moved out of the Inbox into ``folder``. The database sets the
+    time and logs ``email_filed`` and ``email_moved``. Returns False when it was already filed."""
+    result = connection.execute(
+        text(
+            """
+            update mailbox_email set step = 'filed', folder = :folder
+            where id = :id and step = 'routed'
+            returning id
+            """
+        ),
+        {"id": email_id, "folder": folder},
+    )
+    return result.first() is not None
+
+
+def mark_deleted(connection: Connection, email_id: int) -> bool:
+    """Record that the email was deleted from the mailbox. The database sets the time, checks
+    the 30 days in ARGUS/Removed by its own clock and logs ``email_deleted``. Returns False when
+    it was already recorded as deleted."""
+    result = connection.execute(
+        text(
+            """
+            update mailbox_email set deleted_at = clock_timestamp()
+            where id = :id and deleted_at is null
+            returning id
+            """
+        ),
+        {"id": email_id},
+    )
+    return result.first() is not None
+
+
+def routed_emails(connection: Connection) -> list[EmailRecord]:
+    """Every email that is routed but not filed yet, oldest first. Filing works from these
+    records, not from the Inbox, so an email moved just before a crash still gets recorded."""
+    rows = connection.execute(
+        text(
+            "select id, graph_message_id, step, raw_sha256, route, folder"
+            " from mailbox_email where step = 'routed' order by id"
+        )
+    ).mappings()
+    return [_record(row) for row in rows]
+
+
+def due_for_deletion(connection: Connection, folder: str, now: datetime) -> list[EmailRecord]:
+    """The emails in ``folder`` that ARGUS moved there at least 30 days before ``now`` and has
+    not deleted yet, oldest first."""
+    rows = connection.execute(
+        text(
+            """
+            select id, graph_message_id, step, raw_sha256, route, folder from mailbox_email
+            where folder = :folder and deleted_at is null and filed_at <= :cutoff
+            order by filed_at, id
+            """
+        ),
+        {"folder": folder, "cutoff": now - REMOVAL_DELAY},
+    ).mappings()
+    return [_record(row) for row in rows]
