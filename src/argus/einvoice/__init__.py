@@ -13,7 +13,7 @@ from argus.einvoice.parser import (
     read_xml,
     refused_reading,
 )
-from argus.einvoice.queue import queue_disagreements, queue_rejected
+from argus.einvoice.queue import queue_failed_checks
 from argus.einvoice.safe_xml import XmlRefused
 from argus.einvoice.validator import (
     KositValidator,
@@ -80,8 +80,7 @@ __all__ = [
     "embedded_xml",
     "looks_like_xml",
     "pair",
-    "queue_disagreements",
-    "queue_rejected",
+    "queue_failed_checks",
     "read_einvoices",
     "read_xml",
     "refused_reading",

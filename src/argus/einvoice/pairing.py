@@ -14,8 +14,9 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 
 from argus.einvoice.parser import EInvoice
-from argus.reading.fields import InvoiceReading
-from argus.reading.text_rules import INVOICE_KINDS
+from argus.reading.fields import Flag, InvoiceReading
+from argus.reading.pages import Page
+from argus.reading.text_rules import INVOICE_KINDS, ibans
 
 # The values a PDF copy must state the same way as its XML (ADR 0006 point 1).
 COMPARED = ("invoice_number", "gross_amount", "iban_on_document")
@@ -24,11 +25,17 @@ COMPARED = ("invoice_number", "gross_amount", "iban_on_document")
 @dataclass(frozen=True)
 class Disagreement:
     """One value the PDF copy states differently from the XML. Values in the formats of the
-    readings: ``"147.56"``, the IBAN without spaces."""
+    readings: ``"147.56"``, the IBAN without spaces. A PDF that states several IBANs has all of
+    them in ``pdf_values``, the XML's among them if the PDF states it."""
 
     field: str
     xml_value: str
     pdf_value: str
+    pdf_values: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.pdf_values:
+            object.__setattr__(self, "pdf_values", (self.pdf_value,))
 
 
 @dataclass(frozen=True)
@@ -111,11 +118,31 @@ def compare(xml: InvoiceReading, pdf: InvoiceReading) -> tuple[Disagreement, ...
     found = []
     for name in COMPARED:
         xml_value, pdf_value = xml.value(name), pdf.value(name)
+        if name == "iban_on_document" and xml_value is not None and pdf_value is None:
+            several = _several_ibans(xml_value, pdf)
+            if several is not None:
+                found.append(several)
+            continue
         if xml_value is None or pdf_value is None:
             continue
         if _normalise(name, xml_value) != _normalise(name, pdf_value):
             found.append(Disagreement(name, str(xml_value), str(pdf_value)))
     return tuple(found)
+
+
+def _several_ibans(xml_iban: str, pdf: InvoiceReading) -> Disagreement | None:
+    """A PDF that states several IBANs has no single IBAN to compare (PR #94), so the XML IBAN
+    is compared against each of them. Any IBAN that is not the XML's is a disagreement, even when
+    the XML IBAN is listed too: a line like "please pay only to ..." on the PDF tells the person
+    approving to pay somewhere else (PR #95 review and QA)."""
+    read = pdf.fields.get("iban_on_document")
+    if read is None or read.flag is not Flag.SEVERAL_VALUES:
+        return None
+    stated = ibans((Page(1, pdf.text),))
+    wanted = _normalise("iban_on_document", xml_iban)
+    if all(_normalise("iban_on_document", i) == wanted for i in stated):
+        return None
+    return Disagreement("iban_on_document", str(xml_iban), ", ".join(stated), tuple(stated))
 
 
 def _normalise(name: str, value: object) -> object:

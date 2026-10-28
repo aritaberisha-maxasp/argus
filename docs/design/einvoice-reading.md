@@ -66,17 +66,23 @@ Each `EInvoiceWithCopy` lists its documents by position. #30 creates one case fr
 
 ### When the PDF disagrees
 
-ARGUS books from the XML, but the person approving sees the PDF, and a PDF copy that says something else than its XML is a known fraud pattern. So when the copy states another invoice number, total or IBAN, `queue_disagreements` opens an exception with the reason `invoice_check_failed` on the email, showing both values:
+ARGUS books from the XML, but the person approving sees the PDF, and a PDF copy that says something else than its XML is a known fraud pattern. So when the copy states another invoice number, total or IBAN, the email goes to manual review with the reason `invoice_check_failed`, showing both values:
 
 > The PDF copy (attachment 2) and the e-invoice (attachment 1) disagree. total: 147.56 in the XML, 174.56 on the PDF; IBAN: DE\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*0002 in the XML, DE\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*3000 on the PDF. ...
 
 IBANs are masked like everywhere in the queue. When two IBANs end in the same four digits, the detail says they differ in the hidden digits. A value the PDF reader could not read is no disagreement, because nothing on the PDF contradicts the XML.
 
+A PDF that states several IBANs has its IBAN field left empty by the reading (`several_values`). The XML IBAN is then compared against every IBAN on the PDF, and any IBAN that is not the XML's is a disagreement, even when the XML's is listed too. A line like "please pay only to ..." on the PDF would otherwise send the approver to another account. The detail lists every IBAN, masked, and marks the one in the XML.
+
 ## The official check
 
 Every e-invoice is checked with the KoSIT validator, the reference check for XRechnung. It runs as its own container (`docker/kosit-validator`) with the official XRechnung 3.0.2 configuration, which also holds the EN 16931 rules for ZUGFeRD and Factur-X. Both downloads are pinned by checksum in the Dockerfile.
 
-`KositValidator(url).validate(xml)` posts the XML and reads the report. When the validator does not accept the XML, `queue_rejected` opens an exception with the reason `invoice_check_failed`, naming up to ten rules it broke (for example `BR-DE-15`). XML for which the validator has no rules at all (a ZUGFeRD MINIMUM or BASIC WL file, which is no valid invoice in Germany) is not accepted either. When the validator cannot be reached or gives no usable answer, `ValidatorUnavailable` is raised and the email is tried again in the next sweep, so an outage never lets an unchecked e-invoice through.
+`KositValidator(url).validate(xml)` posts the XML and reads the report. When the validator does not accept the XML, the email goes to manual review with the reason `invoice_check_failed`, naming up to ten rules it broke (for example `BR-DE-15`). XML for which the validator has no rules at all (a ZUGFeRD MINIMUM or BASIC WL file, which is no valid invoice in Germany) is not accepted either. When the validator cannot be reached or gives no usable answer, `ValidatorUnavailable` is raised and the email is tried again in the next sweep, so an outage never lets an unchecked e-invoice through.
+
+### One exception per email
+
+The exception queue allows one open exception per email and reason (`exception_open_once`, #19). So `queue_failed_checks(connection, email_id, invoices, validations)` puts every failed check of every e-invoice on the email into one exception, the way `queue_unreadable` does for unreadable documents. It takes the paired e-invoices and the validator's answer for each of them by document, and refuses to run when one has no answer, so an unchecked e-invoice never looks like one that passed. The detail has one paragraph per problem. The audit facts list `checks`, `documents`, `copies`, `fields`, `scenarios` and `rules`, never values. When the email already has an open `invoice_check_failed` exception, that one is returned.
 
 Running it locally:
 

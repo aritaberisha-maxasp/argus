@@ -31,9 +31,12 @@ from argus.reading import (
     InvoiceReading,
     LocalReader,
     ReadField,
+    ReadingSettings,
     Source,
     read_attachment,
 )
+from argus.reading.invoice import build_reading
+from argus.reading.pages import Analysis, Page
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 DOCUMENTS = FIXTURES / "documents"
@@ -452,6 +455,68 @@ def test_a_value_the_pdf_reader_missed_is_no_disagreement() -> None:
     pdf = pdf_reading("attachment 2", invoice_number="BCH-26-10-0057")
 
     assert compare(xml, pdf) == ()
+
+
+# The text of D08's PDF copy, as its text layer reads.
+D08_PDF_TEXT = (
+    "Beispiel Cloud Hosting GmbH\nServerstraße 3, 70002 Beispielstadt, DE\nUSt-IdNr. DE012345602\n"
+    "Max ASP GmbH\nTestallee 1\n70000 Musterstadt\nDE\nRechnung\nNummer: BCH-26-10-0057\n"
+    "Datum: 08.10.2026\nLeistungszeitraum: 01.10.2026 - 31.10.2026\n"
+    "Pos.\nBeschreibung\nMenge\nEinzelpreis\nBetrag\n1\nDomain Verlängerung\n3\n15,00 EUR\n"
+    "45,00 EUR\n2\nSSL Zertifikat\n1\n79,00 EUR\n79,00 EUR\nNettobetrag\n124,00 EUR\n"
+    "USt 19 %\n23,56 EUR\nGesamtbetrag\n147,56 EUR\nZahlbar bis 22.10.2026 ohne Abzug.\n"
+    "Bankverbindung: IBAN DE52 0000 0003 0000 7000 02\n"
+    "Synthetic test document for ARGUS. Not a real invoice.\n"
+)
+OTHER_IBAN = "DE89370400440532013000"
+
+
+def d08_pdf(text: str) -> InvoiceReading:
+    analysis = Analysis(pages=(Page(1, text),))
+    return build_reading("attachment 2", "test", analysis, None, ReadingSettings())
+
+
+@pytest.mark.req("IN-02", "NF-02")
+def test_the_pdf_copy_of_d08_agrees_with_its_xml() -> None:
+    paired, _ = pair([read(D08)], [d08_pdf(D08_PDF_TEXT)])
+
+    assert paired[0].pdf is not None and paired[0].disagreements == ()
+
+
+@pytest.mark.req("IN-02", "NF-02")
+@pytest.mark.parametrize(
+    "added",
+    [
+        "Neue Bankverbindung IBAN: DE89 3704 0044 0532 0130 00",
+        "Bitte nur noch auf DE89370400440532013000 zahlen",
+    ],
+    ids=["new-bank-account", "pay-only-to"],
+)
+def test_a_pdf_copy_that_adds_a_second_iban_disagrees_with_its_xml(added: str) -> None:
+    # PR #95 QA: the PDF states the XML's IBAN and another one. The reading leaves the IBAN
+    # empty with several_values, which must not hide the extra account from the comparison.
+    pdf = d08_pdf(D08_PDF_TEXT + added + "\n")
+    assert pdf.fields["iban_on_document"].flag is Flag.SEVERAL_VALUES
+
+    paired, _ = pair([read(D08)], [pdf])
+
+    (disagreement,) = paired[0].disagreements
+    assert disagreement.field == "iban_on_document"
+    assert disagreement.xml_value == "DE52000000030000700002"
+    assert disagreement.pdf_values == ("DE52000000030000700002", OTHER_IBAN)
+
+
+@pytest.mark.req("IN-02", "NF-02")
+def test_a_pdf_copy_with_several_ibans_none_of_them_the_xmls_disagrees() -> None:
+    text = D08_PDF_TEXT.replace(
+        "IBAN DE52 0000 0003 0000 7000 02",
+        "IBAN DE89 3704 0044 0532 0130 00, IBAN DE07 0000 0004 0000 7000 02",
+    )
+
+    (disagreement,) = compare(read(D08).reading, d08_pdf(text))
+
+    assert disagreement.pdf_values == (OTHER_IBAN, "DE07000000040000700002")
+    assert disagreement.pdf_value == f"{OTHER_IBAN}, DE07000000040000700002"
 
 
 @pytest.mark.req("IN-02")

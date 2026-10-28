@@ -1,28 +1,29 @@
 """Send an email to manual review when its e-invoice cannot be trusted (#28, EX-01, ADR 0006).
 
-Two reasons, both with the exception reason ``invoice_check_failed`` on the email:
+Two checks can fail, both leading to the exception reason ``invoice_check_failed`` on the email:
 
 - the PDF copy disagrees with its XML on the invoice number, the total or the IBAN; the detail
   shows both values, so the person sees what differs;
 - the KoSIT validator did not accept the XML; the detail names the rules it broke.
 
-An e-invoice ARGUS cannot read at all is an unreadable document and goes through
-``argus.reading.queue_unreadable`` with the other unreadable files of the email.
+An email has at most one open exception per reason (``exception_open_once``, #19), so every
+failed check of every e-invoice on the email goes into one exception, the way
+``argus.reading.queue_unreadable`` names every unreadable document in one. An e-invoice ARGUS
+cannot read at all is an unreadable document and goes through ``queue_unreadable``.
 
-Like the other queue steps, these run inside a ``unit_of_work`` after the reading, never around
+Like the other queue steps, this runs inside a ``unit_of_work`` after the reading, never around
 the validator call (PR #79 review). ``detail`` stays on the exception for the person who acts on
 it; ``facts`` go into the audit log and hold only positions, field names and rule codes (NF-03).
 IBANs are masked in the detail like everywhere else in the queue (PR #86 review).
 """
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 from sqlalchemy import Connection, text
 
 from argus.cases.model import ExceptionReason
 from argus.cases.store import open_exception
-from argus.einvoice.pairing import EInvoiceWithCopy
-from argus.einvoice.parser import EInvoice
+from argus.einvoice.pairing import Disagreement, EInvoiceWithCopy
 from argus.einvoice.validator import Validation
 from argus.sorting.models import mask_ibans
 
@@ -34,60 +35,112 @@ LABELS = {"invoice_number": "invoice number", "gross_amount": "total", "iban_on_
 MAX_RULES_SHOWN = 10
 
 
-def queue_disagreements(
-    connection: Connection, email_id: int, invoices: Sequence[EInvoiceWithCopy]
-) -> list[int]:
-    """One exception per e-invoice whose PDF copy disagrees with it. Returns the exception IDs.
-    Safe to repeat: an open exception for the same e-invoice is not opened twice."""
-    opened = []
-    for invoice in invoices:
-        if not invoice.disagreements or invoice.pdf is None:
-            continue
-        xml_document = invoice.einvoice.document
-        existing = _open_exception(connection, email_id, PDF_MATCHES_XML, xml_document)
-        if existing is not None:
-            opened.append(existing)
-            continue
-        differences = []
-        for d in invoice.disagreements:
-            xml_value, pdf_value = _shown(d.field, d.xml_value), _shown(d.field, d.pdf_value)
-            line = f"{LABELS[d.field]}: {xml_value} in the XML, {pdf_value} on the PDF"
-            if xml_value == pdf_value:
-                line += " (they differ in the hidden digits)"
-            differences.append(line)
-        detail = (
-            f"The PDF copy ({invoice.pdf.document}) and the e-invoice ({xml_document}) disagree. "
-            + "; ".join(differences)
-            + ". ARGUS books from the XML, but the person approving sees the PDF, so check "
-            "with the vendor which one is right."
-        )
-        opened.append(
-            open_exception(
-                connection,
-                ExceptionReason.INVOICE_CHECK_FAILED,
-                detail,
-                email_id=email_id,
-                facts={
-                    "check": PDF_MATCHES_XML,
-                    "document": xml_document,
-                    "copy": invoice.pdf.document,
-                    "fields": [d.field for d in invoice.disagreements],
-                },
-            )
-        )
-    return opened
-
-
-def queue_rejected(
-    connection: Connection, email_id: int, einvoice: EInvoice, validation: Validation
+def queue_failed_checks(
+    connection: Connection,
+    email_id: int,
+    invoices: Sequence[EInvoiceWithCopy],
+    validations: Mapping[str, Validation],
 ) -> int | None:
-    """An exception when the validator did not accept the e-invoice. Returns its ID, or None
-    when the validator accepted it. Safe to repeat."""
-    if validation.accepted:
+    """One exception for every e-invoice of the email whose PDF copy disagrees with it or that
+    the validator did not accept. ``validations`` holds the validator's answer for each
+    e-invoice, by its ``document``. Returns the exception ID, or None when every check passed.
+    Safe to repeat: an email has at most one open exception for this."""
+    missing = [i.einvoice.document for i in invoices if i.einvoice.document not in validations]
+    if missing:
+        # An e-invoice nobody checked must never look like one that passed.
+        raise ValueError(f"no validation for {', '.join(missing)}")
+
+    paragraphs: list[str] = []
+    checks: set[str] = set()
+    documents: list[str] = []
+    copies: list[str] = []
+    fields: set[str] = set()
+    scenarios: set[str] = set()
+    rules: set[str] = set()
+    for invoice in invoices:
+        document = invoice.einvoice.document
+        validation = validations[document]
+        failed = False
+        if invoice.disagreements and invoice.pdf is not None:
+            paragraphs.append(_disagreement_text(document, invoice.pdf.document, invoice))
+            checks.add(PDF_MATCHES_XML)
+            copies.append(invoice.pdf.document)
+            fields.update(d.field for d in invoice.disagreements)
+            failed = True
+        if not validation.accepted:
+            paragraphs.append(_rejection_text(document, validation))
+            checks.add(KOSIT_VALIDATION)
+            if validation.scenario is not None:
+                scenarios.add(validation.scenario)
+            rules.update(e.code for e in validation.errors if e.code)
+            failed = True
+        if failed:
+            documents.append(document)
+    if not paragraphs:
         return None
-    existing = _open_exception(connection, email_id, KOSIT_VALIDATION, einvoice.document)
+
+    existing = connection.execute(
+        text(
+            "select id from exception_item where email_id = :email_id"
+            " and reason = :reason and resolved_at is null"
+        ),
+        {"email_id": email_id, "reason": ExceptionReason.INVOICE_CHECK_FAILED.value},
+    ).scalar_one_or_none()
     if existing is not None:
-        return existing
+        return int(existing)
+    return open_exception(
+        connection,
+        ExceptionReason.INVOICE_CHECK_FAILED,
+        " ".join(paragraphs),
+        email_id=email_id,
+        facts={
+            "checks": sorted(checks),
+            "documents": documents,
+            "copies": copies,
+            "fields": sorted(fields),
+            "scenarios": sorted(scenarios),
+            "rules": sorted(rules),
+        },
+    )
+
+
+def _disagreement_text(document: str, copy: str, invoice: EInvoiceWithCopy) -> str:
+    differences = "; ".join(_difference(d) for d in invoice.disagreements)
+    return (
+        f"The PDF copy ({copy}) and the e-invoice ({document}) disagree. {differences}. ARGUS "
+        "books from the XML, but the person approving sees the PDF, so check with the vendor "
+        "which one is right."
+    )
+
+
+def _difference(d: Disagreement) -> str:
+    if d.field != "iban_on_document":
+        return f"{LABELS[d.field]}: {d.xml_value} in the XML, {d.pdf_value} on the PDF"
+    xml_iban = mask_ibans(d.xml_value)
+    if len(d.pdf_values) == 1:
+        line = f"IBAN: {xml_iban} in the XML, {mask_ibans(d.pdf_value)} on the PDF"
+        if mask_ibans(d.pdf_value) == xml_iban:
+            line += " (they differ in the hidden digits)"
+        return line
+    wanted = _compact(d.xml_value)
+    shown = []
+    for iban in d.pdf_values:
+        masked = mask_ibans(iban)
+        if _compact(iban) == wanted:
+            masked += " (the one in the XML)"
+        elif masked == xml_iban:
+            masked += " (differs from the XML only in the hidden digits)"
+        shown.append(masked)
+    return f"IBAN: {xml_iban} in the XML, but the PDF states {len(shown)} IBANs: " + ", ".join(
+        shown
+    )
+
+
+def _compact(iban: str) -> str:
+    return "".join(iban.split()).upper()
+
+
+def _rejection_text(document: str, validation: Validation) -> str:
     errors = validation.errors
     if validation.scenario is None:
         why = (
@@ -96,49 +149,15 @@ def queue_rejected(
             "which is not a valid invoice in Germany."
         )
     elif errors:
-        shown = "; ".join(f"{e.code}: {e.text}" if e.code else e.text for e in errors)
+        shown = "; ".join(
+            f"{e.code}: {e.text}" if e.code else e.text for e in errors[:MAX_RULES_SHOWN]
+        )
         if len(errors) > MAX_RULES_SHOWN:
-            shown = "; ".join(
-                f"{e.code}: {e.text}" if e.code else e.text for e in errors[:MAX_RULES_SHOWN]
-            )
             shown += f"; and {len(errors) - MAX_RULES_SHOWN} more"
         why = f"The official validator ({validation.scenario}) found these errors: {shown}."
     else:
         why = f"The official validator ({validation.scenario}) did not accept it."
-    detail = mask_ibans(
-        f"The e-invoice ({einvoice.document}) failed the official check. {why} The vendor "
-        "may need to send a corrected invoice."
+    return mask_ibans(
+        f"The e-invoice ({document}) failed the official check. {why} The vendor may need to "
+        "send a corrected invoice."
     )
-    return open_exception(
-        connection,
-        ExceptionReason.INVOICE_CHECK_FAILED,
-        detail,
-        email_id=email_id,
-        facts={
-            "check": KOSIT_VALIDATION,
-            "document": einvoice.document,
-            "scenario": validation.scenario,
-            "rules": sorted({e.code for e in errors if e.code}),
-        },
-    )
-
-
-def _shown(field: str, value: str) -> str:
-    return mask_ibans(value) if field == "iban_on_document" else value
-
-
-def _open_exception(connection: Connection, email_id: int, check: str, document: str) -> int | None:
-    found = connection.execute(
-        text(
-            "select id from exception_item where email_id = :email_id and reason = :reason"
-            " and resolved_at is null and facts->>'check' = :check"
-            " and facts->>'document' = :document"
-        ),
-        {
-            "email_id": email_id,
-            "reason": ExceptionReason.INVOICE_CHECK_FAILED.value,
-            "check": check,
-            "document": document,
-        },
-    ).scalar_one_or_none()
-    return int(found) if found is not None else None
