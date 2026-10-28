@@ -59,15 +59,17 @@ class EmailToSort:
 # Evidence goes into the audit log, so it stays short (ADR 0006, NF-03).
 MAX_EVIDENCE_ITEMS = 10
 MAX_SNIPPET_CHARS = 200
-# An IBAN, with or without the spaces of its printed form.
-IBAN = re.compile(r"\b([A-Z]{2})(\d{2}(?: ?[A-Z0-9]{4}){2,7}(?: ?[A-Z0-9]{1,4})?)\b", re.IGNORECASE)
+# An IBAN, with or without spaces, non breaking spaces, tabs or dashes between its groups.
+IBAN = re.compile(
+    r"\b([A-Z]{2})(\d{2}(?:[\s-]?[A-Z0-9]{4}){2,7}(?:[\s-]?[A-Z0-9]{1,4})?)\b", re.IGNORECASE
+)
 
 
 def mask_ibans(text: str) -> str:
     """Keep the country code and the last four characters of every IBAN (PR #79 rule)."""
 
     def mask(match: re.Match[str]) -> str:
-        rest = match[2].replace(" ", "")
+        rest = re.sub(r"[\s-]", "", match[2])
         return match[1] + "*" * (len(rest) - 4) + rest[-4:]
 
     return IBAN.sub(mask, text)
