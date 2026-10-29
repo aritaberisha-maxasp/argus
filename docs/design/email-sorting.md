@@ -13,7 +13,7 @@ Covers: IN-04, IN-07, IN-09, AR-01, AR-02, NF-03. Decision: [ADR 0006](../adr/00
 | incoming invoice or credit note | invoice processing |
 | outgoing invoice or credit note | outgoing booking |
 | payment reminder | forward to Benjamin (#27) |
-| other | the deletion folder, ARGUS/Removed (#26) |
+| other | the deletion folder, ARGUS/Removed, deleted after 30 days ([#26](mailbox-filing.md)) |
 | anything in doubt | manual review |
 
 If Azure OpenAI cannot be reached, the email is not sorted at all and the next sweep tries again. If it answers in the wrong format or its content filter stops the request, the email goes to manual review.

@@ -21,7 +21,7 @@ from argus.intake.graph import (
     check_token,
     token_permissions,
 )
-from standins.graph.app import FIXTURES, MAILBOX, create_app, fake_token
+from standins.graph.app import DELETED_ITEMS_ID, FIXTURES, MAILBOX, create_app, fake_token
 from tests.unit.intake.graph_helpers import TOKEN, StaticTokens, client_for, standin_transport
 
 
@@ -140,7 +140,12 @@ def test_another_mailbox_is_refused_by_the_client(app: FastAPI) -> None:
         ("GET", "users/accounts@maxasp.example/mailFolders/drafts/messages"),
         ("GET", "users/accounts@maxasp.example/calendar/events"),
         ("POST", "users/accounts@maxasp.example/sendMail"),
-        ("DELETE", "users/accounts@maxasp.example/messages/AAk"),
+        ("DELETE", "users/accounts@maxasp.example/mailFolders/AAk"),
+        ("PATCH", "users/accounts@maxasp.example/messages/AAk"),
+        ("POST", "users/accounts@maxasp.example/messages/AAk/forward"),
+        ("POST", "users/accounts@maxasp.example/messages/AAk/copy"),
+        ("POST", "users/accounts@maxasp.example/messages/AAk/permanentDelete"),
+        ("DELETE", "users/accounts@maxasp.example/messages/AAk/attachments/AAk"),
         ("GET", "users"),
         (
             "GET",
@@ -193,3 +198,93 @@ def test_without_the_prefer_header_the_fake_gives_other_ids(app: FastAPI) -> Non
         )
     ids = {m["id"] for m in answer.json()["value"]}
     assert ids and not ids & set(app.state.mailbox.inbox)
+
+
+# Folders, moving and deleting (#26) --------------------------------------------------------
+
+
+@pytest.mark.req("IN-06")
+def test_a_folder_is_found_or_created_under_its_parent(app: FastAPI) -> None:
+    with client_for(app) as graph:
+        assert graph.find_folder(None, "ARGUS") is None
+        argus = graph.create_folder(None, "ARGUS")
+        removed = graph.create_folder(argus, "Removed")
+        assert graph.find_folder(None, "ARGUS") == argus
+        assert graph.find_folder(argus, "Removed") == removed
+        assert graph.find_folder(None, "Removed") is None
+        # Created meanwhile by another run: Graph answers 409, the client returns the folder.
+        assert graph.create_folder(argus, "Removed") == removed
+    assert sorted(f.name for f in app.state.mailbox.folders.values()) == [
+        "ARGUS",
+        "Deleted Items",
+        "Inbox",
+        "Removed",
+    ]
+
+
+@pytest.mark.req("IN-06")
+def test_a_move_keeps_the_immutable_id_and_takes_the_email_out_of_the_inbox(
+    app: FastAPI,
+) -> None:
+    with client_for(app) as graph:
+        message = next(graph.list_inbox())
+        folder = graph.create_folder(None, "ARGUS")
+        graph.move(message.id, folder)
+        graph.move(message.id, folder)  # again: nothing changes
+        assert graph.folder_of(message.id) == folder
+        assert message.id not in {m.id for m in graph.list_inbox()}
+        assert graph.get_raw(message.id) == app.state.mailbox.messages[message.id].raw
+    assert all(h == IMMUTABLE_IDS for h in app.state.mailbox.prefer_headers)
+
+
+@pytest.mark.req("IN-06")
+def test_delete_only_works_on_an_email_in_the_given_folder(app: FastAPI) -> None:
+    with client_for(app) as graph:
+        first, second = [m.id for m in graph.list_inbox()][:2]
+        removed = graph.create_folder(None, "Removed")
+        graph.move(first, removed)
+
+        with pytest.raises(GraphCallRefused, match="not in ARGUS/Removed"):
+            graph.delete_from(second, removed)
+        assert graph.delete_from(first, removed) is True
+        # Like Graph, the email is now in Deleted Items and can still be found there.
+        assert graph.folder_of(first) == graph.deleted_items() == DELETED_ITEMS_ID
+        assert graph.delete_from(first, removed) is False  # already deleted
+    assert set(app.state.mailbox.deleted) == {first}
+
+
+@pytest.mark.req("IN-06")
+def test_an_email_gone_from_the_mailbox_counts_as_already_deleted(app: FastAPI) -> None:
+    with client_for(app) as graph:
+        first = next(graph.list_inbox()).id
+        removed = graph.create_folder(None, "Removed")
+        graph.move(first, removed)
+        app.state.mailbox.remove(first)  # purged from Deleted Items, Graph answers 404
+        assert graph.folder_of(first) is None
+        assert graph.delete_from(first, removed) is False
+
+
+@pytest.mark.req("NF-06")
+@pytest.mark.parametrize("name", ["", "ARGUS' or true", "a/b", "Inbox)", "x" * 65])
+def test_a_folder_name_cannot_change_the_query(app: FastAPI, name: str) -> None:
+    with client_for(app) as graph, pytest.raises(GraphCallRefused):
+        graph.find_folder(None, name)
+    with client_for(app) as graph, pytest.raises(GraphCallRefused):
+        graph.create_folder(None, name)
+    assert app.state.mailbox.prefer_headers == []
+
+
+@pytest.mark.req("NF-06")
+@pytest.mark.parametrize("bad_id", ["../users/ceo", "AAk/../../x", "", "AAk?$select=x"])
+def test_ids_cannot_change_the_path_of_a_move_or_delete(app: FastAPI, bad_id: str) -> None:
+    with client_for(app) as graph:
+        for call in (
+            lambda: graph.move(bad_id, "AAk"),
+            lambda: graph.move("AAk", bad_id),
+            lambda: graph.delete_from(bad_id, "AAk"),
+            lambda: graph.folder_of(bad_id),
+            lambda: graph.find_folder(bad_id, "ARGUS"),
+        ):
+            with pytest.raises(GraphCallRefused):
+                call()
+    assert app.state.mailbox.prefer_headers == []

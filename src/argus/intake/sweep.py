@@ -3,7 +3,8 @@
 It runs every 5 minutes and is the only thing that decides what to process. For each email in
 the Inbox it makes sure there is one record (step ``seen``), then stores the raw email and its
 attachments in the document store (step ``stored``) before anything else happens to it. Later
-stories add classifying, routing and filing.
+stories add classifying and routing. After the pass over the Inbox it files every routed email
+into its ARGUS folder (#26, :mod:`argus.intake.filing`).
 
 Crash safety: every step is recorded before the next starts. After a crash the next sweep finds
 the email still in the Inbox, reads its record and carries on from the last finished step.
@@ -32,6 +33,7 @@ from argus.cases.store import unit_of_work
 from argus.documents.email import StoredEmail, store_email
 from argus.documents.records import record_email_documents
 from argus.documents.store import DocumentStore
+from argus.intake.filing import Folders, file_routed
 from argus.intake.graph import GraphClient, InboxMessage
 from argus.intake.records import EmailRecord, EmailStep, mark_stored, see_email
 
@@ -72,6 +74,7 @@ class SweepResult:
     listed: int = 0
     new: int = 0
     stored: int = 0
+    filed: int = 0
     failed: int = 0
 
 
@@ -143,11 +146,14 @@ def sweep(engine: Engine, graph: GraphClient, archive: EmailArchive) -> SweepRes
                 # The ID only: no sender, subject or content in the log (NF-03).
                 log.exception("Mailbox sweep failed on email %s, next sweep retries", message.id)
                 result.failed += 1
+        filing = file_routed(engine, graph, Folders(graph))
+        result.filed, result.failed = filing.filed, result.failed + filing.failed
         log.info(
-            "Mailbox sweep: %d in Inbox, %d new, %d stored, %d failed",
+            "Mailbox sweep: %d in Inbox, %d new, %d stored, %d filed, %d failed",
             result.listed,
             result.new,
             result.stored,
+            result.filed,
             result.failed,
         )
         return result

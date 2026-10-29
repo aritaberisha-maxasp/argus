@@ -1,10 +1,13 @@
 """A fake Microsoft Graph for development and CI (ADR 0003).
 
 It serves the accounts mailbox from the synthetic fixture emails in ``tests/fixtures/emails``
-and answers the Graph calls ARGUS makes the way Graph does: listing the Inbox with paging and
-reading an email as its raw .eml file. Like Graph with RBAC for Applications, it only lets the
-app into its one mailbox. IDs are immutable only when the request asks for them with
-``Prefer: IdType="ImmutableId"``, so a client that forgets the header gets different IDs.
+and answers the Graph calls ARGUS makes the way Graph does: listing the Inbox with paging,
+reading an email as its raw .eml file, finding and creating folders, moving an email into a
+folder and deleting it. Like Graph, a deleted email moves to Deleted Items and can still be
+found there; only deleting it again from Deleted Items makes it unfindable (404). Like Graph
+with RBAC for Applications, it only lets the app into its one mailbox. IDs are immutable only
+when the request asks for them with ``Prefer: IdType="ImmutableId"``, so a client that forgets
+the header gets different IDs.
 
 Everything is synthetic and kept in memory. Control calls under ``/_standin`` let tests add or
 remove emails, make the next calls fail with throttling, and read what was asked.
@@ -14,6 +17,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from email import message_from_bytes
@@ -27,6 +31,10 @@ from fastapi.responses import JSONResponse
 FIXTURES = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "emails"
 MAILBOX = "accounts@maxasp.example"
 IMMUTABLE = 'IdType="ImmutableId"'
+INBOX_ID = "AAMkAGInbox0000"
+DELETED_ITEMS_ID = "AAMkAGDeleted00"
+WELL_KNOWN = {"inbox": INBOX_ID, "deleteditems": DELETED_ITEMS_ID}
+_NAME_FILTER = re.compile(r"displayName eq '([^']*)'")
 
 
 @dataclass
@@ -71,33 +79,70 @@ def fixture_emails() -> list[bytes]:
 
 
 @dataclass
+class Folder:
+    id: str
+    name: str
+    parent_id: str | None  # None at the top of the mailbox
+
+
+@dataclass
 class Mailbox:
-    inbox: dict[str, Message] = field(default_factory=dict)
+    messages: dict[str, Message] = field(default_factory=dict)
+    location: dict[str, str] = field(default_factory=dict)  # message ID to folder ID
+    folders: dict[str, Folder] = field(default_factory=dict)
     by_mutable: dict[str, str] = field(default_factory=dict)
     raw_reads: dict[str, int] = field(default_factory=dict)
+    moves: list[tuple[str, str]] = field(default_factory=list)
     prefer_headers: list[str | None] = field(default_factory=list)
     fail_next: list[tuple[int, int]] = field(default_factory=list)
 
+    @property
+    def inbox(self) -> dict[str, Message]:
+        return {i: m for i, m in self.messages.items() if self.location[i] == INBOX_ID}
+
+    @property
+    def deleted(self) -> dict[str, Message]:
+        """The emails in Deleted Items."""
+        return {i: m for i, m in self.messages.items() if self.location[i] == DELETED_ITEMS_ID}
+
     def add(self, raw: bytes) -> Message:
         message = _message(raw)
-        self.inbox[message.immutable_id] = message
+        self.messages[message.immutable_id] = message
+        self.location[message.immutable_id] = INBOX_ID
         self.by_mutable[message.mutable_id] = message.immutable_id
         return message
 
     def remove(self, message_id: str) -> None:
-        self.inbox.pop(message_id, None)
+        self.messages.pop(message_id, None)
+        self.location.pop(message_id, None)
 
     def reset(self, emails: list[bytes]) -> None:
-        self.inbox.clear()
-        self.by_mutable.clear()
+        for each in (self.messages, self.location, self.folders, self.by_mutable):
+            each.clear()
         self.raw_reads.clear()
+        self.moves.clear()
         self.prefer_headers.clear()
         self.fail_next.clear()
+        self.folders[INBOX_ID] = Folder(INBOX_ID, "Inbox", None)
+        self.folders[DELETED_ITEMS_ID] = Folder(DELETED_ITEMS_ID, "Deleted Items", None)
         for raw in emails:
             self.add(raw)
 
     def find(self, message_id: str) -> Message | None:
-        return self.inbox.get(message_id) or self.inbox.get(self.by_mutable.get(message_id, ""))
+        immutable = message_id if message_id in self.messages else self.by_mutable.get(message_id)
+        return self.messages.get(immutable or "")
+
+    def in_folder(self, path: str) -> set[str]:
+        """The IDs of the emails in the folder with this path, such as ``ARGUS/Removed``."""
+        parent: str | None = None
+        for name in path.split("/"):
+            parent = next(
+                (f.id for f in self.folders.values() if f.parent_id == parent and f.name == name),
+                None,
+            )
+            if parent is None:
+                return set()
+        return {i for i, folder in self.location.items() if folder == parent}
 
 
 def _error(status: int, code: str, message: str, headers: dict[str, str] | None = None) -> Response:
@@ -187,6 +232,150 @@ def create_app(
         box.raw_reads[message.immutable_id] = box.raw_reads.get(message.immutable_id, 0) + 1
         return Response(message.raw, media_type="text/plain")
 
+    @app.get("/v1.0/users/{user}/messages/{message_id}")
+    def get_message(
+        request: Request,
+        user: str,
+        message_id: str,
+        authorization: Annotated[str | None, Header()] = None,
+        prefer: Annotated[str | None, Header()] = None,
+    ) -> Response:
+        refused = check(request, user, authorization, prefer)
+        if refused:
+            return refused
+        message = box.find(message_id)
+        if message is None:
+            return _error(404, "ErrorItemNotFound", "The specified object was not found.")
+        return JSONResponse(
+            {
+                "id": wire_id(message, prefer),
+                "parentFolderId": box.location[message.immutable_id],
+            }
+        )
+
+    def list_folders(parent_id: str | None, filter_: str | None) -> Response:
+        if parent_id is not None and parent_id not in box.folders:
+            return _error(404, "ErrorItemNotFound", "The specified folder was not found.")
+        match = _NAME_FILTER.fullmatch(filter_ or "")
+        if filter_ and not match:
+            return _error(400, "ErrorInvalidUrlQueryFilter", "Only displayName eq is faked.")
+        found = [
+            {"id": f.id, "displayName": f.name}
+            for f in box.folders.values()
+            if f.parent_id == parent_id and (match is None or f.name == match[1])
+        ]
+        return JSONResponse({"value": found})
+
+    async def create_folder(parent_id: str | None, request: Request) -> Response:
+        if parent_id is not None and parent_id not in box.folders:
+            return _error(404, "ErrorItemNotFound", "The specified folder was not found.")
+        name = (await request.json()).get("displayName", "")
+        if any(f.parent_id == parent_id and f.name == name for f in box.folders.values()):
+            return _error(409, "ErrorFolderExists", "A folder with the specified name exists.")
+        folder = Folder(f"AAMkAGFolder{len(box.folders):04d}", name, parent_id)
+        box.folders[folder.id] = folder
+        return JSONResponse({"id": folder.id, "displayName": name}, status_code=201)
+
+    @app.get("/v1.0/users/{user}/mailFolders")
+    def top_folders(
+        request: Request,
+        user: str,
+        filter_: Annotated[str | None, Query(alias="$filter")] = None,
+        authorization: Annotated[str | None, Header()] = None,
+        prefer: Annotated[str | None, Header()] = None,
+    ) -> Response:
+        return check(request, user, authorization, prefer) or list_folders(None, filter_)
+
+    @app.get("/v1.0/users/{user}/mailFolders/{folder_id}/childFolders")
+    def child_folders(
+        request: Request,
+        user: str,
+        folder_id: str,
+        filter_: Annotated[str | None, Query(alias="$filter")] = None,
+        authorization: Annotated[str | None, Header()] = None,
+        prefer: Annotated[str | None, Header()] = None,
+    ) -> Response:
+        return check(request, user, authorization, prefer) or list_folders(folder_id, filter_)
+
+    @app.post("/v1.0/users/{user}/mailFolders")
+    async def new_top_folder(
+        request: Request,
+        user: str,
+        authorization: Annotated[str | None, Header()] = None,
+        prefer: Annotated[str | None, Header()] = None,
+    ) -> Response:
+        return check(request, user, authorization, prefer) or await create_folder(None, request)
+
+    @app.post("/v1.0/users/{user}/mailFolders/{folder_id}/childFolders")
+    async def new_child_folder(
+        request: Request,
+        user: str,
+        folder_id: str,
+        authorization: Annotated[str | None, Header()] = None,
+        prefer: Annotated[str | None, Header()] = None,
+    ) -> Response:
+        refused = check(request, user, authorization, prefer)
+        return refused or await create_folder(folder_id, request)
+
+    @app.post("/v1.0/users/{user}/messages/{message_id}/move")
+    async def move(
+        request: Request,
+        user: str,
+        message_id: str,
+        authorization: Annotated[str | None, Header()] = None,
+        prefer: Annotated[str | None, Header()] = None,
+    ) -> Response:
+        refused = check(request, user, authorization, prefer)
+        if refused:
+            return refused
+        message = box.find(message_id)
+        if message is None:
+            return _error(404, "ErrorItemNotFound", "The specified object was not found.")
+        destination = (await request.json()).get("destinationId", "")
+        if destination not in box.folders:
+            return _error(404, "ErrorItemNotFound", "The specified folder was not found.")
+        box.location[message.immutable_id] = destination
+        box.moves.append((message.immutable_id, destination))
+        return JSONResponse(
+            {"id": wire_id(message, prefer), "parentFolderId": destination}, status_code=201
+        )
+
+    @app.delete("/v1.0/users/{user}/messages/{message_id}")
+    def delete(
+        request: Request,
+        user: str,
+        message_id: str,
+        authorization: Annotated[str | None, Header()] = None,
+        prefer: Annotated[str | None, Header()] = None,
+    ) -> Response:
+        refused = check(request, user, authorization, prefer)
+        if refused:
+            return refused
+        message = box.find(message_id)
+        if message is None:
+            return _error(404, "ErrorItemNotFound", "The specified object was not found.")
+        if box.location[message.immutable_id] == DELETED_ITEMS_ID:
+            box.remove(message.immutable_id)  # gone for good, as far as Graph shows
+        else:
+            box.location[message.immutable_id] = DELETED_ITEMS_ID
+        return Response(status_code=204)
+
+    @app.get("/v1.0/users/{user}/mailFolders/{folder_id}")
+    def get_folder(
+        request: Request,
+        user: str,
+        folder_id: str,
+        authorization: Annotated[str | None, Header()] = None,
+        prefer: Annotated[str | None, Header()] = None,
+    ) -> Response:
+        refused = check(request, user, authorization, prefer)
+        if refused:
+            return refused
+        folder = box.folders.get(WELL_KNOWN.get(folder_id.lower(), folder_id))
+        if folder is None:
+            return _error(404, "ErrorItemNotFound", "The specified folder was not found.")
+        return JSONResponse({"id": folder.id, "displayName": folder.name})
+
     @app.post("/_standin/messages")
     async def add_message(request: Request) -> dict[str, str]:
         return {"id": box.add(await request.body()).immutable_id}
@@ -208,7 +397,12 @@ def create_app(
 
     @app.get("/_standin/records")
     def records() -> dict[str, Any]:
-        return {"inbox": len(box.inbox), "raw_reads": box.raw_reads}
+        return {
+            "inbox": len(box.inbox),
+            "raw_reads": box.raw_reads,
+            "folders": {f.id: f.name for f in box.folders.values()},
+            "deleted": len(box.deleted),
+        }
 
     return app
 

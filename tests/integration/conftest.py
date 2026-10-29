@@ -6,6 +6,8 @@ Set ``ARGUS_TEST_DATABASE_URL`` to an empty database the tests may wipe. Its nam
 Locally the tests are skipped without it; in CI (``CI`` is set) a missing database fails the run,
 so these tests can never be skipped there.
 
+The mailbox tests share the fake Graph fixtures and the ``clean`` fixture at the end.
+
 The document store tests need Azurite, the local Azure Blob Storage emulator. Set
 ``ARGUS_TEST_BLOB_CONNECTION_STRING`` to ``UseDevelopmentStorage=true``; the README shows how to
 start it. The same rule applies: skipped locally without it, a failure in CI.
@@ -20,9 +22,13 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from alembic.script import ScriptDirectory
+from fastapi import FastAPI
 from sqlalchemy import Engine, create_engine, make_url, text
 
 from argus.documents.store import AzureDocumentStore
+from argus.intake.graph import GraphClient
+from standins.graph.app import create_app
+from tests.unit.intake.graph_helpers import TOKEN, client_for
 
 URL_ENV = "ARGUS_TEST_DATABASE_URL"
 BLOB_ENV = "ARGUS_TEST_BLOB_CONNECTION_STRING"
@@ -100,3 +106,26 @@ def documents(blob_connection_string: str) -> AzureDocumentStore:
     )
     store.create_container_if_missing()
     return store
+
+
+@pytest.fixture
+def clean(owner: Engine) -> None:
+    """Each test starts with no email records. Records cannot be deleted, so the owner turns
+    the guard off for this test cleanup only. The audit log stays (it is append only); tests
+    only look at events of their own records."""
+    with owner.begin() as connection:
+        connection.execute(
+            text("alter table mailbox_email disable trigger mailbox_email_no_delete")
+        )
+        connection.execute(text("delete from mailbox_email"))
+        connection.execute(text("alter table mailbox_email enable trigger mailbox_email_no_delete"))
+
+
+@pytest.fixture
+def fake_graph() -> FastAPI:
+    return create_app(token=TOKEN)
+
+
+@pytest.fixture
+def graph(fake_graph: FastAPI) -> GraphClient:
+    return client_for(fake_graph)
