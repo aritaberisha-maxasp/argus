@@ -65,7 +65,20 @@ jobs:
           done
           docker logs azurite
           exit 1
+      # The official XRechnung validator (ADR 0006, #28). The e-invoice contract tests need it.
+      - name: Start the KoSIT validator
+        run: |
+          docker build -f docker/kosit-validator/Dockerfile -t argus-kosit-validator .
+          docker run -d --name kosit -p 8090:8080 argus-kosit-validator
+          for i in $(seq 1 120); do
+            curl -s -o /dev/null -X POST --data-binary '<a/>' http://localhost:8090/ && exit 0
+            sleep 1
+          done
+          docker logs kosit
+          exit 1
       - name: Tests
+        env:
+          ARGUS_KOSIT_URL: http://localhost:8090/
         run: pytest --cov=argus --cov-report=term
       - name: Fixture check
         run: python tests/fixtures/tools/check.py
@@ -145,7 +158,7 @@ jobs:
       - name: Contract tests
         env:
           ARGUS_DATEV_CONTRACT_URL: http://localhost:58452
-        run: pytest tests/contract -v
+        run: pytest tests/contract/datev -v
       - name: Fake DATEV log
         if: always()
         run: docker logs fake-datev || true
@@ -169,3 +182,4 @@ jobs:
       # does not turn this run red. Each branch is checked by its own runs.
       - name: Scan the git history
         run: ./gitleaks git --redact --no-banner --verbose --log-opts="--full-history HEAD" .
+
