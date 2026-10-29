@@ -49,6 +49,7 @@ class ExceptionReason(StrEnum):
     NUMBER_SEQUENCE_GAP = "number_sequence_gap"
     PAYMENT_FAILED = "payment_failed"
     CUSTOMER_QUERY = "customer_query"
+    FORWARD_FAILED = "forward_failed"  # a payment reminder could not be forwarded (#27)
 
 
 class Outcome(StrEnum):

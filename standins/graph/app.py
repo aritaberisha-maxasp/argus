@@ -3,11 +3,12 @@
 It serves the accounts mailbox from the synthetic fixture emails in ``tests/fixtures/emails``
 and answers the Graph calls ARGUS makes the way Graph does: listing the Inbox with paging,
 reading an email as its raw .eml file, finding and creating folders, moving an email into a
-folder and deleting it. Like Graph, a deleted email moves to Deleted Items and can still be
-found there; only deleting it again from Deleted Items makes it unfindable (404). Like Graph
-with RBAC for Applications, it only lets the app into its one mailbox. IDs are immutable only
-when the request asks for them with ``Prefer: IdType="ImmutableId"``, so a client that forgets
-the header gets different IDs.
+folder and deleting it, and forwarding an email through a saved draft that can be sent only
+once (#27). Like Graph, a deleted email moves to Deleted Items and can still be found there;
+only deleting it again from Deleted Items makes it unfindable (404). Like Graph with RBAC for
+Applications, it only lets the app into its one mailbox. IDs are immutable only when the
+request asks for them with ``Prefer: IdType="ImmutableId"``, so a client that forgets the
+header gets different IDs.
 
 Everything is synthetic and kept in memory. Control calls under ``/_standin`` let tests add or
 remove emails, make the next calls fail with throttling, and read what was asked.
@@ -18,9 +19,10 @@ import hashlib
 import json
 import os
 import re
+import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from email import message_from_bytes
+from email import message_from_bytes, policy
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Annotated, Any
@@ -63,6 +65,30 @@ def _message(raw: bytes) -> Message:
     )
 
 
+@dataclass
+class Draft:
+    """A forward saved as a draft. Like Graph, it carries every attachment of the original."""
+
+    id: str
+    original_id: str
+    to: list[str]
+    comment: str
+    attachments: list[tuple[str, bytes]]
+    is_draft: bool = True
+    cc: list[str] = field(default_factory=list)
+    bcc: list[str] = field(default_factory=list)
+
+
+def attachments_of(raw: bytes) -> list[tuple[str, bytes]]:
+    parsed = message_from_bytes(raw, policy=policy.default)
+    found: list[tuple[str, bytes]] = []
+    for part in parsed.walk():
+        if part.get_content_disposition() == "attachment":
+            data = part.get_payload(decode=True)
+            found.append((part.get_filename() or "", data if isinstance(data, bytes) else b""))
+    return found
+
+
 def fake_token(roles: list[str] | None = None) -> str:
     """An unsigned token shaped like an Entra app token, for the fake Graph only. ``roles`` are
     the application permissions it claims; the real Graph client checks them."""
@@ -95,6 +121,8 @@ class Mailbox:
     moves: list[tuple[str, str]] = field(default_factory=list)
     prefer_headers: list[str | None] = field(default_factory=list)
     fail_next: list[tuple[int, int]] = field(default_factory=list)
+    drafts: dict[str, Draft] = field(default_factory=dict)
+    sent: list[Draft] = field(default_factory=list)
 
     @property
     def inbox(self) -> dict[str, Message]:
@@ -123,6 +151,8 @@ class Mailbox:
         self.moves.clear()
         self.prefer_headers.clear()
         self.fail_next.clear()
+        self.drafts.clear()
+        self.sent.clear()
         self.folders[INBOX_ID] = Folder(INBOX_ID, "Inbox", None)
         self.folders[DELETED_ITEMS_ID] = Folder(DELETED_ITEMS_ID, "Deleted Items", None)
         for raw in emails:
@@ -232,8 +262,8 @@ def create_app(
         box.raw_reads[message.immutable_id] = box.raw_reads.get(message.immutable_id, 0) + 1
         return Response(message.raw, media_type="text/plain")
 
-    @app.get("/v1.0/users/{user}/messages/{message_id}")
-    def get_message(
+    @app.post("/v1.0/users/{user}/messages/{message_id}/createForward")
+    async def create_forward(
         request: Request,
         user: str,
         message_id: str,
@@ -246,9 +276,50 @@ def create_app(
         message = box.find(message_id)
         if message is None:
             return _error(404, "ErrorItemNotFound", "The specified object was not found.")
+        body = await request.json()
+        draft = Draft(
+            id="AAkALgAAAAAAHYQDEapmEc2byACqAC-EWg0B" + uuid.uuid4().hex,
+            original_id=message.immutable_id,
+            to=[r["emailAddress"]["address"] for r in body.get("toRecipients", [])],
+            comment=body.get("comment", ""),
+            attachments=attachments_of(message.raw),
+        )
+        box.drafts[draft.id] = draft
+        return JSONResponse({"id": draft.id, "isDraft": True}, status_code=201)
+
+    @app.get("/v1.0/users/{user}/messages/{message_id}")
+    def get_message(
+        request: Request,
+        user: str,
+        message_id: str,
+        authorization: Annotated[str | None, Header()] = None,
+        prefer: Annotated[str | None, Header()] = None,
+    ) -> Response:
+        refused = check(request, user, authorization, prefer)
+        if refused:
+            return refused
+        draft = box.drafts.get(message_id)
+        if draft is not None:
+
+            def recipients(addresses: list[str]) -> list[dict[str, Any]]:
+                return [{"emailAddress": {"address": a}} for a in addresses]
+
+            return JSONResponse(
+                {
+                    "id": draft.id,
+                    "isDraft": draft.is_draft,
+                    "toRecipients": recipients(draft.to),
+                    "ccRecipients": recipients(draft.cc),
+                    "bccRecipients": recipients(draft.bcc),
+                }
+            )
+        message = box.find(message_id)
+        if message is None:
+            return _error(404, "ErrorItemNotFound", "The specified object was not found.")
         return JSONResponse(
             {
                 "id": wire_id(message, prefer),
+                "isDraft": False,
                 "parentFolderId": box.location[message.immutable_id],
             }
         )
@@ -376,6 +447,51 @@ def create_app(
             return _error(404, "ErrorItemNotFound", "The specified folder was not found.")
         return JSONResponse({"id": folder.id, "displayName": folder.name})
 
+    @app.post("/v1.0/users/{user}/messages/{message_id}/send")
+    def send(
+        request: Request,
+        user: str,
+        message_id: str,
+        authorization: Annotated[str | None, Header()] = None,
+        prefer: Annotated[str | None, Header()] = None,
+    ) -> Response:
+        refused = check(request, user, authorization, prefer)
+        if refused:
+            return refused
+        draft = box.drafts.get(message_id)
+        if draft is None:
+            return _error(404, "ErrorItemNotFound", "The specified object was not found.")
+        if not draft.is_draft:
+            # Graph sends a draft once; after that the message is in Sent Items, not a draft.
+            return _error(400, "ErrorInvalidRequest", "Only draft messages can be sent.")
+        draft.is_draft = False
+        box.sent.append(draft)
+        return Response(status_code=202)
+
+    @app.patch("/_standin/drafts/{draft_id}")
+    async def change_draft(draft_id: str, request: Request) -> dict[str, str]:
+        """Change a draft's recipients, as a person in Outlook could before it is sent."""
+        draft = box.drafts[draft_id]
+        changes = await request.json()
+        draft.to = changes.get("to", draft.to)
+        draft.cc = changes.get("cc", draft.cc)
+        draft.bcc = changes.get("bcc", draft.bcc)
+        return {"changed": draft_id}
+
+    @app.delete("/_standin/drafts/{draft_id}")
+    def delete_draft(draft_id: str) -> dict[str, str]:
+        """Delete a draft, as a person tidying the Drafts folder could."""
+        box.drafts.pop(draft_id, None)
+        return {"deleted": draft_id}
+
+    @app.post("/_standin/drafts/{draft_id}/send")
+    def send_as_person(draft_id: str) -> dict[str, str]:
+        """Send a draft the way a person in Outlook would, outside ARGUS."""
+        draft = box.drafts[draft_id]
+        draft.is_draft = False
+        box.sent.append(draft)
+        return {"sent": draft_id}
+
     @app.post("/_standin/messages")
     async def add_message(request: Request) -> dict[str, str]:
         return {"id": box.add(await request.body()).immutable_id}
@@ -402,6 +518,18 @@ def create_app(
             "raw_reads": box.raw_reads,
             "folders": {f.id: f.name for f in box.folders.values()},
             "deleted": len(box.deleted),
+            "drafts": len(box.drafts),
+            "sent": [
+                {
+                    "original_id": d.original_id,
+                    "to": d.to,
+                    "attachments": [
+                        {"filename": name, "sha256": hashlib.sha256(data).hexdigest()}
+                        for name, data in d.attachments
+                    ],
+                }
+                for d in box.sent
+            ],
         }
 
     return app

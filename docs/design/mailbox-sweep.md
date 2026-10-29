@@ -25,7 +25,7 @@ Each step writes an audit event (`email_seen`, `email_stored`) in the same trans
 
 The Graph client (`argus.intake.graph`) needs only the application permissions **Mail.ReadWrite** and **Mail.Send**, limited by Exchange to the accounts mailbox (ADR 0003). It checks every token it gets: if the token carries any other Graph permission, ARGUS refuses to make the call, so a too wide grant is noticed at once. A token without any mail roles is fine, because with Exchange RBAC for Applications the rights are granted in Exchange, not in the token.
 
-Every request asks for immutable IDs (`Prefer: IdType="ImmutableId"`) and passes an allowlist of calls on the one mailbox: list the Inbox, read one email as `.eml`, and the folder, move and delete calls of [#26](mailbox-filing.md#new-graph-calls). Anything else, another mailbox or another host, is refused before it leaves ARGUS. Throttling answers (429, 503) are retried after the time Graph asks for.
+Every request asks for immutable IDs (`Prefer: IdType="ImmutableId"`) and passes an allowlist of calls on the one mailbox: list the Inbox, read one email as `.eml`, the folder, move and delete calls of [#26](mailbox-filing.md#new-graph-calls), and, only when a reminder address is set, the calls that forward a payment reminder ([reminder-forward.md](reminder-forward.md)). Anything else, another mailbox or another host, is refused before it leaves ARGUS. Throttling answers (429, 503) are retried after the time Graph asks for.
 
 ## Running it
 
