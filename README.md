@@ -29,6 +29,23 @@ To create the tables in a database, set `ARGUS_DATABASE_URL` and run `.venv/bin/
 
 CI runs the same tests plus `ruff check`, `ruff format --check`, `mypy`, the fixture check and a secret scan on every PR. Tag each test with the requirements it covers, for example `@pytest.mark.req("IN-04", "IN-09")`. An ID that is not in the catalog fails the run.
 
+### Acceptance tests and requirement coverage
+
+The acceptance tests AC-1 to AC-8 (`tests/acceptance/`) run the fixture emails end to end through the stand ins. They need the same PostgreSQL and Azurite as above. One command runs them all and prints pass, fail or not run for each AC:
+
+```bash
+.venv/bin/python tools/acceptance.py
+```
+
+An AC passes only when every one of its checks ran and passed. A scenario whose feature is not built yet carries `@pytest.mark.waits_on(<issue>)` and shows as not run. `--markdown FILE` also appends the result as Markdown, for the sprint review. CI writes it to the job summary.
+
+To list every requirement ID with the tests that cover it, or only the ones without a test:
+
+```bash
+.venv/bin/python tools/requirement_coverage.py
+.venv/bin/python tools/requirement_coverage.py --missing
+```
+
 ## Original documents
 
 Every received email and each attachment is kept byte for byte in blob storage, named by its SHA-256 fingerprint (`src/argus/documents/`, ADR 0001). Storing the same file again finds the first copy and never replaces it, and every read checks the fingerprint again. The database records which file came from which email and which case it belongs to, and writes the fingerprint into the audit log itself. In Azure the connection string comes from Key Vault as `ARGUS_DOCUMENTS_CONNECTION_STRING`.

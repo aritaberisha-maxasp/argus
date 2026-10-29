@@ -34,10 +34,19 @@ This is how QA proves that ARGUS does what the [requirements](../requirements/re
 | AC-7 | A monthly Wise CSV is imported. | Not built yet, see below | Balances per currency reconcile, outgoing payments from AC-4 and the incoming payment for MA-2026-0101 are cleared, a partial payment leaves the rest open. |
 | AC-8 | For every case from AC-1 to AC-7 we read the audit log by case. | Output of the other tests | Every case shows each step from receipt to its last status (NF-05) with time and actor, without gaps. |
 
+## Running the acceptance tests
+
+`python tools/acceptance.py` runs every scenario in `tests/acceptance/` and prints pass, fail or not run for each AC, with one line per check. QA runs it before every sprint review and pastes the result (`--markdown FILE`) into the review. CI runs it on every push and shows it in the job summary.
+
+- An AC passes only when every one of its checks ran and passed.
+- A scenario whose feature is not built yet carries `@pytest.mark.waits_on(<issue>, ...)`. It is skipped and shows as not run, never as passed. Its body says what it will check and fails if someone removes the marker without writing it. Whoever builds the last of those issues writes the scenario and removes the marker.
+- A check that is skipped for any other reason, such as no database locally, also shows as not run.
+- Until the sweep sorts emails itself (#91), the AC-1 and AC-8 scenarios record the sorting decision with a stand in in `tests/acceptance/intake.py`. The AC-1 check that the sweep does it on its own waits on #91.
+
 ## Tagging requirement IDs in tests
 
 - Every test names the requirement IDs it covers. In pytest that is a marker: `@pytest.mark.req("IN-04", "IN-09")`. The run fails if a marker names an ID that is not in the catalog (see `tests/conftest.py`).
-- A small script will list every requirement ID from the catalog with the tests that cover it, so a requirement without a test shows up. It is built once the skeleton exists.
+- `python tools/requirement_coverage.py` lists every requirement ID from the catalog with the tests that cover it, so a requirement without a test shows up (`--missing` shows only those). An acceptance scenario that waits on a feature not built yet is listed but does not count as a test.
 - The fixtures carry requirement IDs too: see the `requirements` column in `manifest.csv`.
 
 ## Evidence on PRs

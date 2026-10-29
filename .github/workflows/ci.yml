@@ -80,6 +80,11 @@ jobs:
         env:
           ARGUS_KOSIT_URL: http://localhost:8090/
         run: pytest --cov=argus --cov-report=term
+      # AC-1 to AC-8 against the stand ins: pass, fail or not run per AC, in the job summary (#66).
+      - name: Acceptance tests
+        env:
+          ARGUS_KOSIT_URL: http://localhost:8090/
+        run: python tools/acceptance.py --markdown "$GITHUB_STEP_SUMMARY"
       - name: Fixture check
         run: python tests/fixtures/tools/check.py
       # ARGUS must never fund or release a payment (NF-04, ADR 0004).

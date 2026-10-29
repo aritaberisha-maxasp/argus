@@ -2,7 +2,7 @@
 
 Covers: all requirement IDs (issue #10)
 
-Every requirement ID in the [catalog](requirements.md) mapped to the backlog issues that deliver it. A requirement is covered when at least one issue delivers it and at least one test names its ID (see the [test strategy](../testing/test-strategy.md)). The test column fills in as stories are built. The order of the issues is in [backlog.md](backlog.md).
+Every requirement ID in the [catalog](requirements.md) mapped to the backlog issues that deliver it. A requirement is covered when at least one issue delivers it and at least one test names its ID (see the [test strategy](../testing/test-strategy.md)). The test column fills in as stories are built; `python tools/requirement_coverage.py` lists the tests that name each ID today. The order of the issues is in [backlog.md](backlog.md).
 
 | Requirement | Issues | Tests |
 |---|---|---|
