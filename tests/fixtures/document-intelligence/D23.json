@@ -1,0 +1,716 @@
+{
+ "sha256": "a56e6532c2791e2c2a2ee79a0cc5af90ea1d93a10fb5ec6250198eb5c398de22",
+ "file": "D23_Invoice_MA-2026-0103.pdf",
+ "recorded": "written by hand from expected.json until the Azure setup (#65) exists",
+ "status": "succeeded",
+ "analyzeResult": {
+  "apiVersion": "2024-11-30",
+  "modelId": "prebuilt-invoice",
+  "content": "Max ASP GmbH\nTestallee 1, 70000 Musterstadt, DE\nVAT ID DE099000001\nExample Tech Inc\n100 Sample Avenue\n00000 Example City\nUS\nInvoice\nNumber: MA-2026-0103\nDate: 02 Oct 2026\nService period: 01 Sep 2026 - 30 Sep 2026\nNo.\nDescription\nQty\nUnit price\nAmount\n1\nConsulting services September (hours)\n16\n150.00 USD\n2,400.00 USD\nNet amount\n2,400.00 USD\nVAT 0 %\n0.00 USD\nTotal\n2,400.00 USD\nNot subject to German VAT, place of supply outside Germany.\nPayment due by 01 Nov 2026.\nBank details: IBAN DE43 0000 0001 0000 9900 01\nSynthetic test document for ARGUS. Not a real invoice.",
+  "pages": [
+   {
+    "pageNumber": 1,
+    "lines": [
+     {
+      "content": "Max ASP GmbH"
+     },
+     {
+      "content": "Testallee 1, 70000 Musterstadt, DE"
+     },
+     {
+      "content": "VAT ID DE099000001"
+     },
+     {
+      "content": "Example Tech Inc"
+     },
+     {
+      "content": "100 Sample Avenue"
+     },
+     {
+      "content": "00000 Example City"
+     },
+     {
+      "content": "US"
+     },
+     {
+      "content": "Invoice"
+     },
+     {
+      "content": "Number: MA-2026-0103"
+     },
+     {
+      "content": "Date: 02 Oct 2026"
+     },
+     {
+      "content": "Service period: 01 Sep 2026 - 30 Sep 2026"
+     },
+     {
+      "content": "No."
+     },
+     {
+      "content": "Description"
+     },
+     {
+      "content": "Qty"
+     },
+     {
+      "content": "Unit price"
+     },
+     {
+      "content": "Amount"
+     },
+     {
+      "content": "1"
+     },
+     {
+      "content": "Consulting services September (hours)"
+     },
+     {
+      "content": "16"
+     },
+     {
+      "content": "150.00 USD"
+     },
+     {
+      "content": "2,400.00 USD"
+     },
+     {
+      "content": "Net amount"
+     },
+     {
+      "content": "2,400.00 USD"
+     },
+     {
+      "content": "VAT 0 %"
+     },
+     {
+      "content": "0.00 USD"
+     },
+     {
+      "content": "Total"
+     },
+     {
+      "content": "2,400.00 USD"
+     },
+     {
+      "content": "Not subject to German VAT, place of supply outside Germany."
+     },
+     {
+      "content": "Payment due by 01 Nov 2026."
+     },
+     {
+      "content": "Bank details: IBAN DE43 0000 0001 0000 9900 01"
+     },
+     {
+      "content": "Synthetic test document for ARGUS. Not a real invoice."
+     }
+    ],
+    "words": [
+     {
+      "content": "Max",
+      "confidence": 0.99
+     },
+     {
+      "content": "ASP",
+      "confidence": 0.99
+     },
+     {
+      "content": "GmbH",
+      "confidence": 0.99
+     },
+     {
+      "content": "Testallee",
+      "confidence": 0.99
+     },
+     {
+      "content": "1,",
+      "confidence": 0.99
+     },
+     {
+      "content": "70000",
+      "confidence": 0.99
+     },
+     {
+      "content": "Musterstadt,",
+      "confidence": 0.99
+     },
+     {
+      "content": "DE",
+      "confidence": 0.99
+     },
+     {
+      "content": "VAT",
+      "confidence": 0.99
+     },
+     {
+      "content": "ID",
+      "confidence": 0.99
+     },
+     {
+      "content": "DE099000001",
+      "confidence": 0.99
+     },
+     {
+      "content": "Example",
+      "confidence": 0.99
+     },
+     {
+      "content": "Tech",
+      "confidence": 0.99
+     },
+     {
+      "content": "Inc",
+      "confidence": 0.99
+     },
+     {
+      "content": "100",
+      "confidence": 0.99
+     },
+     {
+      "content": "Sample",
+      "confidence": 0.99
+     },
+     {
+      "content": "Avenue",
+      "confidence": 0.99
+     },
+     {
+      "content": "00000",
+      "confidence": 0.99
+     },
+     {
+      "content": "Example",
+      "confidence": 0.99
+     },
+     {
+      "content": "City",
+      "confidence": 0.99
+     },
+     {
+      "content": "US",
+      "confidence": 0.99
+     },
+     {
+      "content": "Invoice",
+      "confidence": 0.99
+     },
+     {
+      "content": "Number:",
+      "confidence": 0.99
+     },
+     {
+      "content": "MA-2026-0103",
+      "confidence": 0.99
+     },
+     {
+      "content": "Date:",
+      "confidence": 0.99
+     },
+     {
+      "content": "02",
+      "confidence": 0.99
+     },
+     {
+      "content": "Oct",
+      "confidence": 0.99
+     },
+     {
+      "content": "2026",
+      "confidence": 0.99
+     },
+     {
+      "content": "Service",
+      "confidence": 0.99
+     },
+     {
+      "content": "period:",
+      "confidence": 0.99
+     },
+     {
+      "content": "01",
+      "confidence": 0.99
+     },
+     {
+      "content": "Sep",
+      "confidence": 0.99
+     },
+     {
+      "content": "2026",
+      "confidence": 0.99
+     },
+     {
+      "content": "-",
+      "confidence": 0.99
+     },
+     {
+      "content": "30",
+      "confidence": 0.99
+     },
+     {
+      "content": "Sep",
+      "confidence": 0.99
+     },
+     {
+      "content": "2026",
+      "confidence": 0.99
+     },
+     {
+      "content": "No.",
+      "confidence": 0.99
+     },
+     {
+      "content": "Description",
+      "confidence": 0.99
+     },
+     {
+      "content": "Qty",
+      "confidence": 0.99
+     },
+     {
+      "content": "Unit",
+      "confidence": 0.99
+     },
+     {
+      "content": "price",
+      "confidence": 0.99
+     },
+     {
+      "content": "Amount",
+      "confidence": 0.99
+     },
+     {
+      "content": "1",
+      "confidence": 0.99
+     },
+     {
+      "content": "Consulting",
+      "confidence": 0.99
+     },
+     {
+      "content": "services",
+      "confidence": 0.99
+     },
+     {
+      "content": "September",
+      "confidence": 0.99
+     },
+     {
+      "content": "(hours)",
+      "confidence": 0.99
+     },
+     {
+      "content": "16",
+      "confidence": 0.99
+     },
+     {
+      "content": "150.00",
+      "confidence": 0.99
+     },
+     {
+      "content": "USD",
+      "confidence": 0.99
+     },
+     {
+      "content": "2,400.00",
+      "confidence": 0.99
+     },
+     {
+      "content": "USD",
+      "confidence": 0.99
+     },
+     {
+      "content": "Net",
+      "confidence": 0.99
+     },
+     {
+      "content": "amount",
+      "confidence": 0.99
+     },
+     {
+      "content": "2,400.00",
+      "confidence": 0.99
+     },
+     {
+      "content": "USD",
+      "confidence": 0.99
+     },
+     {
+      "content": "VAT",
+      "confidence": 0.99
+     },
+     {
+      "content": "0",
+      "confidence": 0.99
+     },
+     {
+      "content": "%",
+      "confidence": 0.99
+     },
+     {
+      "content": "0.00",
+      "confidence": 0.99
+     },
+     {
+      "content": "USD",
+      "confidence": 0.99
+     },
+     {
+      "content": "Total",
+      "confidence": 0.99
+     },
+     {
+      "content": "2,400.00",
+      "confidence": 0.99
+     },
+     {
+      "content": "USD",
+      "confidence": 0.99
+     },
+     {
+      "content": "Not",
+      "confidence": 0.99
+     },
+     {
+      "content": "subject",
+      "confidence": 0.99
+     },
+     {
+      "content": "to",
+      "confidence": 0.99
+     },
+     {
+      "content": "German",
+      "confidence": 0.99
+     },
+     {
+      "content": "VAT,",
+      "confidence": 0.99
+     },
+     {
+      "content": "place",
+      "confidence": 0.99
+     },
+     {
+      "content": "of",
+      "confidence": 0.99
+     },
+     {
+      "content": "supply",
+      "confidence": 0.99
+     },
+     {
+      "content": "outside",
+      "confidence": 0.99
+     },
+     {
+      "content": "Germany.",
+      "confidence": 0.99
+     },
+     {
+      "content": "Payment",
+      "confidence": 0.99
+     },
+     {
+      "content": "due",
+      "confidence": 0.99
+     },
+     {
+      "content": "by",
+      "confidence": 0.99
+     },
+     {
+      "content": "01",
+      "confidence": 0.99
+     },
+     {
+      "content": "Nov",
+      "confidence": 0.99
+     },
+     {
+      "content": "2026.",
+      "confidence": 0.99
+     },
+     {
+      "content": "Bank",
+      "confidence": 0.99
+     },
+     {
+      "content": "details:",
+      "confidence": 0.99
+     },
+     {
+      "content": "IBAN",
+      "confidence": 0.99
+     },
+     {
+      "content": "DE43",
+      "confidence": 0.99
+     },
+     {
+      "content": "0000",
+      "confidence": 0.99
+     },
+     {
+      "content": "0001",
+      "confidence": 0.99
+     },
+     {
+      "content": "0000",
+      "confidence": 0.99
+     },
+     {
+      "content": "9900",
+      "confidence": 0.99
+     },
+     {
+      "content": "01",
+      "confidence": 0.99
+     },
+     {
+      "content": "Synthetic",
+      "confidence": 0.99
+     },
+     {
+      "content": "test",
+      "confidence": 0.99
+     },
+     {
+      "content": "document",
+      "confidence": 0.99
+     },
+     {
+      "content": "for",
+      "confidence": 0.99
+     },
+     {
+      "content": "ARGUS.",
+      "confidence": 0.99
+     },
+     {
+      "content": "Not",
+      "confidence": 0.99
+     },
+     {
+      "content": "a",
+      "confidence": 0.99
+     },
+     {
+      "content": "real",
+      "confidence": 0.99
+     },
+     {
+      "content": "invoice.",
+      "confidence": 0.99
+     }
+    ]
+   }
+  ],
+  "documents": [
+   {
+    "docType": "invoice",
+    "fields": {
+     "VendorName": {
+      "type": "string",
+      "valueString": "Max ASP GmbH",
+      "content": "Max ASP GmbH",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "CustomerName": {
+      "type": "string",
+      "valueString": "Example Tech Inc",
+      "content": "Example Tech Inc",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "VendorTaxId": {
+      "type": "string",
+      "valueString": "DE099000001",
+      "content": "DE099000001",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "InvoiceId": {
+      "type": "string",
+      "valueString": "MA-2026-0103",
+      "content": "MA-2026-0103",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "InvoiceDate": {
+      "type": "date",
+      "valueDate": "2026-10-02",
+      "content": "2026-10-02",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "ServiceStartDate": {
+      "type": "date",
+      "valueDate": "2026-09-01",
+      "content": "2026-09-01",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "ServiceEndDate": {
+      "type": "date",
+      "valueDate": "2026-09-30",
+      "content": "2026-09-30",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "SubTotal": {
+      "type": "currency",
+      "valueCurrency": {
+       "amount": 2400.0,
+       "currencyCode": "USD"
+      },
+      "content": "2400.00 USD",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "TotalTax": {
+      "type": "currency",
+      "valueCurrency": {
+       "amount": 0.0,
+       "currencyCode": "USD"
+      },
+      "content": "0.00 USD",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "InvoiceTotal": {
+      "type": "currency",
+      "valueCurrency": {
+       "amount": 2400.0,
+       "currencyCode": "USD"
+      },
+      "content": "2400.00 USD",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "TaxDetails": {
+      "type": "array",
+      "valueArray": [
+       {
+        "type": "object",
+        "valueObject": {
+         "Rate": {
+          "type": "string",
+          "valueString": "0%",
+          "content": "0 %",
+          "boundingRegions": [
+           {
+            "pageNumber": 1,
+            "polygon": []
+           }
+          ],
+          "confidence": 0.98
+         },
+         "Amount": {
+          "type": "currency",
+          "valueCurrency": {
+           "amount": 0.0,
+           "currencyCode": "USD"
+          },
+          "content": "0.00 USD",
+          "boundingRegions": [
+           {
+            "pageNumber": 1,
+            "polygon": []
+           }
+          ],
+          "confidence": 0.98
+         }
+        }
+       }
+      ]
+     },
+     "PaymentDetails": {
+      "type": "array",
+      "valueArray": [
+       {
+        "type": "object",
+        "valueObject": {
+         "IBAN": {
+          "type": "string",
+          "valueString": "DE43000000010000990001",
+          "content": "DE43000000010000990001",
+          "boundingRegions": [
+           {
+            "pageNumber": 1,
+            "polygon": []
+           }
+          ],
+          "confidence": 0.98
+         }
+        }
+       }
+      ]
+     },
+     "DueDate": {
+      "type": "date",
+      "valueDate": "2026-11-01",
+      "content": "2026-11-01",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     }
+    }
+   }
+  ]
+ }
+}

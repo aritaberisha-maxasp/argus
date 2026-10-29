@@ -1,0 +1,750 @@
+{
+ "sha256": "d2cf6e49e65e9c8a37b80e0082f8b802a0283bf8ecc258c7675293b3854a1ca7",
+ "file": "D01_Rechnung_BB-2026-1187.pdf",
+ "recorded": "written by hand from expected.json until the Azure setup (#65) exists",
+ "status": "succeeded",
+ "analyzeResult": {
+  "apiVersion": "2024-11-30",
+  "modelId": "prebuilt-invoice",
+  "content": "Muster Bürobedarf GmbH\nPapierweg 12, 70001 Musterstadt, DE\nUSt-IdNr. DE012345601\nMax ASP GmbH\nTestallee 1\n70000 Musterstadt\nDE\nRechnung\nNummer: BB-2026-1187\nDatum: 02.10.2026\nLeistungszeitraum: 01.09.2026 - 30.09.2026\nPos.\nBeschreibung\nMenge\nEinzelpreis\nBetrag\n1\nDruckerpapier A4, 500 Blatt\n20\n4,90 EUR\n98,00 EUR\n2\nToner schwarz\n2\n64,50 EUR\n129,00 EUR\n3\nOrdner breit\n30\n2,35 EUR\n70,50 EUR\nNettobetrag\n297,50 EUR\nUSt 19 %\n56,53 EUR\nGesamtbetrag\n354,03 EUR\nZahlbar bis 01.11.2026 ohne Abzug.\nBei Zahlung bis 12.10.2026 gewähren wir 2,00 % Skonto.\nBankverbindung: IBAN DE44 0000 0002 0000 7000 01\nSynthetic test document for ARGUS. Not a real invoice.",
+  "pages": [
+   {
+    "pageNumber": 1,
+    "lines": [
+     {
+      "content": "Muster Bürobedarf GmbH"
+     },
+     {
+      "content": "Papierweg 12, 70001 Musterstadt, DE"
+     },
+     {
+      "content": "USt-IdNr. DE012345601"
+     },
+     {
+      "content": "Max ASP GmbH"
+     },
+     {
+      "content": "Testallee 1"
+     },
+     {
+      "content": "70000 Musterstadt"
+     },
+     {
+      "content": "DE"
+     },
+     {
+      "content": "Rechnung"
+     },
+     {
+      "content": "Nummer: BB-2026-1187"
+     },
+     {
+      "content": "Datum: 02.10.2026"
+     },
+     {
+      "content": "Leistungszeitraum: 01.09.2026 - 30.09.2026"
+     },
+     {
+      "content": "Pos."
+     },
+     {
+      "content": "Beschreibung"
+     },
+     {
+      "content": "Menge"
+     },
+     {
+      "content": "Einzelpreis"
+     },
+     {
+      "content": "Betrag"
+     },
+     {
+      "content": "1"
+     },
+     {
+      "content": "Druckerpapier A4, 500 Blatt"
+     },
+     {
+      "content": "20"
+     },
+     {
+      "content": "4,90 EUR"
+     },
+     {
+      "content": "98,00 EUR"
+     },
+     {
+      "content": "2"
+     },
+     {
+      "content": "Toner schwarz"
+     },
+     {
+      "content": "2"
+     },
+     {
+      "content": "64,50 EUR"
+     },
+     {
+      "content": "129,00 EUR"
+     },
+     {
+      "content": "3"
+     },
+     {
+      "content": "Ordner breit"
+     },
+     {
+      "content": "30"
+     },
+     {
+      "content": "2,35 EUR"
+     },
+     {
+      "content": "70,50 EUR"
+     },
+     {
+      "content": "Nettobetrag"
+     },
+     {
+      "content": "297,50 EUR"
+     },
+     {
+      "content": "USt 19 %"
+     },
+     {
+      "content": "56,53 EUR"
+     },
+     {
+      "content": "Gesamtbetrag"
+     },
+     {
+      "content": "354,03 EUR"
+     },
+     {
+      "content": "Zahlbar bis 01.11.2026 ohne Abzug."
+     },
+     {
+      "content": "Bei Zahlung bis 12.10.2026 gewähren wir 2,00 % Skonto."
+     },
+     {
+      "content": "Bankverbindung: IBAN DE44 0000 0002 0000 7000 01"
+     },
+     {
+      "content": "Synthetic test document for ARGUS. Not a real invoice."
+     }
+    ],
+    "words": [
+     {
+      "content": "Muster",
+      "confidence": 0.99
+     },
+     {
+      "content": "Bürobedarf",
+      "confidence": 0.99
+     },
+     {
+      "content": "GmbH",
+      "confidence": 0.99
+     },
+     {
+      "content": "Papierweg",
+      "confidence": 0.99
+     },
+     {
+      "content": "12,",
+      "confidence": 0.99
+     },
+     {
+      "content": "70001",
+      "confidence": 0.99
+     },
+     {
+      "content": "Musterstadt,",
+      "confidence": 0.99
+     },
+     {
+      "content": "DE",
+      "confidence": 0.99
+     },
+     {
+      "content": "USt-IdNr.",
+      "confidence": 0.99
+     },
+     {
+      "content": "DE012345601",
+      "confidence": 0.99
+     },
+     {
+      "content": "Max",
+      "confidence": 0.99
+     },
+     {
+      "content": "ASP",
+      "confidence": 0.99
+     },
+     {
+      "content": "GmbH",
+      "confidence": 0.99
+     },
+     {
+      "content": "Testallee",
+      "confidence": 0.99
+     },
+     {
+      "content": "1",
+      "confidence": 0.99
+     },
+     {
+      "content": "70000",
+      "confidence": 0.99
+     },
+     {
+      "content": "Musterstadt",
+      "confidence": 0.99
+     },
+     {
+      "content": "DE",
+      "confidence": 0.99
+     },
+     {
+      "content": "Rechnung",
+      "confidence": 0.99
+     },
+     {
+      "content": "Nummer:",
+      "confidence": 0.99
+     },
+     {
+      "content": "BB-2026-1187",
+      "confidence": 0.99
+     },
+     {
+      "content": "Datum:",
+      "confidence": 0.99
+     },
+     {
+      "content": "02.10.2026",
+      "confidence": 0.99
+     },
+     {
+      "content": "Leistungszeitraum:",
+      "confidence": 0.99
+     },
+     {
+      "content": "01.09.2026",
+      "confidence": 0.99
+     },
+     {
+      "content": "-",
+      "confidence": 0.99
+     },
+     {
+      "content": "30.09.2026",
+      "confidence": 0.99
+     },
+     {
+      "content": "Pos.",
+      "confidence": 0.99
+     },
+     {
+      "content": "Beschreibung",
+      "confidence": 0.99
+     },
+     {
+      "content": "Menge",
+      "confidence": 0.99
+     },
+     {
+      "content": "Einzelpreis",
+      "confidence": 0.99
+     },
+     {
+      "content": "Betrag",
+      "confidence": 0.99
+     },
+     {
+      "content": "1",
+      "confidence": 0.99
+     },
+     {
+      "content": "Druckerpapier",
+      "confidence": 0.99
+     },
+     {
+      "content": "A4,",
+      "confidence": 0.99
+     },
+     {
+      "content": "500",
+      "confidence": 0.99
+     },
+     {
+      "content": "Blatt",
+      "confidence": 0.99
+     },
+     {
+      "content": "20",
+      "confidence": 0.99
+     },
+     {
+      "content": "4,90",
+      "confidence": 0.99
+     },
+     {
+      "content": "EUR",
+      "confidence": 0.99
+     },
+     {
+      "content": "98,00",
+      "confidence": 0.99
+     },
+     {
+      "content": "EUR",
+      "confidence": 0.99
+     },
+     {
+      "content": "2",
+      "confidence": 0.99
+     },
+     {
+      "content": "Toner",
+      "confidence": 0.99
+     },
+     {
+      "content": "schwarz",
+      "confidence": 0.99
+     },
+     {
+      "content": "2",
+      "confidence": 0.99
+     },
+     {
+      "content": "64,50",
+      "confidence": 0.99
+     },
+     {
+      "content": "EUR",
+      "confidence": 0.99
+     },
+     {
+      "content": "129,00",
+      "confidence": 0.99
+     },
+     {
+      "content": "EUR",
+      "confidence": 0.99
+     },
+     {
+      "content": "3",
+      "confidence": 0.99
+     },
+     {
+      "content": "Ordner",
+      "confidence": 0.99
+     },
+     {
+      "content": "breit",
+      "confidence": 0.99
+     },
+     {
+      "content": "30",
+      "confidence": 0.99
+     },
+     {
+      "content": "2,35",
+      "confidence": 0.99
+     },
+     {
+      "content": "EUR",
+      "confidence": 0.99
+     },
+     {
+      "content": "70,50",
+      "confidence": 0.99
+     },
+     {
+      "content": "EUR",
+      "confidence": 0.99
+     },
+     {
+      "content": "Nettobetrag",
+      "confidence": 0.99
+     },
+     {
+      "content": "297,50",
+      "confidence": 0.99
+     },
+     {
+      "content": "EUR",
+      "confidence": 0.99
+     },
+     {
+      "content": "USt",
+      "confidence": 0.99
+     },
+     {
+      "content": "19",
+      "confidence": 0.99
+     },
+     {
+      "content": "%",
+      "confidence": 0.99
+     },
+     {
+      "content": "56,53",
+      "confidence": 0.99
+     },
+     {
+      "content": "EUR",
+      "confidence": 0.99
+     },
+     {
+      "content": "Gesamtbetrag",
+      "confidence": 0.99
+     },
+     {
+      "content": "354,03",
+      "confidence": 0.99
+     },
+     {
+      "content": "EUR",
+      "confidence": 0.99
+     },
+     {
+      "content": "Zahlbar",
+      "confidence": 0.99
+     },
+     {
+      "content": "bis",
+      "confidence": 0.99
+     },
+     {
+      "content": "01.11.2026",
+      "confidence": 0.99
+     },
+     {
+      "content": "ohne",
+      "confidence": 0.99
+     },
+     {
+      "content": "Abzug.",
+      "confidence": 0.99
+     },
+     {
+      "content": "Bei",
+      "confidence": 0.99
+     },
+     {
+      "content": "Zahlung",
+      "confidence": 0.99
+     },
+     {
+      "content": "bis",
+      "confidence": 0.99
+     },
+     {
+      "content": "12.10.2026",
+      "confidence": 0.99
+     },
+     {
+      "content": "gewähren",
+      "confidence": 0.99
+     },
+     {
+      "content": "wir",
+      "confidence": 0.99
+     },
+     {
+      "content": "2,00",
+      "confidence": 0.99
+     },
+     {
+      "content": "%",
+      "confidence": 0.99
+     },
+     {
+      "content": "Skonto.",
+      "confidence": 0.99
+     },
+     {
+      "content": "Bankverbindung:",
+      "confidence": 0.99
+     },
+     {
+      "content": "IBAN",
+      "confidence": 0.99
+     },
+     {
+      "content": "DE44",
+      "confidence": 0.99
+     },
+     {
+      "content": "0000",
+      "confidence": 0.99
+     },
+     {
+      "content": "0002",
+      "confidence": 0.99
+     },
+     {
+      "content": "0000",
+      "confidence": 0.99
+     },
+     {
+      "content": "7000",
+      "confidence": 0.99
+     },
+     {
+      "content": "01",
+      "confidence": 0.99
+     },
+     {
+      "content": "Synthetic",
+      "confidence": 0.99
+     },
+     {
+      "content": "test",
+      "confidence": 0.99
+     },
+     {
+      "content": "document",
+      "confidence": 0.99
+     },
+     {
+      "content": "for",
+      "confidence": 0.99
+     },
+     {
+      "content": "ARGUS.",
+      "confidence": 0.99
+     },
+     {
+      "content": "Not",
+      "confidence": 0.99
+     },
+     {
+      "content": "a",
+      "confidence": 0.99
+     },
+     {
+      "content": "real",
+      "confidence": 0.99
+     },
+     {
+      "content": "invoice.",
+      "confidence": 0.99
+     }
+    ]
+   }
+  ],
+  "documents": [
+   {
+    "docType": "invoice",
+    "fields": {
+     "VendorName": {
+      "type": "string",
+      "valueString": "Muster Bürobedarf GmbH",
+      "content": "Muster Bürobedarf GmbH",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "CustomerName": {
+      "type": "string",
+      "valueString": "Max ASP GmbH",
+      "content": "Max ASP GmbH",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "VendorTaxId": {
+      "type": "string",
+      "valueString": "DE012345601",
+      "content": "DE012345601",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "InvoiceId": {
+      "type": "string",
+      "valueString": "BB-2026-1187",
+      "content": "BB-2026-1187",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "InvoiceDate": {
+      "type": "date",
+      "valueDate": "2026-10-02",
+      "content": "2026-10-02",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "ServiceStartDate": {
+      "type": "date",
+      "valueDate": "2026-09-01",
+      "content": "2026-09-01",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "ServiceEndDate": {
+      "type": "date",
+      "valueDate": "2026-09-30",
+      "content": "2026-09-30",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "SubTotal": {
+      "type": "currency",
+      "valueCurrency": {
+       "amount": 297.5,
+       "currencyCode": "EUR"
+      },
+      "content": "297.50 EUR",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "TotalTax": {
+      "type": "currency",
+      "valueCurrency": {
+       "amount": 56.53,
+       "currencyCode": "EUR"
+      },
+      "content": "56.53 EUR",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "InvoiceTotal": {
+      "type": "currency",
+      "valueCurrency": {
+       "amount": 354.03,
+       "currencyCode": "EUR"
+      },
+      "content": "354.03 EUR",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "TaxDetails": {
+      "type": "array",
+      "valueArray": [
+       {
+        "type": "object",
+        "valueObject": {
+         "Rate": {
+          "type": "string",
+          "valueString": "19%",
+          "content": "19 %",
+          "boundingRegions": [
+           {
+            "pageNumber": 1,
+            "polygon": []
+           }
+          ],
+          "confidence": 0.98
+         },
+         "Amount": {
+          "type": "currency",
+          "valueCurrency": {
+           "amount": 56.53,
+           "currencyCode": "EUR"
+          },
+          "content": "56.53 EUR",
+          "boundingRegions": [
+           {
+            "pageNumber": 1,
+            "polygon": []
+           }
+          ],
+          "confidence": 0.98
+         }
+        }
+       }
+      ]
+     },
+     "PaymentDetails": {
+      "type": "array",
+      "valueArray": [
+       {
+        "type": "object",
+        "valueObject": {
+         "IBAN": {
+          "type": "string",
+          "valueString": "DE44000000020000700001",
+          "content": "DE44000000020000700001",
+          "boundingRegions": [
+           {
+            "pageNumber": 1,
+            "polygon": []
+           }
+          ],
+          "confidence": 0.98
+         }
+        }
+       }
+      ]
+     },
+     "DueDate": {
+      "type": "date",
+      "valueDate": "2026-11-01",
+      "content": "2026-11-01",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     }
+    }
+   }
+  ]
+ }
+}

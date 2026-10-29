@@ -1,0 +1,19 @@
+{
+ "sha256": "d651f69ee4bb5ba9ec2b77714af0ebd3f1f9fcb58f07e82186c3ee04f0c18542",
+ "file": "L46_scan_0001.jpg",
+ "recorded": "written by hand from expected.json until the Azure setup (#65) exists",
+ "status": "succeeded",
+ "analyzeResult": {
+  "apiVersion": "2024-11-30",
+  "modelId": "prebuilt-invoice",
+  "content": "",
+  "pages": [
+   {
+    "pageNumber": 1,
+    "lines": [],
+    "words": []
+   }
+  ],
+  "documents": []
+ }
+}

@@ -1,0 +1,664 @@
+{
+ "sha256": "aad6d2174ab179451fb933d627143f0743d0715d40f01a48edef5cd232cbc9b9",
+ "file": "D12_Rechnung_DR-2026-0815.pdf",
+ "recorded": "written by hand from expected.json until the Azure setup (#65) exists",
+ "status": "succeeded",
+ "analyzeResult": {
+  "apiVersion": "2024-11-30",
+  "modelId": "prebuilt-invoice",
+  "content": "Beispiel Druckerei GmbH\nDruckerweg 8, 70009 Beispielstadt, DE\nUSt-IdNr. DE012345609\nMax ASP GmbH\nTestallee 1\n70000 Musterstadt\nDE\nRechnung\nNummer: DR-2026-0815\nDatum: 08.10.2026\nLeistungszeitraum: 08.10.2026 - 08.10.2026\nPos.\nBeschreibung\nMenge\nEinzelpreis\nBetrag\n1\nFlyer DIN A5, 4/4 farbig\n1000\n0,09 EUR\n90,00 EUR\n2\nVisitenkarten\n500\n0,12 EUR\n60,00 EUR\nNettobetrag\n150,00 EUR\nUSt 19 %\n28,50 EUR\nGesamtbetrag\n178,50 EUR\nZahlbar bis 22.10.2026 ohne Abzug.\nBankverbindung: IBAN DE73 0000 0009 0000 7000 09\nSynthetic test document for ARGUS. Not a real invoice.",
+  "pages": [
+   {
+    "pageNumber": 1,
+    "lines": [
+     {
+      "content": "Beispiel Druckerei GmbH"
+     },
+     {
+      "content": "Druckerweg 8, 70009 Beispielstadt, DE"
+     },
+     {
+      "content": "USt-IdNr. DE012345609"
+     },
+     {
+      "content": "Max ASP GmbH"
+     },
+     {
+      "content": "Testallee 1"
+     },
+     {
+      "content": "70000 Musterstadt"
+     },
+     {
+      "content": "DE"
+     },
+     {
+      "content": "Rechnung"
+     },
+     {
+      "content": "Nummer: DR-2026-0815"
+     },
+     {
+      "content": "Datum: 08.10.2026"
+     },
+     {
+      "content": "Leistungszeitraum: 08.10.2026 - 08.10.2026"
+     },
+     {
+      "content": "Pos."
+     },
+     {
+      "content": "Beschreibung"
+     },
+     {
+      "content": "Menge"
+     },
+     {
+      "content": "Einzelpreis"
+     },
+     {
+      "content": "Betrag"
+     },
+     {
+      "content": "1"
+     },
+     {
+      "content": "Flyer DIN A5, 4/4 farbig"
+     },
+     {
+      "content": "1000"
+     },
+     {
+      "content": "0,09 EUR"
+     },
+     {
+      "content": "90,00 EUR"
+     },
+     {
+      "content": "2"
+     },
+     {
+      "content": "Visitenkarten"
+     },
+     {
+      "content": "500"
+     },
+     {
+      "content": "0,12 EUR"
+     },
+     {
+      "content": "60,00 EUR"
+     },
+     {
+      "content": "Nettobetrag"
+     },
+     {
+      "content": "150,00 EUR"
+     },
+     {
+      "content": "USt 19 %"
+     },
+     {
+      "content": "28,50 EUR"
+     },
+     {
+      "content": "Gesamtbetrag"
+     },
+     {
+      "content": "178,50 EUR"
+     },
+     {
+      "content": "Zahlbar bis 22.10.2026 ohne Abzug."
+     },
+     {
+      "content": "Bankverbindung: IBAN DE73 0000 0009 0000 7000 09"
+     },
+     {
+      "content": "Synthetic test document for ARGUS. Not a real invoice."
+     }
+    ],
+    "words": [
+     {
+      "content": "Beispiel",
+      "confidence": 0.99
+     },
+     {
+      "content": "Druckerei",
+      "confidence": 0.99
+     },
+     {
+      "content": "GmbH",
+      "confidence": 0.99
+     },
+     {
+      "content": "Druckerweg",
+      "confidence": 0.99
+     },
+     {
+      "content": "8,",
+      "confidence": 0.99
+     },
+     {
+      "content": "70009",
+      "confidence": 0.99
+     },
+     {
+      "content": "Beispielstadt,",
+      "confidence": 0.99
+     },
+     {
+      "content": "DE",
+      "confidence": 0.99
+     },
+     {
+      "content": "USt-IdNr.",
+      "confidence": 0.99
+     },
+     {
+      "content": "DE012345609",
+      "confidence": 0.99
+     },
+     {
+      "content": "Max",
+      "confidence": 0.99
+     },
+     {
+      "content": "ASP",
+      "confidence": 0.99
+     },
+     {
+      "content": "GmbH",
+      "confidence": 0.99
+     },
+     {
+      "content": "Testallee",
+      "confidence": 0.99
+     },
+     {
+      "content": "1",
+      "confidence": 0.99
+     },
+     {
+      "content": "70000",
+      "confidence": 0.99
+     },
+     {
+      "content": "Musterstadt",
+      "confidence": 0.99
+     },
+     {
+      "content": "DE",
+      "confidence": 0.99
+     },
+     {
+      "content": "Rechnung",
+      "confidence": 0.99
+     },
+     {
+      "content": "Nummer:",
+      "confidence": 0.99
+     },
+     {
+      "content": "DR-2026-0815",
+      "confidence": 0.99
+     },
+     {
+      "content": "Datum:",
+      "confidence": 0.99
+     },
+     {
+      "content": "08.10.2026",
+      "confidence": 0.99
+     },
+     {
+      "content": "Leistungszeitraum:",
+      "confidence": 0.99
+     },
+     {
+      "content": "08.10.2026",
+      "confidence": 0.99
+     },
+     {
+      "content": "-",
+      "confidence": 0.99
+     },
+     {
+      "content": "08.10.2026",
+      "confidence": 0.99
+     },
+     {
+      "content": "Pos.",
+      "confidence": 0.99
+     },
+     {
+      "content": "Beschreibung",
+      "confidence": 0.99
+     },
+     {
+      "content": "Menge",
+      "confidence": 0.99
+     },
+     {
+      "content": "Einzelpreis",
+      "confidence": 0.99
+     },
+     {
+      "content": "Betrag",
+      "confidence": 0.99
+     },
+     {
+      "content": "1",
+      "confidence": 0.99
+     },
+     {
+      "content": "Flyer",
+      "confidence": 0.99
+     },
+     {
+      "content": "DIN",
+      "confidence": 0.99
+     },
+     {
+      "content": "A5,",
+      "confidence": 0.99
+     },
+     {
+      "content": "4/4",
+      "confidence": 0.99
+     },
+     {
+      "content": "farbig",
+      "confidence": 0.99
+     },
+     {
+      "content": "1000",
+      "confidence": 0.99
+     },
+     {
+      "content": "0,09",
+      "confidence": 0.99
+     },
+     {
+      "content": "EUR",
+      "confidence": 0.99
+     },
+     {
+      "content": "90,00",
+      "confidence": 0.99
+     },
+     {
+      "content": "EUR",
+      "confidence": 0.99
+     },
+     {
+      "content": "2",
+      "confidence": 0.99
+     },
+     {
+      "content": "Visitenkarten",
+      "confidence": 0.99
+     },
+     {
+      "content": "500",
+      "confidence": 0.99
+     },
+     {
+      "content": "0,12",
+      "confidence": 0.99
+     },
+     {
+      "content": "EUR",
+      "confidence": 0.99
+     },
+     {
+      "content": "60,00",
+      "confidence": 0.99
+     },
+     {
+      "content": "EUR",
+      "confidence": 0.99
+     },
+     {
+      "content": "Nettobetrag",
+      "confidence": 0.99
+     },
+     {
+      "content": "150,00",
+      "confidence": 0.99
+     },
+     {
+      "content": "EUR",
+      "confidence": 0.99
+     },
+     {
+      "content": "USt",
+      "confidence": 0.99
+     },
+     {
+      "content": "19",
+      "confidence": 0.99
+     },
+     {
+      "content": "%",
+      "confidence": 0.99
+     },
+     {
+      "content": "28,50",
+      "confidence": 0.99
+     },
+     {
+      "content": "EUR",
+      "confidence": 0.99
+     },
+     {
+      "content": "Gesamtbetrag",
+      "confidence": 0.99
+     },
+     {
+      "content": "178,50",
+      "confidence": 0.99
+     },
+     {
+      "content": "EUR",
+      "confidence": 0.99
+     },
+     {
+      "content": "Zahlbar",
+      "confidence": 0.99
+     },
+     {
+      "content": "bis",
+      "confidence": 0.99
+     },
+     {
+      "content": "22.10.2026",
+      "confidence": 0.99
+     },
+     {
+      "content": "ohne",
+      "confidence": 0.99
+     },
+     {
+      "content": "Abzug.",
+      "confidence": 0.99
+     },
+     {
+      "content": "Bankverbindung:",
+      "confidence": 0.99
+     },
+     {
+      "content": "IBAN",
+      "confidence": 0.99
+     },
+     {
+      "content": "DE73",
+      "confidence": 0.99
+     },
+     {
+      "content": "0000",
+      "confidence": 0.99
+     },
+     {
+      "content": "0009",
+      "confidence": 0.99
+     },
+     {
+      "content": "0000",
+      "confidence": 0.99
+     },
+     {
+      "content": "7000",
+      "confidence": 0.99
+     },
+     {
+      "content": "09",
+      "confidence": 0.99
+     },
+     {
+      "content": "Synthetic",
+      "confidence": 0.99
+     },
+     {
+      "content": "test",
+      "confidence": 0.99
+     },
+     {
+      "content": "document",
+      "confidence": 0.99
+     },
+     {
+      "content": "for",
+      "confidence": 0.99
+     },
+     {
+      "content": "ARGUS.",
+      "confidence": 0.99
+     },
+     {
+      "content": "Not",
+      "confidence": 0.99
+     },
+     {
+      "content": "a",
+      "confidence": 0.99
+     },
+     {
+      "content": "real",
+      "confidence": 0.99
+     },
+     {
+      "content": "invoice.",
+      "confidence": 0.99
+     }
+    ]
+   }
+  ],
+  "documents": [
+   {
+    "docType": "invoice",
+    "fields": {
+     "VendorName": {
+      "type": "string",
+      "valueString": "Beispiel Druckerei GmbH",
+      "content": "Beispiel Druckerei GmbH",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "CustomerName": {
+      "type": "string",
+      "valueString": "Max ASP GmbH",
+      "content": "Max ASP GmbH",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "VendorTaxId": {
+      "type": "string",
+      "valueString": "DE012345609",
+      "content": "DE012345609",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "InvoiceId": {
+      "type": "string",
+      "valueString": "DR-2026-0815",
+      "content": "DR-2026-0815",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "InvoiceDate": {
+      "type": "date",
+      "valueDate": "2026-10-08",
+      "content": "2026-10-08",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "ServiceStartDate": {
+      "type": "date",
+      "valueDate": "2026-10-08",
+      "content": "2026-10-08",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "ServiceEndDate": {
+      "type": "date",
+      "valueDate": "2026-10-08",
+      "content": "2026-10-08",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "SubTotal": {
+      "type": "currency",
+      "valueCurrency": {
+       "amount": 150.0,
+       "currencyCode": "EUR"
+      },
+      "content": "150.00 EUR",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "TotalTax": {
+      "type": "currency",
+      "valueCurrency": {
+       "amount": 28.5,
+       "currencyCode": "EUR"
+      },
+      "content": "28.50 EUR",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "InvoiceTotal": {
+      "type": "currency",
+      "valueCurrency": {
+       "amount": 178.5,
+       "currencyCode": "EUR"
+      },
+      "content": "178.50 EUR",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     },
+     "TaxDetails": {
+      "type": "array",
+      "valueArray": [
+       {
+        "type": "object",
+        "valueObject": {
+         "Rate": {
+          "type": "string",
+          "valueString": "19%",
+          "content": "19 %",
+          "boundingRegions": [
+           {
+            "pageNumber": 1,
+            "polygon": []
+           }
+          ],
+          "confidence": 0.98
+         },
+         "Amount": {
+          "type": "currency",
+          "valueCurrency": {
+           "amount": 28.5,
+           "currencyCode": "EUR"
+          },
+          "content": "28.50 EUR",
+          "boundingRegions": [
+           {
+            "pageNumber": 1,
+            "polygon": []
+           }
+          ],
+          "confidence": 0.98
+         }
+        }
+       }
+      ]
+     },
+     "PaymentDetails": {
+      "type": "array",
+      "valueArray": [
+       {
+        "type": "object",
+        "valueObject": {
+         "IBAN": {
+          "type": "string",
+          "valueString": "DE73000000090000700009",
+          "content": "DE73000000090000700009",
+          "boundingRegions": [
+           {
+            "pageNumber": 1,
+            "polygon": []
+           }
+          ],
+          "confidence": 0.98
+         }
+        }
+       }
+      ]
+     },
+     "DueDate": {
+      "type": "date",
+      "valueDate": "2026-10-22",
+      "content": "2026-10-22",
+      "boundingRegions": [
+       {
+        "pageNumber": 1,
+        "polygon": []
+       }
+      ],
+      "confidence": 0.98
+     }
+    }
+   }
+  ]
+ }
+}
