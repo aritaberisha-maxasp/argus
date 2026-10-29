@@ -12,10 +12,13 @@ built yet (``@pytest.mark.waits_on``), or that was skipped for any other reason,
 so is its AC. Nothing that did not run ever counts as passed.
 
 ``--markdown FILE`` also appends the result as Markdown to FILE, for the sprint review or the CI
-job summary. Anything after ``--`` goes to pytest. Exits 1 when a check fails.
+job summary. Anything after ``--`` goes to pytest; every check under tests/acceptance is still
+listed, and one left out of the run is not run. Exits 1 when a check fails.
 """
 
 import argparse
+import contextlib
+import io
 import re
 import subprocess
 import sys
@@ -113,7 +116,11 @@ class Collector:
         self.checks: dict[str, Check] = {}
 
     def pytest_collection_modifyitems(self, items: list[pytest.Item]) -> None:
+        """Adds every collected check. A check collected by an earlier pass stays, so a narrower
+        run (node ids after ``--``) can never drop a check from its AC."""
         for item in items:
+            if item.nodeid in self.checks:
+                continue
             acs = tuple(
                 sorted(
                     {
@@ -220,6 +227,13 @@ def main(argv: Sequence[str]) -> int:
     args = parser.parse_args(argv)
 
     collector = Collector()
+    # First every check under tests/acceptance, whatever is passed to pytest, so a check left
+    # out of the run below still counts as not run.
+    with contextlib.redirect_stdout(io.StringIO()) as listing:
+        code = pytest.main([str(TESTS), "--collect-only", "-q"], plugins=[collector])
+    if code != pytest.ExitCode.OK:
+        print(listing.getvalue(), f"pytest could not collect the acceptance tests ({code})")
+        return int(code)
     code = pytest.main([str(TESTS), "-q", "-rfE", *args.pytest_args], plugins=[collector])
     if code not in (pytest.ExitCode.OK, pytest.ExitCode.TESTS_FAILED):
         print(f"pytest could not run the acceptance tests (exit code {code})", file=sys.stderr)

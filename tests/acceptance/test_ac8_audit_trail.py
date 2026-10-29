@@ -9,7 +9,7 @@ import pytest
 from sqlalchemy import Engine, text
 
 from argus.cases.store import verify_chain
-from tests.acceptance.intake import IntakeRun
+from tests.acceptance.intake import SORTING_STANDIN, IntakeRun
 
 INTAKE_STEPS = ["email_seen", "email_stored", "email_classified", "email_routed", "email_filed"]
 
@@ -37,6 +37,25 @@ def test_every_email_shows_each_intake_step_with_time_and_actor(
                 gaps[each.fixture_id] = [e.event_type for e in events]
         assert verify_chain(connection) is None
     assert gaps == {}
+
+
+@pytest.mark.req("AC-8", "NF-01")
+@pytest.mark.waits_on(91)
+def test_no_intake_step_in_the_trail_was_recorded_by_the_test_stand_in(
+    app: Engine, intake_run: IntakeRun
+) -> None:
+    """Until #91 the stand in in tests/acceptance/intake.py records classified and routed, so
+    the trail above holds steps ARGUS did not take itself. Whoever builds #91 removes the stand
+    in and this marker."""
+    with app.connect() as connection:
+        by_standin = connection.execute(
+            text(
+                "select count(*) from audit_event"
+                " where email_id = any(:ids) and actor_type = 'system' and actor = :actor"
+            ),
+            {"ids": [e.record_id for e in intake_run.emails], "actor": SORTING_STANDIN.name},
+        ).scalar()
+    assert by_standin == 0
 
 
 @pytest.mark.req("AC-8", "NF-05")

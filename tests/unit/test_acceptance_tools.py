@@ -3,7 +3,7 @@
 
 import importlib.util
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from typing import Any, Literal
 
 import pytest
@@ -137,3 +137,26 @@ def test_a_scenario_that_waits_on_a_feature_does_not_count_as_a_test() -> None:
     assert "VM-03  0 tests" in text
     assert "t::w (not built yet, waits on #35)" in text
     assert requirement_coverage.summary(found).startswith("0 of 2 requirement IDs")
+
+
+class FakeItem:
+    """Just what the collector reads from a pytest item."""
+
+    def __init__(self, nodeid: str, *acs: str) -> None:
+        self.nodeid, self.name, self._acs = nodeid, nodeid.rpartition("::")[2], acs
+
+    def iter_markers(self, name: str) -> list[SimpleNamespace]:
+        return [SimpleNamespace(args=self._acs)] if name == "req" else []
+
+
+def test_a_narrower_run_never_drops_a_check_collected_before() -> None:
+    collector = acceptance.Collector()
+    everything = [FakeItem("t::test_run_date", "AC-4"), FakeItem("t::test_batch", "AC-4")]
+    collector.pytest_collection_modifyitems(everything)
+    # The run after ``--`` only names the first check, and it passes.
+    collector.pytest_collection_modifyitems(everything[:1])
+    collector.pytest_runtest_logreport(
+        pytest.TestReport("t::test_run_date", ("t", 1, "a"), {}, "passed", None, "call")
+    )
+    found = acceptance.verdicts({"AC-4": "Payment run"}, collector.checks.values())
+    assert (found[0].result, found[0].summary) == ("not run", "1 of 2 checks pass, 1 not run")
