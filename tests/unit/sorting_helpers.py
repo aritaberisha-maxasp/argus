@@ -47,7 +47,12 @@ def manifest() -> list[dict[str, str]]:
 
 
 def read_fixture_email(path: Path) -> EmailToSort:
-    message = email.message_from_bytes(path.read_bytes(), policy=policy.default)
+    return read_raw_email(path.read_bytes())
+
+
+def read_raw_email(raw: bytes) -> EmailToSort:
+    """The same for an email as stored by the sweep, for the acceptance tests (#66)."""
+    message = email.message_from_bytes(raw, policy=policy.default)
     assert isinstance(message, EmailMessage)
     name, address = parseaddr(str(message.get("From", "")))
     part = message.get_body(preferencelist=("plain", "html"))

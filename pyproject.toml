@@ -43,6 +43,7 @@ pythonpath = ["."]
 addopts = ["--strict-markers", "--import-mode=importlib"]
 markers = [
     "req(*ids): requirement IDs from docs/requirements/requirements.md that this test covers",
+    "waits_on(*issues): an acceptance scenario whose feature is not built yet; shows as not run",
 ]
 
 [tool.ruff]
