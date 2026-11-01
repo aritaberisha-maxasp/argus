@@ -9,5 +9,6 @@ A PR is ready for Arita only when all of this is true:
 - **It is traceable.** The PR names the requirement IDs it covers, and the tests reference them.
 - **It leaves an audit trail.** Any step that changes the state of an invoice, booking or payment writes to the audit log (NF-01, NF-05).
 - **It is safe.** No secrets, no real personal or company data, nothing that could release a payment (NF-04).
+- **It is connected, or says what is not.** If the feature only works once another story connects it, the PR names that follow up issue.
 - **It is documented.** Behaviour a user or operator would notice is described in the docs, and any design decision has an ADR.
 - **The PR description is easy to review on a phone:** what changed in plain language, why, how it was tested and what the risks are.
