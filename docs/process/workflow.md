@@ -26,9 +26,9 @@ If something blocks the issue, add the `blocked` label and say on the issue what
 ### Working in parallel
 
 - **Post the interface first.** When other stories will build on yours, post the interface (names, inputs, outputs, migration number) as a comment on the issue before writing the code.
-- **Do not wait on one merge.** Once a base PR has its reviewer verdict, the next stories may start from its branch. Their PR targets that branch or main and says `Merge after #<n>` as its first line, so Arita knows the order.
+- **Do not wait on one merge.** Once a base PR has its reviewer verdict, the next stories may start from its branch. Their PR targets that branch or main and says `Merge after #<n>` on the first line after the attribution block, so Arita knows the order.
 - **Connect the pieces.** The PO plans the story that connects two pieces in the same sprint as the pieces. A PR that leaves something unconnected names the follow up issue in its description, and the PO decides that night whether it joins the sprint.
-- **Closing keywords only when you mean it.** GitHub closes an issue when a merged PR or commit says `close`, `closes`, `fix`, `fixes`, `resolve` or `resolves` next to its number, even in the middle of a sentence. Use those words only for the issue the PR finishes. Anywhere else write "issue 2" or "#2" without them.
+- **Closing keywords only when you mean it.** GitHub closes an issue when a merged PR or commit says `close`, `closes`, `closed`, `fix`, `fixes`, `fixed`, `resolve`, `resolves` or `resolved` next to its number, even in the middle of a sentence. Use those words only for the issue the PR finishes. Anywhere else write "issue 2" or "#2" without them.
 
 ## Reviews
 
