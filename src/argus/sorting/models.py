@@ -130,3 +130,22 @@ class SortingDecision:
                 for snippet in self.evidence[:MAX_EVIDENCE_ITEMS]
             ],
         }
+
+    @classmethod
+    def from_audit_details(cls, details: Mapping[str, Any]) -> "SortingDecision":
+        """The decision back from what was recorded, so an email whose next step failed is
+        taken on without asking the model again. The evidence is the masked one."""
+
+        def category(name: str) -> Category | None:
+            value = details.get(name)
+            return Category(value) if value else None
+
+        return cls(
+            route=Route(details["route"]),
+            category=category("category"),
+            reasons=tuple(details.get("reasons") or ()),
+            model_category=category("model_category"),
+            model_confidence=details.get("model_confidence"),
+            check_category=category("check_category"),
+            evidence=tuple(details.get("evidence") or ()),
+        )

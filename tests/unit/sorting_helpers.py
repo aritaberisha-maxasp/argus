@@ -17,7 +17,14 @@ from pathlib import Path
 
 import pypdf
 
-from argus.sorting import Attachment, EmailToSort, SortingConfig
+from argus.sorting import (
+    Attachment,
+    Category,
+    EmailToSort,
+    Route,
+    SortingConfig,
+    SortingDecision,
+)
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 EMAILS = FIXTURES / "emails"
@@ -115,3 +122,25 @@ def _einvoice_text(data: bytes) -> str | None:
     # Laid out like the PDF copies: seller, its address line, its VAT ID, then the buyer.
     lines = [seller, "(address)", "USt-IdNr. (in the XML)", buyer]
     return "\n".join([*lines, TITLE_FOR_TYPE_CODE.get(code, "Rechnung"), f"Nummer: {number}"])
+
+
+CATEGORY_FOR_ROUTE = {
+    Route.INVOICE_PROCESSING: Category.INCOMING_INVOICE,
+    Route.OUTGOING_BOOKING: Category.OUTGOING_INVOICE,
+    Route.FORWARD_REMINDER: Category.PAYMENT_REMINDER,
+    Route.DELETION_FOLDER: Category.OTHER,
+}
+
+
+def decision_for(route: Route) -> SortingDecision:
+    """A sorting decision for ``route``, for tests that need a classified email."""
+    category = CATEGORY_FOR_ROUTE.get(route)
+    return SortingDecision(
+        route=route,
+        category=category,
+        reasons=() if category else ("the model and our checks disagree",),
+        model_category=category or Category.OTHER,
+        model_confidence=0.97,
+        check_category=category,
+        evidence=(),
+    )

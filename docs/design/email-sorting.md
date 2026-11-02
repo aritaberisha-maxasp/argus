@@ -36,7 +36,7 @@ Prompts and model answers are never written to the application logs. The logs sa
 
 ## What is still to come
 
-- **Hooking it up to the mailbox records of #24.** Once #24 is merged, the sweep calls `sort_email` outside any transaction, then moves the email to the `classified` step. The database writes every `email_*` audit event itself (migration 0004), so the follow up adds migration 0005 to put the decision details into the `email_classified` event.
+- **Hooked up to the mailbox records of #24 (#91).** The sweep reads the stored copy with `argus.intake.email_text.EmailReader`, calls `sort_email` outside any transaction, then records the decision with `mark_classified` in a short unit of work. Migration 0005 keeps the decision on the record and the database puts it into the `email_classified` event; the application still cannot write any `email_*` event. The route the email later gets must match the recorded decision. The sweep then routes it from the recorded decision, so a retry never asks the model again.
 - **Reading the documents** (#28 e-invoices, #29 PDFs and scans) fills the attachment text. Until then the tests read the fixture PDFs directly and use a recorded reading for the two scans.
 - **Sender authentication** (#70) and the named safety gates (#71).
 - **Recording real answers.** The recorded answers in `tests/fixtures/model-answers/` are written by hand. Once the Azure setup (#65) exists, they are recorded from the real deployment and the fixture run is repeated before every model change.

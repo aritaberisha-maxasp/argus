@@ -27,10 +27,9 @@ def sort_email(email: EmailToSort, model: LanguageModel, config: SortingConfig) 
     stays unsorted and is tried again. Never call this inside a ``unit_of_work``: record the
     decision afterwards in a short one (see the note on PR #79).
 
-    Recording is not built here. The database writes every ``email_*`` audit event itself
-    (migration 0004, #24), so the follow up after #24 moves the email to the ``classified``
-    step and lets the database write ``email_classified`` with
-    :meth:`SortingDecision.audit_details`."""
+    The mailbox sweep records it (#91): :func:`argus.intake.records.mark_classified` moves the
+    email to the step ``classified`` and the database writes ``email_classified`` with
+    :meth:`SortingDecision.audit_details` (migration 0005)."""
     checks = check_email(email, config)
     try:
         answer = model.propose(email)
@@ -77,7 +76,8 @@ def sort_email(email: EmailToSort, model: LanguageModel, config: SortingConfig) 
             check_category=checks.category,
             evidence=quotes_only(answer.evidence, email),
         )
-    log.info("Email %s sorted: %s", email.message_id, decision.route)
+    # No Message-ID in the log: it names the sender's domain. The caller logs its own record ID.
+    log.debug("Email sorted: %s", decision.route)
     return decision
 
 

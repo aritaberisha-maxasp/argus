@@ -40,13 +40,11 @@ def test_every_email_shows_each_intake_step_with_time_and_actor(
 
 
 @pytest.mark.req("AC-8", "NF-01")
-@pytest.mark.waits_on(91)
 def test_no_intake_step_in_the_trail_was_recorded_by_the_test_stand_in(
     app: Engine, intake_run: IntakeRun
 ) -> None:
-    """Until #91 the stand in in tests/acceptance/intake.py records classified and routed, so
-    the trail above holds steps ARGUS did not take itself. Whoever builds #91 removes the stand
-    in and this marker."""
+    """Since #91 the sweep records classified and routed itself, so every step in the trail
+    above was taken by ARGUS, none by a test stand in."""
     with app.connect() as connection:
         by_standin = connection.execute(
             text(

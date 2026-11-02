@@ -43,9 +43,7 @@ def test_no_invoice_is_sent_to_the_deletion_folder(intake_run: IntakeRun) -> Non
 
 
 @pytest.mark.req("AC-1", "IN-01", "IN-04")
-@pytest.mark.waits_on(91)
 def test_the_sweep_sorts_every_email_on_its_own(intake_run: IntakeRun) -> None:
-    """Without the stand in in tests/acceptance/intake.py: one sweep takes every email past the
-    step stored. Whoever builds #91 removes the stand in and this marker."""
+    """One sweep takes every email past the step stored, with no test stand in (#91)."""
     stuck = [i for i, step in intake_run.steps_after_first_sweep.items() if step == "stored"]
     assert stuck == []
