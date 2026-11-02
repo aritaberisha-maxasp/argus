@@ -161,6 +161,36 @@ def test_an_email_in_doubt_is_recorded_for_manual_review_with_its_reasons(app: E
     assert record.folder == "ARGUS/Manual review"
 
 
+def open_exceptions(app: Engine, record_id: int) -> list[dict[str, Any]]:
+    with app.connect() as connection:
+        rows = connection.execute(
+            text(
+                "select reason, detail, facts from exception_item"
+                " where email_id = :id and resolved_at is null order by id"
+            ),
+            {"id": record_id},
+        ).mappings()
+        return [dict(row) for row in rows]
+
+
+@pytest.mark.req("IN-09", "EX-01")
+@pytest.mark.usefixtures("clean")
+def test_an_email_in_doubt_opens_one_exception_also_after_a_second_sweep(app: Engine) -> None:
+    fake = fake_graph_with(REVIEW, OTHER)
+    documents, sorting, graph = run(fake, CountingModel())
+
+    sweep(app, graph, DocumentArchive(documents), sorting)
+    sweep(app, graph, DocumentArchive(documents), sorting)
+
+    review = record_of(app, graph, REVIEW)
+    [exception] = open_exceptions(app, review.id)
+    assert exception["reason"] == "uncertain_classification"
+    [classified] = events(app, review.id, "email_classified")
+    for reason in classified["details"]["reasons"]:
+        assert reason in exception["detail"]
+    assert open_exceptions(app, record_of(app, graph, OTHER).id) == []
+
+
 # AC: the model is called outside any unit of work; if Azure cannot be reached the email stays
 # where it is and the next sweep tries again. Sorting twice writes no second event.
 

@@ -3,7 +3,8 @@
 It runs every 5 minutes and is the only thing that decides what to process. For each email in
 the Inbox it makes sure there is one record (step ``seen``), then stores the raw email and its
 attachments in the document store (step ``stored``) before anything else happens to it. When
-it is given :class:`Sorting`, it then sorts the stored copy (step ``classified``, #91) and
+it is given :class:`Sorting`, it then sorts the stored copy (step ``classified``, #91; an email
+in doubt also gets an exception for a person, IN-09) and
 routes it (step ``routed``): a payment reminder by forwarding it (#27), every other email by
 recording its route. After the pass over the Inbox it files every routed email into its ARGUS
 folder (#26, :mod:`argus.intake.filing`).
@@ -37,8 +38,8 @@ from typing import Protocol
 
 from sqlalchemy import Connection, Engine, text
 
-from argus.cases.model import Actor
-from argus.cases.store import unit_of_work
+from argus.cases.model import Actor, ExceptionReason
+from argus.cases.store import open_exception, unit_of_work
 from argus.documents.email import StoredEmail, store_email
 from argus.documents.records import record_email_documents
 from argus.documents.store import DocumentStore
@@ -170,9 +171,24 @@ def classify(engine: Engine, sorting: Sorting, record: EmailRecord) -> SortingDe
     with unit_of_work(engine, SWEEP_ACTOR) as db:
         if not mark_classified(db, record.id, decision):
             return None
+        if decision.route is Route.MANUAL_REVIEW:
+            # In the same unit of work, so sorting twice never opens a second one (IN-09, EX-01).
+            open_exception(
+                db,
+                ExceptionReason.UNCERTAIN_CLASSIFICATION,
+                manual_review_detail(decision),
+                email_id=record.id,
+            )
     # The record ID and the route only: no Message-ID, sender or subject in the log (NF-03).
     log.info("Email record %s classified: %s", record.id, decision.route)
     return decision
+
+
+def manual_review_detail(decision: SortingDecision) -> str:
+    """What the person in the exception queue reads: why ARGUS could not sort the email. It
+    stays on the exception; the audit log gets the decision from ``email_classified``."""
+    reasons = "; ".join(decision.reasons) or "no reason given"
+    return f"ARGUS could not sort this email on its own. Check it and route it by hand: {reasons}"
 
 
 def route(engine: Engine, sorting: Sorting, record: EmailRecord) -> bool:
