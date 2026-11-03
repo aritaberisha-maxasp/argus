@@ -33,9 +33,9 @@ param aiLocation string = 'germanywestcentral'
 @maxLength(10)
 param prefix string = 'argus'
 
-@description('Days every original document stays unchangeable. 10 years (ADR 0001).')
-@minValue(3653)
-param retentionDays int = 3653
+@description('Days every original document stays unchangeable. 4018 days covers 10 years counted from the end of the calendar year (ADR 0001, § 147 (4) AO).')
+@minValue(4018)
+param retentionDays int = 4018
 
 @description('Lock the document retention policy for good. Off by default. Only Arita switches it on (infra/README.md).')
 param retentionLocked bool = false

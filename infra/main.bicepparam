@@ -6,7 +6,9 @@ using 'main.bicep'
 // herself, after the first deploy and after the tax advisor confirms the period.
 param retentionLocked = false
 
-param retentionDays = 3653
+// 10 years from the end of the calendar year the file arrives in, plus the longest run to
+// year end with leap days (ADR 0001). Can be raised later, never lowered once locked.
+param retentionDays = 4018
 
 // The identity that runs the migrations (#81). Not secret; the pipeline passes the real
 // values as GitHub variables. The fallback lets CI build this file without Azure.

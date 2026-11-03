@@ -7,7 +7,8 @@ Azure sign in is needed. The script fails when:
 - a resource could end up outside Germany West Central, or an AI account outside the EU
   (ADR 0001, ADR 0006, NF-03);
 - the retention lock for original documents is on by default, or switched on anywhere but
-  through the ``retentionLocked`` parameter (ADR 0001, NF-01);
+  through the ``retentionLocked`` parameter, or the retention period is shorter than 10 years
+  from the end of the calendar year (ADR 0001, NF-01);
 - a secret could end up in the code, a parameter default or a deployment output, or the app
   gets a secret any other way than from Key Vault (NF-06);
 - a model deployment, the allowed deployment types or the Azure Policy would let a Global
@@ -40,6 +41,10 @@ EU_REGIONS = frozenset(
 EU_DEPLOYMENT_SKUS = frozenset({"DataZoneStandard", "Standard"})
 LOCATION_EXPRESSIONS = frozenset({"[parameters('location')]", "[parameters('aiLocation')]"})
 LOCK_PARAMETER = "retentionLocked"
+PERIOD_PARAMETER = "retentionDays"
+# 10 years from the end of the calendar year a file arrives in, plus the longest run to year
+# end with leap days (ADR 0001, § 147 (4) AO).
+MIN_RETENTION_DAYS = 4018
 SKU_ALIAS = "Microsoft.CognitiveServices/accounts/deployments/sku.name"
 
 # Things that look like a real credential written down as plain text.
@@ -121,12 +126,27 @@ def location_problems(main: dict[str, Any]) -> list[str]:
     return problems
 
 
-def retention_problems(main: dict[str, Any]) -> list[str]:
+def retention_problems(main: dict[str, Any], parameters: dict[str, Any] | None) -> list[str]:
     problems = []
     for template in templates(main):
         parameter = template.get("parameters", {}).get(LOCK_PARAMETER)
         if parameter is not None and parameter.get("defaultValue", False) is not False:
             problems.append(f"{LOCK_PARAMETER} must default to false")
+        period = template.get("parameters", {}).get(PERIOD_PARAMETER)
+        if period is not None:
+            for key in ("defaultValue", "minValue"):
+                if key in period and period[key] < MIN_RETENTION_DAYS:
+                    problems.append(
+                        f"{PERIOD_PARAMETER} {key} must be at least {MIN_RETENTION_DAYS} days"
+                    )
+            if "minValue" not in period:
+                problems.append(f"{PERIOD_PARAMETER} needs a minValue of {MIN_RETENTION_DAYS}")
+    if parameters is not None:
+        given = parameters.get("parameters", {}).get(PERIOD_PARAMETER, {}).get("value")
+        if given is not None and given < MIN_RETENTION_DAYS:
+            problems.append(
+                f"{PERIOD_PARAMETER} in the parameters file is below {MIN_RETENTION_DAYS}"
+            )
     states = []
     for resource in resources(main):
         if resource.get("type") != "Microsoft.Storage/storageAccounts":
@@ -250,7 +270,7 @@ def check(folder: Path) -> list[str]:
     )
     return [
         *location_problems(main),
-        *retention_problems(main),
+        *retention_problems(main, parameters),
         *secret_problems(main, parameters),
         *deployment_type_problems(main, policy, parameters),
     ]

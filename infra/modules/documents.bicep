@@ -15,7 +15,7 @@ param tags object
 param keyVaultName string
 
 @description('Days every original stays unchangeable. Can be raised later, never lowered once locked.')
-@minValue(3653)
+@minValue(4018)
 param retentionDays int
 
 @description('Lock the retention policy for good. Off by default. Only Arita switches it on, after the first deploy and after the tax advisor confirms the period.')

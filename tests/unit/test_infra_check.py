@@ -46,6 +46,7 @@ def good_main() -> dict[str, Any]:
         "parameters": {
             "location": {"type": "string"},
             "retentionLocked": {"type": "bool", "defaultValue": False},
+            "retentionDays": {"type": "int", "minValue": 4018},
         },
         "resources": {
             "account": {
@@ -125,6 +126,7 @@ def good_main() -> dict[str, Any]:
                 "allowedValues": ["germanywestcentral", "swedencentral"],
             },
             "retentionLocked": {"type": "bool", "defaultValue": False},
+            "retentionDays": {"type": "int", "defaultValue": 4018, "minValue": 4018},
         },
         "resources": {
             "identity": {
@@ -184,6 +186,7 @@ def good_parameters() -> dict[str, Any]:
     return {
         "parameters": {
             "retentionLocked": {"value": False},
+            "retentionDays": {"value": 4018},
             "modelDeployments": {"value": [{"name": "argus-sorting", "sku": "DataZoneStandard"}]},
         }
     }
@@ -251,6 +254,30 @@ def test_a_module_that_locks_by_default_fails(tmp_path: Path) -> None:
     documents = main["resources"]["documents"]["properties"]["template"]
     documents["parameters"]["retentionLocked"]["defaultValue"] = True
     assert any("default to false" in p for p in run(tmp_path, main))
+
+
+@pytest.mark.req("NF-01")
+@pytest.mark.parametrize("key", ["defaultValue", "minValue"])
+def test_a_period_shorter_than_ten_years_from_year_end_fails(tmp_path: Path, key: str) -> None:
+    main = good_main()
+    main["parameters"]["retentionDays"][key] = 3653
+    assert any(f"retentionDays {key} must be at least 4018" in p for p in run(tmp_path, main))
+
+
+@pytest.mark.req("NF-01")
+def test_a_module_period_without_a_floor_fails(tmp_path: Path) -> None:
+    main = good_main()
+    documents = main["resources"]["documents"]["properties"]["template"]
+    del documents["parameters"]["retentionDays"]["minValue"]
+    assert any("needs a minValue" in p for p in run(tmp_path, main))
+
+
+@pytest.mark.req("NF-01")
+def test_a_short_period_in_the_parameters_fails(tmp_path: Path) -> None:
+    parameters = good_parameters()
+    parameters["parameters"]["retentionDays"]["value"] = 3653
+    problems = run(tmp_path, good_main(), parameters=parameters)
+    assert any("parameters file is below 4018" in p for p in problems)
 
 
 @pytest.mark.req("NF-01")
