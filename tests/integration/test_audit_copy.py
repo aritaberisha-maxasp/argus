@@ -10,9 +10,10 @@ back at the end, so the shared log stays whole for the other tests.
 """
 
 import json
+import re
 import uuid
 from collections.abc import Iterator
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -48,11 +49,16 @@ from argus.cases.store import (
     unit_of_work,
     verify_chain,
 )
+from argus.working_days import berlin_date
 
 JOB = Actor.system("audit-test")
-NIGHT_1 = date(2026, 11, 3)
-NIGHT_2 = date(2026, 11, 4)
-NIGHT_3 = date(2026, 11, 5)
+# Nights in the past, so events written by a test count as later than every copy's night,
+# as they would after the nightly run. The test of copies written ahead uses later nights.
+TODAY = berlin_date(datetime.now(UTC))
+NIGHT_1 = TODAY - timedelta(days=3)
+NIGHT_2 = TODAY - timedelta(days=2)
+NIGHT_3 = TODAY - timedelta(days=1)
+N1, N2, N3 = NIGHT_1.isoformat(), NIGHT_2.isoformat(), NIGHT_3.isoformat()
 AUDIT_REASONS = (ExceptionReason.AUDIT_COPY_FAILED, ExceptionReason.AUDIT_CHECK_FAILED)
 
 
@@ -99,9 +105,9 @@ def copy(app: Engine, store: CopyStore, night: date) -> CopyResult:
         return write_copy(connection, store, night)
 
 
-def check(app: Engine, store: CopyStore) -> CheckReport:
+def check(app: Engine, store: CopyStore, night: date | None = None) -> CheckReport:
     with snapshot(app) as connection:
-        return check_copies(connection, store)
+        return check_copies(connection, store, night)
 
 
 @pytest.fixture
@@ -135,7 +141,7 @@ def test_the_copy_holds_every_event_with_its_chain_number_and_hash(
 
     assert result.written
     assert (result.name, result.first_seq, result.last_seq) == (name_for(NIGHT_1), 1, last)
-    assert copies.names() == ["audit-log/2026-11-03.jsonl"]
+    assert copies.names() == [f"audit-log/{N1}.jsonl"]
     saved = decode(result.name, copies.read(result.name))
     assert saved.header.prev_hash == "00"
     assert saved.header.event_count == last
@@ -254,9 +260,39 @@ def test_a_copy_that_is_there_already_is_never_replaced(
 def test_an_earlier_night_cannot_follow_a_later_one(app: Engine, copies: AzureCopyStore) -> None:
     copy(app, copies, NIGHT_2)
 
-    with pytest.raises(CopyRefused, match="2026-11-04 is already copied"):
+    with pytest.raises(CopyRefused, match=f"{N2} is already copied"):
         copy(app, copies, NIGHT_1)
     assert copies.names() == [name_for(NIGHT_2)]
+
+
+@pytest.mark.req("NF-01")
+@pytest.mark.parametrize("night", [TODAY + timedelta(days=1), date(2062, 1, 1)])
+def test_a_night_after_today_is_refused_before_anything_is_written(
+    app: Engine, copies: AzureCopyStore, night: date
+) -> None:
+    """Review of PR 102: a locked copy for a future night (a typo such as 2062 for 2026) could
+    never be removed and would stop every later night."""
+    with pytest.raises(CopyRefused, match=f"the night {night} is after today"):
+        copy(app, copies, night)
+
+    assert copies.names() == []
+    assert copy(app, copies, TODAY).written
+
+
+@pytest.mark.req("NF-01")
+def test_a_newest_copy_that_ends_past_the_database_is_refused(
+    app: Engine, copies: AzureCopyStore
+) -> None:
+    """Starting after a copy that claims more events than the database has would leave every
+    real event up to that number uncopied for good (review of PR 102)."""
+    beyond = newest_seq(app) + 100
+    assert copies.write_new(
+        name_for(NIGHT_1), encode(CopyHeader(NIGHT_1, beyond + 1, beyond, 0, "ab" * 32), [])
+    )
+
+    with pytest.raises(CopyRefused, match=f"ends at event {beyond}, but the database ends"):
+        copy(app, copies, NIGHT_2)
+    assert copies.names() == [name_for(NIGHT_1)]
 
 
 @pytest.mark.req("NF-01")
@@ -324,9 +360,7 @@ def test_an_event_changed_in_place_is_found(
         ("chain_broken", target),
         ("changed", target),
     ]
-    assert report.findings[1].message.endswith(
-        "differs from audit-log/2026-11-03.jsonl in: details"
-    )
+    assert report.findings[1].message.endswith(f"differs from audit-log/{N1}.jsonl in: details")
 
 
 @pytest.mark.req("NF-01")
@@ -452,6 +486,85 @@ def test_a_file_that_is_not_a_copy_is_reported(app: Engine, copies: AzureCopySto
     assert [(f.kind, f.copy) for f in report.findings] == [("unreadable", name_for(NIGHT_2))]
 
 
+def write_ahead(copies: AzureCopyStore, after: CopyResult, nights: list[date]) -> None:
+    """Empty copies written early by someone with the storage key. Each one continues the
+    chain correctly, so on their own they look like quiet nights."""
+    tip = decode(after.name, copies.read(after.name)).events[-1]["hash"]
+    for night in nights:
+        header = CopyHeader(night, after.last_seq + 1, after.last_seq, 0, tip)
+        assert copies.write_new(name_for(night), encode(header, []))
+
+
+@pytest.mark.req("NF-01", "EX-01")
+def test_copies_written_ahead_for_future_nights_are_found(
+    app: Engine, copies: AzureCopyStore
+) -> None:
+    """Compliance review of PR 102: empty copies for the next 30 nights would make the job
+    copy nothing and, without these checks, leave the check green."""
+    first = copy(app, copies, NIGHT_1)
+    ahead = [NIGHT_2 + timedelta(days=n) for n in range(32)]
+    write_ahead(copies, first, ahead)
+    add_events(app, 5)
+    last = newest_seq(app)
+
+    result = run_nightly(app, copies, NIGHT_3)
+
+    assert result.copy is not None and not result.copy.written
+    assert result.report is not None and not result.ok
+    future = [f.copy for f in result.report.findings if f.kind == "future_copy"]
+    assert future == [name_for(n) for n in ahead if n > NIGHT_3]
+    not_copied = [
+        (f.first_seq, f.last_seq) for f in result.report.findings if f.kind == "not_copied"
+    ]
+    assert not_copied == [(first.last_seq + 1, last)]
+    [(reason, detail)] = open_audit_exceptions(app)
+    assert reason is ExceptionReason.AUDIT_CHECK_FAILED
+    assert f"{name_for(ahead[-1])} is for a night after {N3}" not in detail  # only 10 shown
+    assert f"{name_for(TODAY)} is for a night after {N3}, the night being checked" in detail
+    with app.connect() as connection:
+        facts: dict[str, Any] = connection.execute(
+            text("select facts from exception_item where id = :id"),
+            {"id": result.exception_ids[0]},
+        ).scalar_one()
+    assert without_fingerprint(facts) == {
+        "night": N3,
+        "findings": {"future_copy": 30, "not_copied": 1},
+    }
+
+
+@pytest.mark.req("NF-01")
+def test_events_left_behind_by_a_copy_written_early_are_found(
+    app: Engine, copies: AzureCopyStore
+) -> None:
+    """Even on the night the early copy is for, so with no copy from the future, the events
+    it left behind are reported, and cutting them off is still caught."""
+    first = copy(app, copies, NIGHT_1)
+    tomorrow = TODAY + timedelta(days=1)
+    write_ahead(copies, first, [tomorrow])
+    add_events(app, 2)
+    last = newest_seq(app)
+
+    report = check(app, copies, tomorrow)
+
+    assert [(f.kind, f.first_seq, f.last_seq) for f in report.findings] == [
+        ("not_copied", first.last_seq + 1, last)
+    ]
+    assert report.findings[0].message == (
+        f"events {first.last_seq + 1} to {last} happened before the night {tomorrow}"
+        " but no copy holds them"
+    )
+
+
+@pytest.mark.req("NF-01")
+def test_events_after_the_newest_night_began_are_left_for_the_next_copy(
+    app: Engine, copies: AzureCopyStore
+) -> None:
+    copy(app, copies, NIGHT_1)
+    add_events(app, 2)
+
+    assert check(app, copies, NIGHT_1).ok
+
+
 # --- AC: a failure of the job or the check lands in the exception queue ---
 
 
@@ -472,6 +585,13 @@ class FailingStore:
 
     def write_new(self, name: str, data: bytes) -> bool:
         raise ConnectionError("storage not reachable")
+
+
+def without_fingerprint(facts: dict[str, Any]) -> dict[str, Any]:
+    """The facts apart from the fingerprint, after checking it is a plain hex digest."""
+    rest = dict(facts)
+    assert re.fullmatch(r"[0-9a-f]{32}", rest.pop("fingerprint"))
+    return rest
 
 
 def open_audit_exceptions(app: Engine) -> list[tuple[ExceptionReason, str]]:
@@ -509,7 +629,7 @@ def test_a_failed_copy_lands_in_the_exception_queue_once(
     assert open_audit_exceptions(app) == [
         (
             ExceptionReason.AUDIT_COPY_FAILED,
-            "The copy of the audit log for the night 2026-11-03 could not be written. "
+            f"The copy of the audit log for the night {N1} could not be written. "
             "ConnectionError: storage not reachable",
         )
     ]
@@ -522,7 +642,7 @@ def test_a_failed_copy_lands_in_the_exception_queue_once(
             text("select facts from exception_item where id = :id"),
             {"id": result.exception_ids[0]},
         ).scalar_one()
-    assert facts == {"night": "2026-11-03", "error": "ConnectionError"}
+    assert without_fingerprint(facts) == {"night": f"{N1}", "error": "ConnectionError"}
 
 
 @pytest.mark.req("NF-01", "EX-01")
@@ -537,7 +657,7 @@ def test_a_check_that_cannot_run_lands_in_the_exception_queue(
     assert sorted(reasons) == sorted(AUDIT_REASONS)
     details = dict(open_audit_exceptions(app))
     assert details[ExceptionReason.AUDIT_CHECK_FAILED] == (
-        "The audit log check of the night 2026-11-03 could not run. "
+        f"The audit log check of the night {N1} could not run. "
         "ConnectionError: storage not reachable"
     )
 
@@ -558,17 +678,45 @@ def test_problems_found_by_the_check_land_in_the_exception_queue(
     [(reason, detail)] = open_audit_exceptions(app)
     assert reason is ExceptionReason.AUDIT_CHECK_FAILED
     assert detail == (
-        "The audit log check of the night 2026-11-05 found 2 problem(s):\n"
-        "- audit-log/2026-11-04.jsonl does not continue the chain where the copy before it"
+        f"The audit log check of the night {N3} found 2 problem(s):\n"
+        f"- audit-log/{N2}.jsonl does not continue the chain where the copy before it"
         " ended\n"
-        "- audit-log/2026-11-05.jsonl does not continue the chain where the copy before it ended"
+        f"- audit-log/{N3}.jsonl does not continue the chain where the copy before it ended"
     )
     with app.connect() as connection:
         facts: dict[str, Any] = connection.execute(
             text("select facts from exception_item where id = :id"),
             {"id": result.exception_ids[0]},
         ).scalar_one()
-    assert facts == {"night": "2026-11-05", "findings": {"broken_link": 2}}
+    assert without_fingerprint(facts) == {"night": f"{N3}", "findings": {"broken_link": 2}}
+
+
+@pytest.mark.req("NF-01", "EX-01")
+def test_a_new_problem_while_an_older_one_is_open_gets_its_own_item(
+    app: Engine, copies: AzureCopyStore
+) -> None:
+    """Review of PR 102: the same findings again keep their item, but a new finding while
+    that item is open must not be lost."""
+    first = copy(app, copies, NIGHT_1)
+    forged = CopyHeader(NIGHT_2, first.last_seq + 1, first.last_seq, 0, "ab" * 32)
+    assert copies.write_new(name_for(NIGHT_2), encode(forged, []))
+    one = run_nightly(app, copies, NIGHT_3)
+    again = run_nightly(app, copies, NIGHT_3)
+    assert again.exception_ids == one.exception_ids
+    assert len(open_audit_exceptions(app)) == 1
+
+    copies.write_new(name_for(TODAY), b"not json\n")
+    later = run_nightly(app, copies, TODAY)
+
+    check_items = [
+        detail
+        for reason, detail in open_audit_exceptions(app)
+        if reason is ExceptionReason.AUDIT_CHECK_FAILED
+    ]
+    assert len(check_items) == 2
+    assert "cannot be read" not in check_items[0]
+    assert f"- {name_for(TODAY)} cannot be read: JSONDecodeError" in check_items[1]
+    assert set(later.exception_ids).isdisjoint(one.exception_ids)
 
 
 @pytest.mark.req("NF-01", "EX-01")
@@ -586,12 +734,12 @@ def test_an_unreadable_last_copy_stops_the_copy_and_both_steps_report_it(
     assert copies.names() == [name_for(NIGHT_1), name_for(NIGHT_2)]
     assert dict(open_audit_exceptions(app)) == {
         ExceptionReason.AUDIT_COPY_FAILED: (
-            "The copy of the audit log for the night 2026-11-05 could not be written. "
-            "CopyUnreadable: audit-log/2026-11-04.jsonl cannot be read: JSONDecodeError"
+            f"The copy of the audit log for the night {N3} could not be written. "
+            f"CopyUnreadable: audit-log/{N2}.jsonl cannot be read: JSONDecodeError"
         ),
         ExceptionReason.AUDIT_CHECK_FAILED: (
-            "The audit log check of the night 2026-11-05 found 1 problem(s):\n"
-            "- audit-log/2026-11-04.jsonl cannot be read: JSONDecodeError"
+            f"The audit log check of the night {N3} found 1 problem(s):\n"
+            f"- audit-log/{N2}.jsonl cannot be read: JSONDecodeError"
         ),
     }
 
@@ -610,10 +758,8 @@ def test_the_audit_exception_is_logged_without_free_text(
             ),
             {"id": result.exception_ids[0]},
         ).scalar_one()
-    assert details == {
-        "reason": "audit_copy_failed",
-        "facts": {"night": "2026-11-03", "error": "ConnectionError"},
-    }
+    assert details["reason"] == "audit_copy_failed"
+    assert without_fingerprint(details["facts"]) == {"night": N1, "error": "ConnectionError"}
     assert "storage not reachable" not in json.dumps(details)
 
 
@@ -629,5 +775,5 @@ def test_the_job_exits_with_1_when_something_failed(
 ) -> None:
     monkeypatch.setenv("ARGUS_DATABASE_URL", database_url)
 
-    assert main(["--night", "2026-11-03"], store=copies) == 0
-    assert main(["--night", "2026-11-04"], store=FailingStore(copies)) == 1
+    assert main(["--night", f"{N1}"], store=copies) == 0
+    assert main(["--night", f"{N2}"], store=FailingStore(copies)) == 1

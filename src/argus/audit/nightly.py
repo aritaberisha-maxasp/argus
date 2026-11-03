@@ -10,12 +10,14 @@ deleted, so comparing with them shows any event that was copied and is now gone 
 """
 
 import argparse
+import hashlib
+import json
 import logging
 import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, time
 from typing import Any
 
 from sqlalchemy import Connection, Engine, text
@@ -38,7 +40,7 @@ from argus.cases.model import Actor, ExceptionReason
 from argus.cases.store import DuplicateRefused, open_exception, unit_of_work, verify_chain
 from argus.db import engine_from_env
 from argus.secrets import EnvironmentSecretStore
-from argus.working_days import berlin_date
+from argus.working_days import BERLIN, berlin_date
 
 log = logging.getLogger("argus.audit")
 
@@ -70,7 +72,8 @@ class Finding:
     it is about, when it is about events."""
 
     kind: str
-    """``missing``, ``changed``, ``gap``, ``broken_link``, ``chain_broken`` or ``unreadable``."""
+    """``missing``, ``changed``, ``gap``, ``broken_link``, ``chain_broken``, ``unreadable``,
+    ``future_copy`` or ``not_copied``."""
     message: str
     first_seq: int | None = None
     last_seq: int | None = None
@@ -140,13 +143,25 @@ def _copy_nights(store: CopyStore) -> dict[date, str]:
     return nights
 
 
-def write_copy(connection: Connection, store: CopyStore, night: date) -> CopyResult:
+def _today() -> date:
+    return berlin_date(datetime.now(BERLIN))
+
+
+def write_copy(
+    connection: Connection, store: CopyStore, night: date, *, today: date | None = None
+) -> CopyResult:
     """Write every audit event since the last copy into the copy for ``night``.
 
     Run it inside :func:`snapshot`. Running it again for the same night writes nothing and
     gives back the copy that is there, so a retry can create neither a second copy nor a gap.
     The next night starts right after the last event of that copy.
+
+    A night after ``today`` (Berlin) is refused before anything is written: the locked copy
+    could never be removed, and every later night would be refused (review of PR 102).
     """
+    today = today or _today()
+    if night > today:
+        raise CopyRefused(f"the night {night} is after today ({today}) and cannot be copied yet")
     nights = _copy_nights(store)
     if night in nights:
         header = decode(nights[night], store.read(nights[night])).header
@@ -159,6 +174,14 @@ def write_copy(connection: Connection, store: CopyStore, night: date) -> CopyRes
     if nights:
         newest = nights[max(nights)]
         after = decode(newest, store.read(newest)).header.last_seq
+        in_database: int = connection.execute(
+            text("select coalesce(max(chain_seq), 0) from audit_event")
+        ).scalar_one()
+        if after > in_database:
+            # Starting there would leave every event up to it uncopied, for good.
+            raise CopyRefused(
+                f"{newest} ends at event {after}, but the database ends at event {in_database}"
+            )
     events = _events(connection, after + 1, None)
     first_seq = after + 1
     last_seq = events[-1]["chain_seq"] if events else after
@@ -310,15 +333,45 @@ def _check_one(
     return findings
 
 
-def check_copies(connection: Connection, store: CopyStore) -> CheckReport:
+def _not_copied(connection: Connection, last_copied: int, newest_night: date) -> list[Finding]:
+    """Events that happened before the newest copy's night began (Berlin time) but that no
+    copy holds. The job copies everything up to the moment it runs, so such an event means a
+    copy was written early and left it behind (compliance review of PR 102)."""
+    cutoff = datetime.combine(newest_night, time(0), tzinfo=BERLIN)
+    numbers: list[int] = list(
+        connection.execute(
+            text(
+                "select chain_seq from audit_event"
+                " where chain_seq > :last and occurred_at < :cutoff order by chain_seq"
+            ),
+            {"last": last_copied, "cutoff": cutoff},
+        ).scalars()
+    )
+    return [
+        Finding(
+            "not_copied",
+            f"{_span(first, last)} happened before the night {newest_night} "
+            "but no copy holds " + ("it" if first == last else "them"),
+            first_seq=first,
+            last_seq=last,
+        )
+        for first, last in _ranges(numbers)
+    ]
+
+
+def check_copies(
+    connection: Connection, store: CopyStore, night: date | None = None
+) -> CheckReport:
     """Compare the database with every copy, oldest night first. Run it inside
-    :func:`snapshot`.
+    :func:`snapshot`. ``night`` is the night the job runs for; a copy for a later night
+    is reported, because nobody can have written it honestly.
 
     Reports an event that was copied and is now missing from the database or different
     there, a gap in the chain numbers (between copies, inside a copy or in the database), a
-    copy that does not continue the chain of the one before, a file that cannot be read, and
-    the first broken link :func:`verify_chain` finds. Events newer than the last copy are only
-    checked by the chain; the next copy takes them.
+    copy that does not continue the chain of the one before, a file that cannot be read, the
+    first broken link :func:`verify_chain` finds, a copy from the future, and an event older
+    than the newest copy's night that no copy holds. Events newer than that are only checked
+    by the chain; the next copy takes them.
     """
     findings: list[Finding] = []
     broken = verify_chain(connection)
@@ -334,11 +387,21 @@ def check_copies(connection: Connection, store: CopyStore) -> CheckReport:
     findings += _database_gaps(connection)
 
     nights = _copy_nights(store)
+    if night is not None:
+        findings += [
+            Finding(
+                "future_copy",
+                f"{nights[later]} is for a night after {night}, the night being checked",
+                copy=nights[later],
+            )
+            for later in sorted(nights)
+            if later > night
+        ]
     expected_first = 1
     tip_hash: str | None = GENESIS_HASH
     checked = 0
-    for night in sorted(nights):
-        name = nights[night]
+    for copy_night in sorted(nights):
+        name = nights[copy_night]
         try:
             copy = decode(name, store.read(name))
         except CopyUnreadable as error:
@@ -349,14 +412,24 @@ def check_copies(connection: Connection, store: CopyStore) -> CheckReport:
         checked += len(copy.events)
         expected_first = copy.header.last_seq + 1
         tip_hash = copy.events[-1].get("hash") if copy.events else copy.header.prev_hash
+    if nights:
+        findings += _not_copied(connection, expected_first - 1, max(nights))
     return CheckReport(copies=len(nights), events_checked=checked, findings=findings)
+
+
+def fingerprint_of(what: Any) -> str:
+    """A short fingerprint of what went wrong, so the same problem found again keeps its open
+    exception, and a different one gets its own (review of PR 102)."""
+    data = json.dumps(what, sort_keys=True, default=str).encode("utf-8")
+    return hashlib.sha256(data).hexdigest()[:32]
 
 
 def _report_problem(
     engine: Engine, reason: ExceptionReason, detail: str, facts: dict[str, Any]
 ) -> int:
-    """Put the failure into the exception queue. If one with this reason is still open, a
-    person has not looked yet: keep that one instead of adding another."""
+    """Put the failure into the exception queue. If the same problem (same reason and
+    fingerprint in ``facts``) is still open, a person has not looked yet: keep that one
+    instead of adding another. A different problem always gets its own item."""
     try:
         with unit_of_work(engine, ACTOR) as db:
             return open_exception(db, reason, detail, facts=facts)
@@ -366,8 +439,9 @@ def _report_problem(
                 text(
                     "select id from exception_item where reason = :reason and resolved_at is null"
                     " and case_id is null and email_id is null and statement_id is null"
+                    " and facts->>'fingerprint' = :fingerprint"
                 ),
-                {"reason": reason.value},
+                {"reason": reason.value, "fingerprint": facts["fingerprint"]},
             ).scalar_one()
         log.info("Exception %s about the audit copy is still open", open_id)
         return open_id
@@ -404,12 +478,16 @@ def run_nightly(engine: Engine, store: CopyStore, night: date) -> NightlyResult:
                 ExceptionReason.AUDIT_COPY_FAILED,
                 f"The copy of the audit log for the night {night} could not be written. "
                 f"{_first_line(error)}",
-                {"night": night.isoformat(), "error": type(error).__name__},
+                {
+                    "night": night.isoformat(),
+                    "error": type(error).__name__,
+                    "fingerprint": fingerprint_of(_first_line(error)),
+                },
             )
         )
     try:
         with snapshot(engine) as connection:
-            report = check_copies(connection, store)
+            report = check_copies(connection, store, night)
     except Exception as error:
         log.exception("The audit copy check could not run")
         exception_ids.append(
@@ -417,7 +495,11 @@ def run_nightly(engine: Engine, store: CopyStore, night: date) -> NightlyResult:
                 engine,
                 ExceptionReason.AUDIT_CHECK_FAILED,
                 f"The audit log check of the night {night} could not run. {_first_line(error)}",
-                {"night": night.isoformat(), "error": type(error).__name__},
+                {
+                    "night": night.isoformat(),
+                    "error": type(error).__name__,
+                    "fingerprint": fingerprint_of(_first_line(error)),
+                },
             )
         )
     else:
@@ -430,7 +512,13 @@ def run_nightly(engine: Engine, store: CopyStore, night: date) -> NightlyResult:
                     engine,
                     ExceptionReason.AUDIT_CHECK_FAILED,
                     _check_detail(night, report),
-                    {"night": night.isoformat(), "findings": kinds},
+                    {
+                        "night": night.isoformat(),
+                        "findings": kinds,
+                        "fingerprint": fingerprint_of(
+                            [(f.kind, f.first_seq, f.last_seq, f.copy) for f in report.findings]
+                        ),
+                    },
                 )
             )
     return NightlyResult(copy, report, exception_ids)

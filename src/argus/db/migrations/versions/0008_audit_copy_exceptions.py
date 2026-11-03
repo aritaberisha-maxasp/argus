@@ -6,9 +6,11 @@ step fails, a person has to look, so it lands in the exception queue with one of
 reasons: ``audit_copy_failed`` or ``audit_check_failed``.
 
 These items belong to no case, email or bank statement. The rule that an exception names
-exactly one of them now allows none, but only for these two reasons. The open-once index
-treats a missing target as 0, so each reason has at most one open item: a failure every night
-does not pile up while nobody has looked yet.
+exactly one of them now allows none, but only for these two reasons, and then ``facts`` must
+carry a ``fingerprint`` of what went wrong. The general open-once index now only covers items
+with a target. Items without one get their own: one open item per reason and fingerprint. So
+the same problem found every night does not pile up, but a new problem found while an older
+item is still open gets its own item instead of being lost (review of PR 102).
 
 The new reasons are compared as text in the check, because a value added to an enum cannot be
 used in the same transaction.
@@ -35,7 +37,16 @@ alter table exception_item drop constraint exception_item_check;
 alter table exception_item add constraint exception_item_target check (
   num_nonnulls(case_id, email_id, statement_id) = 1
   or (num_nonnulls(case_id, email_id, statement_id) = 0
-      and reason::text in ('audit_copy_failed', 'audit_check_failed')));
+      and reason::text in ('audit_copy_failed', 'audit_check_failed')
+      and jsonb_typeof(facts -> 'fingerprint') = 'string'));
+
+drop index exception_open_once;
+create unique index exception_open_once on exception_item
+  (coalesce(case_id,0), coalesce(email_id,0), coalesce(statement_id,0), reason)
+  where resolved_at is null and num_nonnulls(case_id, email_id, statement_id) > 0;
+create unique index exception_open_once_untargeted on exception_item
+  (reason, (facts ->> 'fingerprint'))
+  where resolved_at is null and num_nonnulls(case_id, email_id, statement_id) = 0;
 """
 
 DOWNGRADE = r"""
@@ -45,6 +56,11 @@ do $$ begin
     raise exception 'audit copy exceptions exist; their audit trail is kept for ten years (NF-01)';
   end if;
 end $$;
+drop index exception_open_once_untargeted;
+drop index exception_open_once;
+create unique index exception_open_once on exception_item
+  (coalesce(case_id,0), coalesce(email_id,0), coalesce(statement_id,0), reason)
+  where resolved_at is null;
 alter table exception_item drop constraint exception_item_target;
 alter table exception_item add constraint exception_item_check
   check (num_nonnulls(case_id, email_id, statement_id) = 1);
