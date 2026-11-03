@@ -53,6 +53,8 @@ class SortingConfig:
     own_domain: str  # Max ASP's email domain
     invoicing_agent: str  # the address the invoicing agent sends from (AR-01)
     own_company: str = "Max ASP GmbH"
-    vendors: tuple[str, ...] = ()  # names of the vendors in DATEV
-    customers: tuple[str, ...] = ()  # names of the customers in DATEV
+    # The email domains the vendors and customers in DATEV really send from, exactly as written
+    # in their From addresses. A domain that only looks like one of these never matches (#70).
+    vendor_domains: frozenset[str] = frozenset()
+    customer_domains: frozenset[str] = frozenset()
     thresholds: Thresholds = field(default_factory=Thresholds)

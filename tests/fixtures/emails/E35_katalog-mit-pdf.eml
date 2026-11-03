@@ -1,3 +1,7 @@
+Authentication-Results: spf=pass (sender IP is 192.0.2.10)
+ smtp.mailfrom=muster-buerobedarf.example; dkim=pass (signature was verified)
+ header.d=muster-buerobedarf.example;dmarc=pass action=none
+ header.from=muster-buerobedarf.example;compauth=pass reason=100
 From: Muster =?utf-8?q?B=C3=BCrobedarf?= <angebote@muster-buerobedarf.example>
 To: accounts@maxasp.example
 Subject: Unsere Herbst-Angebote =?utf-8?q?f=C3=BCr_Ihr_B=C3=BCro?=

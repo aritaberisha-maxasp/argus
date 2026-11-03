@@ -1,3 +1,7 @@
+Authentication-Results: spf=pass (sender IP is 192.0.2.10)
+ smtp.mailfrom=maxasp.example; dkim=pass (signature was verified)
+ header.d=maxasp.example;dmarc=pass action=none
+ header.from=maxasp.example;compauth=pass reason=100
 From: Max ASP Rechnungsagent <rechnungen@maxasp.example>
 To: accounts@maxasp.example
 Subject: Gutschrift GS-2026-0011 an Beispiel Handel GmbH

@@ -25,6 +25,7 @@ from argus.sorting import (
     SortingConfig,
     SortingDecision,
 )
+from argus.sorting.sender import first_headers
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 EMAILS = FIXTURES / "emails"
@@ -36,15 +37,26 @@ TITLE_FOR_TYPE_CODE = {"380": "Rechnung", "381": "Gutschrift", "384": "Rechnungs
 
 
 def fixture_config() -> SortingConfig:
-    def names(file: str) -> tuple[str, ...]:
-        with (FIXTURES / "master-data" / file).open(encoding="utf-8") as f:
-            return tuple(row["name"] for row in csv.DictReader(f))
+    def domains(kind: str) -> frozenset[str]:
+        with (FIXTURES / "master-data" / "sender-domains.csv").open(encoding="utf-8") as f:
+            return frozenset(row["domain"] for row in csv.DictReader(f) if row["kind"] == kind)
 
     return SortingConfig(
         own_domain="maxasp.example",
         invoicing_agent="rechnungen@maxasp.example",
-        vendors=names("vendors.csv"),
-        customers=names("customers.csv"),
+        vendor_domains=domains("vendor"),
+        customer_domains=domains("customer"),
+    )
+
+
+def passes_for(address: str) -> str:
+    """The ``Authentication-Results`` header Exchange Online writes when SPF, DKIM and DMARC all
+    pass for the domain of ``address``, as in the fixture emails (#70)."""
+    domain = address.rpartition("@")[2]
+    return (
+        f"spf=pass (sender IP is 192.0.2.10) smtp.mailfrom={domain}; dkim=pass (signature was "
+        f"verified) header.d={domain};dmarc=pass action=none header.from={domain};"
+        "compauth=pass reason=100"
     )
 
 
@@ -78,7 +90,7 @@ def read_raw_email(raw: bytes) -> EmailToSort:
         sender_name=name,
         subject=str(message.get("Subject", "")),
         body=body,
-        headers={key.lower(): str(value) for key, value in message.items()},
+        headers=first_headers(message.items()),
         attachments=tuple(attachments),
     )
 

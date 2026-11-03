@@ -573,9 +573,27 @@ HTML_TEMPLATE = ("<!DOCTYPE html><html><body style=\"font-family: sans-serif\">{
                  "<p style=\"font-size: 11px; color: #777\">Synthetic test email for ARGUS.</p></body></html>")
 
 
+# Senders whose emails do not really come from their domain: SPF, DKIM and DMARC fail (#70).
+NOT_AUTHENTICATED = {"phishing", "spam_invoice"}
+
+
+def authentication_results(key, address):
+    """The header Exchange Online writes on top of every email from the internet (ADR 0006).
+    192.0.2.0/24 is a documentation network (RFC 5737)."""
+    domain = address.rpartition("@")[2]
+    if key in NOT_AUTHENTICATED:
+        return (f"spf=fail (sender IP is 192.0.2.66) smtp.mailfrom={domain}; "
+                f"dkim=none (message not signed) header.d=none;dmarc=fail action=quarantine "
+                f"header.from={domain};compauth=fail reason=000")
+    return (f"spf=pass (sender IP is 192.0.2.10) smtp.mailfrom={domain}; "
+            f"dkim=pass (signature was verified) header.d={domain};dmarc=pass action=none "
+            f"header.from={domain};compauth=pass reason=100")
+
+
 def build_email(spec, files, invoices_by_id):
     name, address = sender(spec["from"])
     msg = EmailMessage()
+    msg["Authentication-Results"] = authentication_results(spec["from"], address)
     msg["From"] = f"{name} <{address}>" if name else address
     msg["To"] = ACCOUNTS_MAILBOX
     msg["Subject"] = spec["subject"]
@@ -619,6 +637,11 @@ def build_master_data():
               ["customer_account", "name", "street", "postcode", "city", "country", "vat_id", "tax_treatment"],
               [[c["account"], c["name"], c["street"], c["postcode"], c["city"], c["country"], c["vat_id"],
                 c["tax_treatment"]] for c in CUSTOMERS.values()])
+    # The domains the partners in DATEV really send from (#70). Not a DATEV field: ARGUS keeps it.
+    write_csv(MASTER_DIR / "sender-domains.csv", ["domain", "kind", "account", "name"],
+              [[p["email"].rpartition("@")[2], kind, p["account"], p["name"]]
+               for kind, parties in (("vendor", VENDORS), ("customer", CUSTOMERS))
+               for p in parties.values()])
     rows = []
     for v in VENDORS.values():
         if not v["approver"]:

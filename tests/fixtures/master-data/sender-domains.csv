@@ -1,0 +1,13 @@
+domain,kind,account,name
+muster-buerobedarf.example,vendor,70001,Muster Bürobedarf GmbH
+beispiel-cloud.example,vendor,70002,Beispiel Cloud Hosting GmbH
+muster-immobilien.example,vendor,70003,Muster Immobilien Verwaltung KG
+example-software.example,vendor,70004,Example Software Ltd
+beispiel-beratung.example,vendor,70005,Beispiel Beratung Partner mbB
+muster-telekom.example,vendor,70006,Muster Telekom Service GmbH
+beispiel-reinigung.example,vendor,70007,Beispiel Reinigung GmbH
+muster-logistik.example,vendor,70008,Muster Logistik GmbH
+beispiel-handel.example,customer,10001,Beispiel Handel GmbH
+example-retail.example,customer,10002,Example Retail BV
+example-tech.example,customer,10003,Example Tech Inc
+muster-stadtwerke.example,customer,10004,Muster Stadtwerke GmbH

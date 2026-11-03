@@ -1,3 +1,7 @@
+Authentication-Results: spf=pass (sender IP is 192.0.2.10)
+ smtp.mailfrom=beispiel-akademie.example; dkim=pass (signature was verified)
+ header.d=beispiel-akademie.example;dmarc=pass action=none
+ header.from=beispiel-akademie.example;compauth=pass reason=100
 From: Beispiel Akademie <events@beispiel-akademie.example>
 To: accounts@maxasp.example
 Subject: Einladung: Webinar zur E-Rechnungspflicht 2027

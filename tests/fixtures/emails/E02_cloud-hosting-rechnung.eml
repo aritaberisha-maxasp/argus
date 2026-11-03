@@ -1,3 +1,7 @@
+Authentication-Results: spf=pass (sender IP is 192.0.2.10)
+ smtp.mailfrom=beispiel-cloud.example; dkim=pass (signature was verified)
+ header.d=beispiel-cloud.example;dmarc=pass action=none
+ header.from=beispiel-cloud.example;compauth=pass reason=100
 From: Beispiel Cloud Hosting GmbH <billing@beispiel-cloud.example>
 To: accounts@maxasp.example
 Subject: Ihre Rechnung BCH-26-10-0042 =?utf-8?q?f=C3=BCr?= Oktober 2026

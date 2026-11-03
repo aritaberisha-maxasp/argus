@@ -1,3 +1,7 @@
+Authentication-Results: spf=pass (sender IP is 192.0.2.10)
+ smtp.mailfrom=scan-service.example; dkim=pass (signature was verified)
+ header.d=scan-service.example;dmarc=pass action=none
+ header.from=scan-service.example;compauth=pass reason=100
 From: scanner-7731@scan-service.example
 To: accounts@maxasp.example
 Subject: Unterlagen

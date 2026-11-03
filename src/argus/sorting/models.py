@@ -12,6 +12,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from argus.sorting.sender import SenderCheck
+
 
 class Category(StrEnum):
     """The four categories of IN-04. Each email gets exactly one, or goes to manual review."""
@@ -103,6 +105,7 @@ class CheckResult:
     category: Category | None
     reasons: tuple[str, ...]
     issued_by_us: bool  # a document in the email is issued by Max ASP (AR-02)
+    sender: SenderCheck | None = None  # who sent it, and whether the domain is real (#70)
 
 
 @dataclass(frozen=True)
@@ -114,6 +117,8 @@ class SortingDecision:
     model_confidence: float | None
     check_category: Category | None
     evidence: tuple[str, ...]
+    # Kept with the email and in the audit log (#70). None only on decisions recorded before.
+    sender: SenderCheck | None = None
 
     def audit_details(self) -> dict[str, Any]:
         """What goes into the audit log: the decision and the evidence snippets, never the
@@ -129,6 +134,7 @@ class SortingDecision:
                 mask_ibans(snippet[:MAX_SNIPPET_CHARS])
                 for snippet in self.evidence[:MAX_EVIDENCE_ITEMS]
             ],
+            "sender": self.sender.audit_details() if self.sender else None,
         }
 
     @classmethod
@@ -148,4 +154,7 @@ class SortingDecision:
             model_confidence=details.get("model_confidence"),
             check_category=category("check_category"),
             evidence=tuple(details.get("evidence") or ()),
+            sender=SenderCheck.from_audit_details(details["sender"])
+            if details.get("sender")
+            else None,
         )

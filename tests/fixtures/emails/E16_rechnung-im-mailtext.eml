@@ -1,3 +1,7 @@
+Authentication-Results: spf=pass (sender IP is 192.0.2.10)
+ smtp.mailfrom=muster-telekom.example; dkim=pass (signature was verified)
+ header.d=muster-telekom.example;dmarc=pass action=none
+ header.from=muster-telekom.example;compauth=pass reason=100
 From: Muster Telekom Service GmbH <rechnung@muster-telekom.example>
 To: accounts@maxasp.example
 Subject: Ihre Rechnung MTS-2026-560017
