@@ -4,7 +4,8 @@ Runs the forward against the fake Graph and a real PostgreSQL. The groups below 
 acceptance criteria of #27. Covers IN-05, PY-06, NF-01 and NF-03.
 
 The emails are picked up by the real sweep steps of #24 and then moved to ``classified`` the
-way #91 will, so the forward starts from the same record it gets in production.
+way the sweep records them since #91, so the forward starts from the same record it gets in
+production.
 """
 
 import json
@@ -37,7 +38,7 @@ from argus.cases.store import (
 from argus.documents.email import attachments_of
 from argus.documents.store import MemoryDocumentStore
 from argus.intake.graph import GraphCallRefused, GraphClient
-from argus.intake.records import EmailRecord, EmailStep, get_email
+from argus.intake.records import EmailRecord, EmailStep, get_email, mark_classified
 from argus.intake.reminders import (
     FORWARD_ACTOR,
     ForwardRefused,
@@ -47,7 +48,7 @@ from argus.intake.sweep import SWEEP_ACTOR, DocumentArchive, see, store
 from argus.sorting import Attachment, Category, EmailToSort, Route, SortingDecision
 from standins.graph.app import MAILBOX, Mailbox, create_app
 from tests.unit.intake.graph_helpers import BASE_URL, TOKEN, StaticTokens, standin_transport
-from tests.unit.sorting_helpers import EMAILS, read_fixture_email
+from tests.unit.sorting_helpers import EMAILS, decision_for, read_fixture_email
 
 # Synthetic, like every address in the fixtures. The real one is a setting (IN-05).
 FORWARD_TO = "benjamin@maxasp.example"
@@ -111,14 +112,13 @@ def mailbox_of(fake: FastAPI) -> Mailbox:
 
 
 def classified(app: Engine, graph: GraphClient) -> EmailRecord:
-    """The first Inbox email, seen and stored by the sweep of #24 and sorted as #91 will."""
+    """The first Inbox email, seen and stored by the sweep of #24 and classified as a payment
+    reminder the way the sweep records it since #91."""
     message = next(graph.list_inbox())
     record, _ = see(app, message)
     store(app, graph, DocumentArchive(MemoryDocumentStore()), record)
     with unit_of_work(app, SWEEP_ACTOR) as db:
-        db.execute(
-            text("update mailbox_email set step = 'classified' where id = :id"), {"id": record.id}
-        )
+        assert mark_classified(db, record.id, decision_for(Route.FORWARD_REMINDER))
         sorted_record = get_email(db, message.id)
     assert sorted_record is not None
     return sorted_record

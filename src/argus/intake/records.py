@@ -1,18 +1,20 @@
-"""The email records of the mailbox sweep (ADR 0003, migrations 0004 and 0006).
+"""The email records of the mailbox sweep (ADR 0003, migrations 0004 to 0007).
 
 Each function runs inside a short :func:`argus.cases.store.unit_of_work`. None of them calls
 Graph or the document store: those calls happen first, outside the transaction, because every
 transaction that writes an audit event holds the audit lock until it commits (PR #79 review).
 """
 
+import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import StrEnum
+from typing import Any
 
 from sqlalchemy import Connection, RowMapping, text
 
 from argus.intake.graph import InboxMessage
-from argus.sorting.models import Route
+from argus.sorting.models import Route, SortingDecision
 
 # Other emails stay this long in ARGUS/Removed before ARGUS deletes them (IN-06, ADR 0003).
 # The database refuses an earlier deletion too (migration 0006).
@@ -113,6 +115,31 @@ def mark_stored(connection: Connection, email_id: int, raw_sha256: str, raw_loca
         {"id": email_id, "sha256": raw_sha256, "location": raw_location},
     )
     return result.first() is not None
+
+
+def mark_classified(connection: Connection, email_id: int, decision: SortingDecision) -> bool:
+    """Record the sorting decision of a stored email. The database logs ``email_classified``
+    with :meth:`SortingDecision.audit_details` (migration 0005). Returns False when the email
+    is not at step stored, so sorting the same email twice records nothing the second time."""
+    result = connection.execute(
+        text(
+            """
+            update mailbox_email set step = 'classified', classification = cast(:details as jsonb)
+            where id = :id and step = 'stored'
+            returning id
+            """
+        ),
+        {"id": email_id, "details": json.dumps(decision.audit_details())},
+    )
+    return result.first() is not None
+
+
+def classification_of(connection: Connection, email_id: int) -> dict[str, Any] | None:
+    """The recorded sorting decision, as written into ``email_classified``."""
+    found = connection.execute(
+        text("select classification from mailbox_email where id = :id"), {"id": email_id}
+    ).scalar()
+    return dict(found) if found is not None else None
 
 
 def mark_routed(connection: Connection, email_id: int, route: Route) -> bool:

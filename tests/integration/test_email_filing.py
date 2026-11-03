@@ -3,8 +3,8 @@
 Runs against the fake Graph serving the 50 fixture emails and a real PostgreSQL. The groups
 below follow the acceptance criteria of #26. Covers IN-06 and NF-01 (ADR 0003).
 
-Sorting is not wired to the mailbox records yet (#91), so the tests move emails to the step
-``classified`` themselves, with the rights the application has, and then route them.
+These tests leave the sorting out of the sweep and record a chosen decision for each email
+themselves, with the rights the application has, so each route can be tested on its own.
 """
 
 from collections.abc import Callable
@@ -30,6 +30,7 @@ from argus.intake.records import (
     DeletionOutcome,
     EmailRecord,
     get_email,
+    mark_classified,
     mark_deleted,
     mark_routed,
 )
@@ -37,6 +38,7 @@ from argus.intake.sweep import SWEEP_ACTOR, sweep
 from argus.sorting.models import Route
 from standins.graph.app import DELETED_ITEMS_ID, INBOX_ID
 from tests.integration.test_mailbox_sweep import MemoryArchive
+from tests.unit.sorting_helpers import decision_for
 
 DAY = timedelta(days=1)
 
@@ -51,11 +53,9 @@ def stored_emails(app: Engine, graph: GraphClient) -> list[EmailRecord]:
 
 
 def route(app: Engine, record: EmailRecord, to: Route) -> None:
-    """Stand in for #91 and the routing stories: classify, then route."""
+    """Record a decision for ``to``, then route, as the sweep does since #91."""
     with unit_of_work(app, SWEEP_ACTOR) as db:
-        db.execute(
-            text("update mailbox_email set step = 'classified' where id = :id"), {"id": record.id}
-        )
+        assert mark_classified(db, record.id, decision_for(to))
         assert mark_routed(db, record.id, to)
 
 
@@ -155,10 +155,7 @@ def test_emails_that_are_not_routed_stay_in_the_inbox(
 ) -> None:
     records = stored_emails(app, graph)
     with unit_of_work(app, SWEEP_ACTOR) as db:
-        db.execute(
-            text("update mailbox_email set step = 'classified' where id = :id"),
-            {"id": records[0].id},
-        )
+        assert mark_classified(db, records[0].id, decision_for(Route.DELETION_FOLDER))
 
     result = sweep(app, graph, MemoryArchive())
 

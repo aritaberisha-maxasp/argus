@@ -55,5 +55,5 @@ The allowlist of the Graph client grows by six calls, all on the one mailbox: li
 
 ## Still to come
 
-- **Routing.** Filing needs the step `routed` with its route. Sorting is wired to the mailbox records in #91 (step `classified`). The stories that handle each route then call `mark_routed`. For Other there is nothing else to do, so routing it is just `mark_routed(..., Route.DELETION_FOLDER)` once its decision is recorded.
-- **Migration order.** Migration 0005 is kept for #91, so this one is 0006 and follows 0004 for now. Whichever of the two lands second has to follow the other.
+- **Routing.** Filing needs the step `routed` with its route. Since #91 the sweep sorts each stored email (step `classified`) and routes it from the recorded decision: a payment reminder through `forward_reminder` (#27), every other email with `mark_routed`. For Other there is nothing else to do, so routing it is just `mark_routed(..., Route.DELETION_FOLDER)` once its decision is recorded.
+- **Migration order.** Migration 0005 was kept for #91, so this one is 0006 and follows 0004. 0005 landed last and follows 0007.

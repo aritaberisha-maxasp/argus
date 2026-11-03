@@ -58,7 +58,7 @@ The events hold IDs only, never the forward address, the sender, the subject or 
 
 ## Still to come
 
-- The sweep calls `forward_reminder` once sorting is wired into it (#91).
+- The sweep calls `forward_reminder` for every email sorted as a payment reminder (#91), when `Sorting.reminders` is set.
 - Filing the email out of the Inbox is #26.
 - Unsent drafts left by a crash after step 1 stay in Drafts. They are harmless; a later clean up could remove them.
 - Migration 0007 follows 0006 (#26, PR 92), so this story is merged after PR 92. 0005 is kept for #91; whichever of 0005 and the others lands second follows the other.

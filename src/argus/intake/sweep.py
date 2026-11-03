@@ -2,9 +2,19 @@
 
 It runs every 5 minutes and is the only thing that decides what to process. For each email in
 the Inbox it makes sure there is one record (step ``seen``), then stores the raw email and its
-attachments in the document store (step ``stored``) before anything else happens to it. Later
-stories add classifying and routing. After the pass over the Inbox it files every routed email
-into its ARGUS folder (#26, :mod:`argus.intake.filing`).
+attachments in the document store (step ``stored``) before anything else happens to it. When
+it is given :class:`Sorting`, it then sorts the stored copy (step ``classified``, #91; an email
+in doubt also gets an exception for a person, IN-09) and
+routes it (step ``routed``): a payment reminder by forwarding it (#27), every other email by
+recording its route. After the pass over the Inbox it files every routed email into its ARGUS
+folder (#26, :mod:`argus.intake.filing`).
+
+Sorting calls the language model and the document reader outside any transaction. Only the
+decision is recorded afterwards, and the database writes ``email_classified`` with it
+(migration 0005). If the model or the reader cannot be reached, the email stays at ``stored``
+and the next sweep tries again. An email that is classified but not routed yet (its forward
+failed, or the sweep stopped in between) is routed by the next sweep from the recorded
+decision, without asking the model again.
 
 Crash safety: every step is recorded before the next starts. After a crash the next sweep finds
 the email still in the Inbox, reads its record and carries on from the last finished step.
@@ -20,7 +30,7 @@ recorded afterwards in a short one (PR #79 review).
 
 import logging
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import timedelta
@@ -28,14 +38,26 @@ from typing import Protocol
 
 from sqlalchemy import Connection, Engine, text
 
-from argus.cases.model import Actor
-from argus.cases.store import unit_of_work
+from argus.cases.model import Actor, ExceptionReason
+from argus.cases.store import open_exception, unit_of_work
 from argus.documents.email import StoredEmail, store_email
 from argus.documents.records import record_email_documents
 from argus.documents.store import DocumentStore
 from argus.intake.filing import Folders, file_routed
 from argus.intake.graph import GraphClient, InboxMessage
-from argus.intake.records import EmailRecord, EmailStep, mark_stored, see_email
+from argus.intake.records import (
+    EmailRecord,
+    EmailStep,
+    classification_of,
+    get_email,
+    mark_classified,
+    mark_routed,
+    mark_stored,
+    see_email,
+)
+from argus.intake.reminders import ReminderMailbox, forward_reminder
+from argus.sorting import EmailToSort, LanguageModel, Route, SortingConfig, SortingDecision
+from argus.sorting.router import sort_email
 
 log = logging.getLogger("argus.intake.sweep")
 
@@ -68,12 +90,30 @@ class DocumentArchive:
         record_email_documents(connection, email_id, stored)
 
 
+@dataclass(frozen=True)
+class Sorting:
+    """What the sweep needs to sort and route each stored email (#91).
+
+    ``read`` turns the stored raw email into what the sorting reads:
+    :class:`argus.intake.email_text.EmailReader` in production. ``reminders`` is the Graph
+    client allowed to forward to the reminder address (#27). Without it, payment reminders
+    stay classified in the Inbox until it is set."""
+
+    documents: DocumentStore
+    model: LanguageModel
+    config: SortingConfig
+    read: Callable[[bytes], EmailToSort]
+    reminders: ReminderMailbox | None = None
+
+
 @dataclass
 class SweepResult:
     ran: bool
     listed: int = 0
     new: int = 0
     stored: int = 0
+    classified: int = 0
+    routed: int = 0
     filed: int = 0
     failed: int = 0
 
@@ -120,6 +160,79 @@ def store(engine: Engine, graph: GraphClient, archive: EmailArchive, record: Ema
     return True
 
 
+def classify(engine: Engine, sorting: Sorting, record: EmailRecord) -> SortingDecision | None:
+    """Step classified: sort the stored copy, then record the decision in one short unit of
+    work. Returns None when the email is not at step stored or another worker recorded it
+    first. Raises when the model or the reader cannot be reached; nothing is recorded then."""
+    if record.step is not EmailStep.STORED or record.raw_sha256 is None:
+        return None
+    email = sorting.read(sorting.documents.get(record.raw_sha256))
+    decision = sort_email(email, sorting.model, sorting.config)  # outside any transaction
+    with unit_of_work(engine, SWEEP_ACTOR) as db:
+        if not mark_classified(db, record.id, decision):
+            return None
+        if decision.route is Route.MANUAL_REVIEW:
+            # In the same unit of work, so sorting twice never opens a second one (IN-09, EX-01).
+            open_exception(
+                db,
+                ExceptionReason.UNCERTAIN_CLASSIFICATION,
+                manual_review_detail(decision),
+                email_id=record.id,
+            )
+    # The record ID and the route only: no Message-ID, sender or subject in the log (NF-03).
+    log.info("Email record %s classified: %s", record.id, decision.route)
+    return decision
+
+
+def manual_review_detail(decision: SortingDecision) -> str:
+    """What the person in the exception queue reads: why ARGUS could not sort the email. It
+    stays on the exception; the audit log gets the decision from ``email_classified``."""
+    reasons = "; ".join(decision.reasons) or "no reason given"
+    return f"ARGUS could not sort this email on its own. Check it and route it by hand: {reasons}"
+
+
+def route(engine: Engine, sorting: Sorting, record: EmailRecord) -> bool:
+    """Step routed: a payment reminder is forwarded (#27), which routes it once the forward is
+    sent; every other email gets its route recorded. Works from the recorded decision.
+    Returns False when nothing was routed now."""
+    if record.step is not EmailStep.CLASSIFIED:
+        return False
+    with engine.connect() as connection:
+        details = classification_of(connection, record.id)
+    if details is None:
+        raise RuntimeError(f"email record {record.id} is classified without a decision")
+    decision = SortingDecision.from_audit_details(details)
+    if decision.route is Route.FORWARD_REMINDER:
+        if sorting.reminders is None:
+            log.warning("Email record %s is a payment reminder, forwarding is not set", record.id)
+            return False
+        if record.raw_sha256 is None:
+            raise RuntimeError(f"email record {record.id} is classified without a stored copy")
+        reminder = sorting.read(sorting.documents.get(record.raw_sha256))
+        forward_reminder(engine, sorting.reminders, record, reminder, decision)
+        routed = _step_of(engine, record) is EmailStep.ROUTED
+    else:
+        with unit_of_work(engine, SWEEP_ACTOR) as db:
+            routed = mark_routed(db, record.id, decision.route)
+    if routed:
+        log.info("Email record %s routed: %s", record.id, decision.route)
+    return routed
+
+
+def _step_of(engine: Engine, record: EmailRecord) -> EmailStep | None:
+    with engine.connect() as connection:
+        found = get_email(connection, record.graph_message_id)
+    return found.step if found else None
+
+
+def _current(engine: Engine, record: EmailRecord) -> EmailRecord:
+    with engine.connect() as connection:
+        found = get_email(connection, record.graph_message_id)
+    if found is None:
+        raise RuntimeError(f"email record {record.id} is missing")
+    return found
+
+
 def process_email(
     engine: Engine, graph: GraphClient, archive: EmailArchive, message: InboxMessage
 ) -> tuple[bool, bool]:
@@ -128,9 +241,11 @@ def process_email(
     return new, store(engine, graph, archive, record)
 
 
-def sweep(engine: Engine, graph: GraphClient, archive: EmailArchive) -> SweepResult:
+def sweep(
+    engine: Engine, graph: GraphClient, archive: EmailArchive, sorting: Sorting | None = None
+) -> SweepResult:
     """One pass over the Inbox. An email that fails is logged and retried by the next sweep;
-    the others carry on."""
+    the others carry on. Without ``sorting`` the sweep stops at the step stored."""
     with sweep_lock(engine) as got:
         if not got:
             log.info("Mailbox sweep skipped, another sweep is running")
@@ -142,6 +257,12 @@ def sweep(engine: Engine, graph: GraphClient, archive: EmailArchive) -> SweepRes
                 record, new = see(engine, message)
                 result.new += new
                 result.stored += store(engine, graph, archive, record)
+                if sorting is not None:
+                    record = _current(engine, record)
+                    if classify(engine, sorting, record) is not None:
+                        result.classified += 1
+                        record = _current(engine, record)
+                    result.routed += route(engine, sorting, record)
             except Exception:
                 # The ID only: no sender, subject or content in the log (NF-03).
                 log.exception("Mailbox sweep failed on email %s, next sweep retries", message.id)
@@ -149,10 +270,13 @@ def sweep(engine: Engine, graph: GraphClient, archive: EmailArchive) -> SweepRes
         filing = file_routed(engine, graph, Folders(graph))
         result.filed, result.failed = filing.filed, result.failed + filing.failed
         log.info(
-            "Mailbox sweep: %d in Inbox, %d new, %d stored, %d filed, %d failed",
+            "Mailbox sweep: %d in Inbox, %d new, %d stored, %d classified, %d routed, %d filed,"
+            " %d failed",
             result.listed,
             result.new,
             result.stored,
+            result.classified,
+            result.routed,
             result.filed,
             result.failed,
         )
@@ -165,12 +289,13 @@ def run_every(
     archive: EmailArchive,
     stop: threading.Event,
     interval: timedelta = SWEEP_INTERVAL,
+    sorting: Sorting | None = None,
 ) -> None:
     """Sweep now and then every ``interval`` until ``stop`` is set. A sweep that fails as a
     whole (Graph or the database is down) is logged and the next one tries again."""
     while not stop.is_set():
         try:
-            sweep(engine, graph, archive)
+            sweep(engine, graph, archive, sorting)
         except Exception:
             log.exception("Mailbox sweep failed, next sweep in %s", interval)
         stop.wait(interval.total_seconds())
