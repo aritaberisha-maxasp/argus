@@ -50,6 +50,10 @@ To list every requirement ID with the tests that cover it, or only the ones with
 
 Every received email and each attachment is kept byte for byte in blob storage, named by its SHA-256 fingerprint (`src/argus/documents/`, ADR 0001). Storing the same file again finds the first copy and never replaces it, and every read checks the fingerprint again. The database records which file came from which email and which case it belongs to, and writes the fingerprint into the audit log itself. In Azure the connection string comes from Key Vault as `ARGUS_DOCUMENTS_CONNECTION_STRING`.
 
+## Nightly copy of the audit log
+
+The hash chain in the database catches a change to an old audit event, but not the newest events being deleted. So every night `python -m argus.audit` copies the new events into `audit-log/<YYYY-MM-DD>.jsonl` in the same locked container as the documents, then compares the database with every copy (`src/argus/audit/`, issue #83). It reports a copied event that is missing or changed, and any gap in the chain numbers. A failure of either step opens an exception (`audit_copy_failed` or `audit_check_failed`), at most one open per reason. The job only reads the database. It needs `ARGUS_DATABASE_URL` and `ARGUS_DOCUMENTS_CONNECTION_STRING`; `--night 2026-11-03` names the night, otherwise it is today in Berlin. Running it twice for the same night writes nothing the second time.
+
 ## Stand ins
 
 ARGUS cannot reach Wise or DATEV from the build environment, so development and CI use stand ins that answer like the real systems. See [standins/wise/README.md](standins/wise/README.md) for the Wise one.
