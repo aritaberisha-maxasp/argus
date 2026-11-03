@@ -352,9 +352,10 @@ def test_an_outgoing_invoice_from_a_fake_invoicing_agent_goes_to_review(app: Eng
     sweep(app, graph, DocumentArchive(documents), sorting)
 
     with app.connect() as connection:
-        record_id, route, stored = connection.execute(
-            text("select id, route, classification from mailbox_email")
-        ).one()
+        row = connection.execute(text("select id, route, classification from mailbox_email")).one()
+    record_id: int = row.id
+    route: str = row.route
+    stored: dict[str, Any] = row.classification
     assert route == "manual_review"
     expected = {
         "claimed": "invoicing_agent",
