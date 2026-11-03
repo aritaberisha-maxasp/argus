@@ -15,6 +15,9 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[2]
 
+# Built at runtime from repeated letters, so the secret scan does not take it for a real key.
+FAKE_ACCOUNT_KEY = "AccountKey=" + "A" * 40 + "=="
+
 
 def load_check() -> ModuleType:
     spec = importlib.util.spec_from_file_location("check_infra", REPO / "tools" / "check_infra.py")
@@ -272,9 +275,9 @@ def test_no_retention_policy_at_all_fails(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     "text",
     [
-        "AccountKey=abcdefghijklmnopqrstuvwxyz0123456789ABCD==",
-        "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJhcmd1cyJ9.signature",
-        "-----BEGIN RSA PRIVATE KEY-----",
+        FAKE_ACCOUNT_KEY,
+        "eyJ" + "x" * 12 + "." + "y" * 12 + ".signature",
+        "-----BEGIN RSA " + "PRIVATE KEY-----",
     ],
 )
 def test_a_credential_in_the_code_fails(tmp_path: Path, text: str) -> None:
@@ -286,7 +289,7 @@ def test_a_credential_in_the_code_fails(tmp_path: Path, text: str) -> None:
 @pytest.mark.req("NF-06")
 def test_a_credential_in_the_parameters_fails(tmp_path: Path) -> None:
     parameters = good_parameters()
-    parameters["parameters"]["wiseToken"] = {"value": "AccountKey=abcdefghijklmnopqrstuvwxyz0123=="}
+    parameters["parameters"]["wiseToken"] = {"value": FAKE_ACCOUNT_KEY}
     assert any(
         "looks like a credential" in p for p in run(tmp_path, good_main(), parameters=parameters)
     )
