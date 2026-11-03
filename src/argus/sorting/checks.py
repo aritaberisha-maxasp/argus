@@ -118,6 +118,10 @@ def check_sender(email: EmailToSort, config: SortingConfig) -> sender.SenderChec
     authentication = sender.authenticate(email.sender_address, email.headers)
     if claimed in sender.NEEDS_CHECK and not authentication.passed:
         return sender.SenderCheck(claimed, sender.UNKNOWN, authentication)
+    # Mail inside the tenant often carries no DMARC result, so Max ASP's own domain is not
+    # checked. But when Exchange says DMARC fails for it, the email came from outside.
+    if claimed == sender.INTERNAL and authentication.dmarc_failed:
+        return sender.SenderCheck(claimed, sender.UNKNOWN, authentication)
     return sender.SenderCheck(claimed, claimed, authentication)
 
 

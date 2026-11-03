@@ -363,7 +363,12 @@ def test_an_outgoing_invoice_from_a_fake_invoicing_agent_goes_to_review(app: Eng
         "from_domain": "maxasp.example",
         "authenticated": False,
         "passed_by": None,
-        "results": ["spf=pass attacker.invalid", "dkim=none none", "dmarc=fail maxasp.example"],
+        "dmarc_failed": True,
+        "results": [
+            "spf=pass attacker.invalid",
+            "dkim=none (not a domain)",
+            "dmarc=fail maxasp.example",
+        ],
     }
     assert stored["sender"] == expected
     [classified] = events(app, record_id, "email_classified")

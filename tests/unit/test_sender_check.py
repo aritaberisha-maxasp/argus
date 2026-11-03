@@ -189,7 +189,8 @@ def test_a_look_alike_domain_is_never_a_match(address: str) -> None:
     email = email_from(address, passes_for(address))
     check = check_sender(email, CONFIG)
     assert (check.claimed, check.treated_as) == ("unknown", "unknown")
-    assert check.authentication.passed  # its own domain is real, it is just not ours
+    if address.isascii():
+        assert check.authentication.passed  # its own domain is real, it is just not ours
 
 
 @pytest.mark.req("IN-04", "AR-02")
@@ -375,9 +376,10 @@ def test_the_check_result_is_in_the_audit_details_with_domains_only() -> None:
         "from_domain": "maxasp.example",
         "authenticated": False,
         "passed_by": None,
+        "dmarc_failed": True,
         "results": [
             "spf=pass attacker.invalid",
-            "dkim=none none",
+            "dkim=none (not a domain)",
             "dmarc=fail maxasp.example",
         ],
     }
@@ -409,3 +411,111 @@ def test_a_model_answer_that_cannot_be_used_still_keeps_the_sender_check() -> No
     decision = sort_email(email_from(VENDOR, passes_for(VENDOR)), Broken(), CONFIG)
     assert decision.route == Route.MANUAL_REVIEW
     assert decision.audit_details()["sender"]["treated_as"] == "known_vendor"
+
+
+# Compliance on PR 101: what is stored stays small and holds no text the sender made up
+
+
+@pytest.mark.req("NF-01", "NF-03")
+def test_an_oversized_or_junk_header_stores_at_most_three_short_lines() -> None:
+    huge = (
+        "dkim=pass header.d=a;" * 5000
+        + "spf=" + "x" * 20_000 + " smtp.mailfrom=anna.muster@Hallo Welt, bitte zahlen;"
+        + 'dmarc=pass header.from="maxasp.example; dmarc=pass"'
+    )  # fmt: skip
+    email = email_from(AGENT, huge, text=OUR_INVOICE)
+    details = sort_email(email, FixedModel(Category.OUTGOING_INVOICE), CONFIG).audit_details()
+    stored = details["sender"]
+    assert stored["results"] == [
+        "dkim=pass (not a domain)",
+        "spf=other (not a domain)",
+        "dmarc=pass (not a domain)",
+    ]
+    assert stored["treated_as"] == "unknown"
+    assert len(json.dumps(stored)) < 400
+    assert "anna.muster" not in json.dumps(details)
+
+
+@pytest.mark.req("NF-03")
+@pytest.mark.parametrize(
+    ("address", "stored"),
+    [
+        ("anna@" + "a" * 300 + ".example", "(not a domain)"),
+        ("anna@muster bürobedarf.example", "(not a domain)"),
+        ("anna@-muster.example", "(not a domain)"),
+        ("nobody", "(no domain)"),
+        ("anna@Muster-Buerobedarf.example.", "muster-buerobedarf.example"),
+    ],
+)
+def test_the_from_domain_is_stored_only_when_it_is_a_domain_name(address: str, stored: str) -> None:
+    check = check_sender(email_from(address, passes_for(address)), CONFIG)
+    assert check.audit_details()["from_domain"] == stored
+    if stored.startswith("("):
+        assert not check.authentication.passed
+
+
+@pytest.mark.req("IN-04")
+def test_the_aligned_pass_is_the_stored_line_when_a_method_appears_twice() -> None:
+    results = "dkim=pass header.d=mailer.invalid; dkim=pass header.d=muster-buerobedarf.example"
+    check = check_sender(email_from(VENDOR, results), CONFIG)
+    assert check.authentication.passed_by == "dkim"
+    assert check.authentication.results == ("dkim=pass muster-buerobedarf.example",)
+
+
+# Reviewer notes on PR 101
+
+
+@pytest.mark.req("IN-04", "IN-09")
+def test_a_dmarc_fail_for_the_from_domain_wins_over_an_spf_or_dkim_pass() -> None:
+    results = (
+        "spf=pass smtp.mailfrom=muster-buerobedarf.example; dkim=pass "
+        "header.d=muster-buerobedarf.example;dmarc=fail header.from=muster-buerobedarf.example"
+    )
+    check = check_sender(email_from(VENDOR, results), CONFIG)
+    assert check.treated_as == "unknown"
+    assert check.audit_details()["dmarc_failed"] is True
+
+
+@pytest.mark.req("IN-04", "IN-09")
+def test_a_forged_max_asp_address_from_outside_goes_to_review() -> None:
+    address = "chef@maxasp.example"
+    notice = replace(
+        email_from(address, FAILS.format(d="maxasp.example"), text=None, name="Chef"),
+        subject="Neue Bankverbindung",
+        body="Bitte ab sofort die neue Bankverbindung von Muster Bürobedarf nutzen.",
+    )
+    check = check_sender(notice, CONFIG)
+    assert (check.claimed, check.treated_as) == ("internal", "unknown")
+    decision = sort_email(notice, FixedModel(Category.OTHER, 0.999), CONFIG)
+    assert decision.route == Route.MANUAL_REVIEW
+    assert "someone at Max ASP" in decision.reasons[0]
+    # Mail inside the tenant without a DMARC result is still internal.
+    inside = replace(notice, headers={"authentication-results": "dmarc=none"})
+    assert check_sender(inside, CONFIG).treated_as == "internal"
+
+
+@pytest.mark.req("IN-04")
+@pytest.mark.parametrize(
+    ("own_domain", "agent"),
+    [("maxasp.example", ""), ("maxasp.example", "  "), ("", "rechnungen@maxasp.example")],
+)
+def test_empty_sender_settings_are_refused(own_domain: str, agent: str) -> None:
+    with pytest.raises(ValueError):
+        replace(CONFIG, own_domain=own_domain, invoicing_agent=agent)
+
+
+# QA on PR 101: comments in the header are removed before reading it
+
+
+@pytest.mark.req("IN-04")
+def test_comments_are_removed_before_the_header_is_read() -> None:
+    [spf, dkim] = parse_results(
+        "spf=fail (smtp.mailfrom=muster-buerobedarf.example; dmarc=pass) "
+        "smtp.mailfrom=other.invalid; dkim=pass (outer (inner header.d=x.invalid) comment) "
+        "header.d=muster-buerobedarf.example"
+    )
+    assert dict(spf.properties) == {"smtp.mailfrom": "other.invalid"}
+    assert (dkim.result, dict(dkim.properties)) == (
+        "pass",
+        {"header.d": "muster-buerobedarf.example"},
+    )

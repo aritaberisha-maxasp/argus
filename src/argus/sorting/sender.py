@@ -31,6 +31,23 @@ from typing import Any
 
 HEADER = "authentication-results"
 METHODS = ("dmarc", "dkim", "spf")
+# The property that names the checked domain for each method.
+DOMAIN_KEY = {"dmarc": "header.from", "dkim": "header.d", "spf": "smtp.mailfrom"}
+
+# What the stored result may say. Part of the header can be written by the sender (``header.d``
+# comes from the DKIM signature), and the result goes into an audit event nobody can change for
+# 10 years, so only known words and real domain names are kept (NF-01, NF-03).
+RESULT_WORDS = frozenset(
+    {"pass", "fail", "softfail", "neutral", "none", "temperror", "permerror", "policy",
+     "bestguesspass"}
+)  # fmt: skip
+NOT_A_DOMAIN = "(not a domain)"
+NO_DOMAIN = "(no domain)"
+NO_HEADER = "no Authentication-Results header from Exchange Online"
+# At least two labels, each of letters, digits and inner hyphens (RFC 1035).
+_LABEL = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
+_DOMAIN = re.compile(rf"{_LABEL}(?:\.{_LABEL})+")
+MAX_DOMAIN_CHARS = 253
 
 # A comment in parentheses, as Microsoft writes them: "(sender IP is 192.0.2.10)".
 _COMMENT = re.compile(r"\([^()]*\)")
@@ -53,6 +70,20 @@ def domain_of(value: str) -> str:
     """The domain of an address or a domain, in lower case: "Rechnung@Muster.example" gives
     "muster.example"."""
     return value.strip().strip('"').rpartition("@")[2].strip().rstrip(".").lower()
+
+
+def safe_domain(domain: str) -> str:
+    """``domain`` when it is a plain domain name (letters, digits, dots and hyphens), otherwise
+    a fixed placeholder. Never more than 253 characters."""
+    if not domain:
+        return NO_DOMAIN
+    if len(domain) <= MAX_DOMAIN_CHARS and _DOMAIN.fullmatch(domain):
+        return domain
+    return NOT_A_DOMAIN
+
+
+def safe_result(result: str) -> str:
+    return result if result in RESULT_WORDS else "other"
 
 
 @dataclass(frozen=True)
@@ -92,9 +123,12 @@ def parse_results(value: str) -> tuple[MethodResult, ...]:
 class Authentication:
     """What the topmost ``Authentication-Results`` header says about the From domain."""
 
-    from_domain: str
+    from_domain: str  # a plain domain name, or a placeholder (see :func:`safe_domain`)
     passed_by: str | None  # "dmarc", "dkim" or "spf"; None when nothing passed for the domain
-    results: tuple[str, ...]  # one line per method, domains only: "spf=pass other.example"
+    # At most one line per method, known result words and domain names only:
+    # "spf=pass other.example". Never the part before an @, which can name a person (NF-03).
+    results: tuple[str, ...]
+    dmarc_failed: bool = False  # Exchange says DMARC fails for the From domain
 
     @property
     def passed(self) -> bool:
@@ -104,24 +138,30 @@ class Authentication:
 def authenticate(sender_address: str, headers: Mapping[str, str]) -> Authentication:
     """Check the From domain of ``sender_address`` against the topmost ``Authentication-Results``.
 
-    ``headers`` must hold the topmost copy of each header (see :func:`first_headers`)."""
-    from_domain = domain_of(sender_address) if "@" in sender_address else ""
+    ``headers`` must hold the topmost copy of each header (see :func:`first_headers`). An
+    explicit DMARC fail for the From domain wins over any SPF or DKIM pass."""
+    from_domain = safe_domain(domain_of(sender_address) if "@" in sender_address else "")
+    comparable = from_domain not in (NO_DOMAIN, NOT_A_DOMAIN)
     found = parse_results(headers.get(HEADER, ""))
     passes: set[str] = set()
-    lines: list[str] = []
+    dmarc_failed = False
+    lines: dict[str, str] = {}  # one per method, in the order the methods first appear
     for item in found:
         if item.method not in METHODS:
             continue
-        key = {"dmarc": "header.from", "dkim": "header.d", "spf": "smtp.mailfrom"}[item.method]
-        domain = domain_of(item.properties.get(key, ""))
-        # Only the domain, never the part before the @, which can name a person (NF-03).
-        lines.append(f"{item.method}={item.result} {domain or '(no domain)'}")
-        if item.result == "pass" and from_domain and domain == from_domain:
+        domain = safe_domain(domain_of(item.properties.get(DOMAIN_KEY[item.method], "")))
+        aligned = comparable and domain == from_domain
+        line = f"{item.method}={safe_result(item.result)} {domain}"
+        if item.result == "pass" and aligned:
             passes.add(item.method)
-    passed_by = next((method for method in METHODS if method in passes), None)
-    if not found:
-        lines.append("no Authentication-Results header from Exchange Online")
-    return Authentication(from_domain, passed_by, tuple(lines))
+            lines[item.method] = line  # the aligned pass is the line that explains the trust
+        elif item.method not in lines:
+            lines[item.method] = line
+        if item.method == "dmarc" and item.result == "fail" and aligned:
+            dmarc_failed = True
+    passed_by = None if dmarc_failed else next((m for m in METHODS if m in passes), None)
+    results = tuple(lines.values()) if found else (NO_HEADER,)
+    return Authentication(from_domain, passed_by, results, dmarc_failed)
 
 
 # Who the From address says the sender is, and who ARGUS treats it as after the check.
@@ -134,6 +174,7 @@ NEEDS_CHECK = (INVOICING_AGENT, KNOWN_VENDOR, KNOWN_CUSTOMER)
 
 DESCRIBED = {
     INVOICING_AGENT: "the invoicing agent",
+    INTERNAL: "someone at Max ASP",
     KNOWN_VENDOR: "a known vendor",
     KNOWN_CUSTOMER: "a known customer",
 }
@@ -149,8 +190,8 @@ class SenderCheck:
 
     @property
     def failed_claim(self) -> bool:
-        """The From address names the invoicing agent or a known partner, but the email does
-        not really come from that domain."""
+        """The From address names the invoicing agent, a known partner or Max ASP itself, but
+        the email does not really come from that domain."""
         return self.claimed != self.treated_as
 
     def reason(self) -> str:
@@ -166,6 +207,7 @@ class SenderCheck:
             "from_domain": self.authentication.from_domain,
             "authenticated": self.authentication.passed,
             "passed_by": self.authentication.passed_by,
+            "dmarc_failed": self.authentication.dmarc_failed,
             "results": list(self.authentication.results),
         }
 
@@ -178,5 +220,6 @@ class SenderCheck:
                 from_domain=details["from_domain"],
                 passed_by=details.get("passed_by"),
                 results=tuple(details.get("results") or ()),
+                dmarc_failed=bool(details.get("dmarc_failed")),
             ),
         )

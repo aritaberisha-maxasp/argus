@@ -58,3 +58,11 @@ class SortingConfig:
     vendor_domains: frozenset[str] = frozenset()
     customer_domains: frozenset[str] = frozenset()
     thresholds: Thresholds = field(default_factory=Thresholds)
+
+    def __post_init__(self) -> None:
+        # An empty setting would make an email with no readable From address look like it
+        # claims to be the invoicing agent or someone at Max ASP.
+        if "@" not in self.invoicing_agent.strip():
+            raise ValueError("the invoicing agent must be a full email address")
+        if not self.own_domain.strip():
+            raise ValueError("Max ASP's own email domain must be set")
