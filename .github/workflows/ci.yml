@@ -188,3 +188,33 @@ jobs:
       - name: Scan the git history
         run: ./gitleaks git --redact --no-banner --verbose --log-opts="--full-history HEAD" .
 
+
+  infra:
+    name: Infrastructure code
+    runs-on: ubuntu-latest
+    env:
+      BICEP_VERSION: v0.33.93
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Compiles and lints the Azure setup (#65) without signing in to Azure or deploying
+      # anything. The preview against the real subscription comes with the pipeline in #81.
+      - name: Install Bicep
+        run: |
+          az bicep install --version "$BICEP_VERSION"
+          az bicep version
+      - name: Build the templates
+        run: |
+          mkdir -p build/infra
+          az bicep build --file infra/main.bicep --outdir build/infra
+          az bicep build --file infra/policy/eu-only.bicep --outdir build/infra
+          az bicep build-params --file infra/main.bicepparam --outfile build/infra/main.parameters.json
+      - name: Lint the templates
+        run: |
+          az bicep lint --file infra/main.bicep
+          az bicep lint --file infra/policy/eu-only.bicep
+      # Region, retention lock, secrets and deployment types (NF-01, NF-03, NF-06, ADR 0006).
+      - name: Check the rules of #65
+        run: python tools/check_infra.py build/infra
