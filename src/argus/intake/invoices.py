@@ -52,8 +52,15 @@ class Invoicing:
     (Document Intelligence in production), and the language model that may fill missing fields."""
 
     reader: DocumentReader
+    # Max ASP's own VAT IDs. An incoming invoice may print them as the customer's, above the
+    # supplier's; they are never taken as the issuer's (review of PR 105).
+    own_vat_ids: frozenset[str]
     model: FieldModel | None = None
     settings: ReadingSettings = field(default_factory=ReadingSettings)
+
+    @property
+    def reading_settings(self) -> ReadingSettings:
+        return replace(self.settings, own_vat_ids=self.own_vat_ids | self.settings.own_vat_ids)
 
 
 @dataclass(frozen=True)
@@ -113,13 +120,14 @@ def find_invoices(raw: bytes, invoicing: Invoicing) -> EmailInvoices:
     """Every invoice in the email, read page by page. Calls the reader and the model, so never
     call it inside a unit of work. Raises ``ReaderUnavailable`` or ``ModelUnavailable`` when a
     service cannot be reached; the email then stays where it is and the next sweep tries again."""
+    settings = invoicing.reading_settings
     attachments = attachments_of(raw)
     datas = [a.data for a in attachments]
     doubts: list[str] = []
     sources: list[Source] = []
     for position, data in enumerate(datas, start=1):
         found = read_attachment_invoices(
-            position, data, invoicing.reader, invoicing.model, invoicing.settings
+            position, data, invoicing.reader, invoicing.model, settings
         )
         if found is None:
             continue
@@ -127,7 +135,7 @@ def find_invoices(raw: bytes, invoicing: Invoicing) -> EmailInvoices:
         sources += [Source(reading, position, pages) for pages, reading in found.readings]
     message = message_from_bytes(raw, policy=policy.default)
     if isinstance(message, EmailMessage):
-        body = read_body(body_of(message), invoicing.model, invoicing.settings)
+        body = read_body(body_of(message), invoicing.model, settings)
         if body is not None:
             sources.append(Source(body, None))
 
@@ -150,8 +158,19 @@ def find_invoices(raw: bytes, invoicing: Invoicing) -> EmailInvoices:
             )
         invoices.append((item.einvoice.reading, xml, (copy,) if copy else ()))
     for reading in alone:
-        if reading.unreadable is None and reading.kind in INVOICE_KINDS:
+        if reading.unreadable is not None:
+            continue
+        if reading.kind in INVOICE_KINDS:
             invoices.append((reading, by_reading[id(reading)], ()))
+        elif reading.kind == "unknown" and (
+            reading.value("invoice_number") or reading.value("gross_amount")
+        ):
+            # Looks like an invoice without an invoice title ("Rechnung Nr. 1001 vom ..."). It
+            # never silently gets no case (EX-01, same rule as PR 104).
+            doubts.append(
+                f"{_where(by_reading[id(reading)])} states an invoice number or a total but no"
+                " document title ARGUS knows"
+            )
 
     found_invoices: list[FoundInvoice] = []
     keys: list[str] = []

@@ -26,6 +26,7 @@ ARGUS does not guess. The email goes to manual review with the reason (IN-09), a
 - one page states two invoice numbers, so it cannot be split by page;
 - the reader sees another number of invoices than the pages show, or puts one invoice across two;
 - an invoice has no number or issuer ARGUS can read, or appears twice in the email;
+- a document has no invoice title ARGUS knows but states an invoice number or a total ("Rechnung Nr. 1001 vom ..."), so it is never dropped without a trace (same rule as the §14 check of #32);
 - a document or an e-invoice cannot be read;
 - the PDF copy of an e-invoice states another number, total or IBAN than its XML (#28).
 
@@ -33,7 +34,11 @@ The reasons name documents by position and page, never by file name, and never q
 
 ## The case key
 
+Both counts, the model's (`model_invoices`) and ARGUS's own (`invoices_found`), are kept in the decision and so in `email_classified`, so the trail shows why cases were opened or not.
+
 Each case is keyed on its issuer plus its invoice number: `vat:<VAT ID>|<number>`, or `name:<issuer name>|<number>` when the invoice states no VAT ID. The name is lower case, without its legal form, with umlauts written out. The number loses its spaces and is upper case.
+
+Max ASP's own VAT IDs (`Invoicing.own_vat_ids`, from settings) are never taken as the issuer's. Many invoices print the customer's VAT ID in the address block above the supplier's own, so the page rules skip them, a reader or model value equal to one is dropped, and they never start a new invoice in the split. They apply only to incoming invoices; Max ASP's own invoices are not read through this path.
 
 The database refuses a second case with the same key for the same email, and the key never changes once set. Duplicates across emails are #31's: it can build `duplicate_key` from the case key, the gross amount and the currency.
 
@@ -52,6 +57,8 @@ The database refuses a second case with the same key for the same email, and the
 `invoice_reading` holds full IBANs and quotes from the invoice, so it is a table of its own and never goes into the audit log (compliance on PR 94). It is insert only. The database writes the audit event `invoice_read` with the IDs, the pages, the reader, the kind and the names of the flagged fields, never a value. Who may see a reading in the app comes with sign in and roles (#23).
 
 ## Not in this story
+
+- Nothing outside the tests builds `Sorting(invoicing=...)` yet: the app wiring of the sweep, with the real reader and Max ASP's VAT IDs from settings, comes with the deployment (#81) and the go live checks (#90).
 
 - Outgoing invoices get their cases with #52.
 - The reader is called twice per invoice email, once for the sorting and once for the split. Reusing the first reading is a cost saving for later; the recorded stand ins make it free in CI.

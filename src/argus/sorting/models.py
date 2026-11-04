@@ -122,6 +122,9 @@ class SortingDecision:
     # How many invoices the model listed, so the split into cases is checked against it without
     # asking the model again (#30, IN-08). None when the model gave no usable answer.
     model_invoices: int | None = None
+    # How many invoices ARGUS found in the documents and pages, page by page (#30). Kept next to
+    # the model's count so the trail shows why cases were opened or not. None when not read.
+    invoices_found: int | None = None
 
     def audit_details(self) -> dict[str, Any]:
         """What goes into the audit log: the decision and the evidence snippets, never the
@@ -141,6 +144,8 @@ class SortingDecision:
         }
         if self.model_invoices is not None:
             details["model_invoices"] = self.model_invoices
+        if self.invoices_found is not None:
+            details["invoices_found"] = self.invoices_found
         return details
 
     @classmethod
@@ -164,4 +169,5 @@ class SortingDecision:
             if details.get("sender")
             else None,
             model_invoices=details.get("model_invoices"),
+            invoices_found=details.get("invoices_found"),
         )

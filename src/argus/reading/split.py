@@ -38,16 +38,19 @@ class Split:
     doubts: tuple[str, ...] = ()
 
 
-def split_file(analysis: Analysis, document: str) -> Split:
+def split_file(
+    analysis: Analysis, document: str, own_vat_ids: frozenset[str] = frozenset()
+) -> Split:
     """The invoices of one file, page by page. ``document`` names the file by position
-    ("attachment 2") for the doubts, never by file name (NF-03)."""
+    ("attachment 2") for the doubts, never by file name (NF-03). ``own_vat_ids`` are Max ASP's,
+    which a page may print as the customer's and which never start a new invoice."""
     doubts: list[str] = []
     groups: list[list[Page]] = []
     numbers_of_group: list[list[str]] = []
     issuers_of_group: list[list[str]] = []
     for page in analysis.pages:
         numbers = invoice_numbers((page,))
-        issuers = vat_ids(page)
+        issuers = vat_ids(page, own_vat_ids)
         if len(numbers) > 1:
             doubts.append(
                 f"page {page.number} of {document} states {len(numbers)} invoice numbers"

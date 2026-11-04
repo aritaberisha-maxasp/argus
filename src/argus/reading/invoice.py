@@ -72,6 +72,10 @@ class ReadingSettings:
     ignore_below: float = 0.50  # a field below this confidence counts as not read
     min_text_confidence: float = 0.60  # a scan whose words are read less surely is unreadable
     min_readable_chars: int = 40  # a document with less text than this is unreadable
+    # VAT IDs that are never the issuer's: Max ASP's own, when reading incoming invoices that
+    # print the customer's VAT ID above the supplier's (#30, review of PR 105). Empty for
+    # documents Max ASP issues itself.
+    own_vat_ids: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
         if not 0.0 <= self.ignore_below <= self.flag_below <= 1.0:
@@ -140,7 +144,7 @@ def read_attachment_invoices(
     except DocumentNotReadable as error:
         return FileInvoices((((), _unreadable(document, reader.name, str(error))),))
     settings = settings or ReadingSettings()
-    split = split_file(analysis, document)
+    split = split_file(analysis, document, settings.own_vat_ids)
     return FileInvoices(
         tuple(
             (part.pages, build_reading(document, reader.name, part.analysis, model, settings))
@@ -194,7 +198,8 @@ def build_reading(
 
     kind = document_kind(whole_text)
     fields = _from_reader(analysis, settings)
-    _add_page_text(fields, analysis.pages)
+    _drop_own_vat_id(fields, settings)
+    _add_page_text(fields, analysis.pages, settings.own_vat_ids)
 
     problems: list[str] = []
     numbers = invoice_numbers(analysis.pages)
@@ -225,6 +230,7 @@ def build_reading(
             _add_from_model(fields, analysis.pages, missing, model)
         except ModelAnswerInvalid as error:
             problems.append(f"the language model gave no usable answer: {error}")
+        _drop_own_vat_id(fields, settings)
     for name in needed:
         if name not in fields:
             fields[name] = ReadField(name, flag=Flag.NOT_FOUND, note="not found on the document")
@@ -270,8 +276,17 @@ def _from_reader(analysis: Analysis, settings: ReadingSettings) -> dict[str, Rea
     return fields
 
 
-def _add_page_text(fields: dict[str, ReadField], pages: tuple[Page, ...]) -> None:
-    for name, found in find_fields(pages).items():
+def _drop_own_vat_id(fields: dict[str, ReadField], settings: ReadingSettings) -> None:
+    """Max ASP's own VAT ID is never the issuer's on an incoming invoice, whoever read it."""
+    found = fields.get("vendor_vat_id")
+    if found is not None and found.value in settings.own_vat_ids:
+        del fields["vendor_vat_id"]
+
+
+def _add_page_text(
+    fields: dict[str, ReadField], pages: tuple[Page, ...], skip_vat_ids: frozenset[str]
+) -> None:
+    for name, found in find_fields(pages, skip_vat_ids).items():
         current = fields.get(name)
         if current is None:
             bad_iban = name == "iban_on_document" and not iban_valid(found.value)

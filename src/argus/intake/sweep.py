@@ -32,7 +32,7 @@ import logging
 import threading
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import timedelta
 from typing import Protocol
 
@@ -184,6 +184,7 @@ def classify(engine: Engine, sorting: Sorting, record: EmailRecord) -> SortingDe
     if decision.route is Route.INVOICE_PROCESSING and sorting.invoicing is not None:
         # Also outside any transaction: the reader and the model may be called (#30).
         invoices = find_invoices(raw, sorting.invoicing)
+        decision = replace(decision, invoices_found=len(invoices.invoices))
         doubts = doubts_about(invoices, decision.model_invoices)
         if doubts:
             decision, invoices = to_manual_review(decision, doubts), None

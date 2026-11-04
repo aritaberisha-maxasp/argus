@@ -27,7 +27,7 @@ from argus.reading.pages import Analysis, InvoiceSpan, Page
 from argus.reading.split import split_file
 from argus.sorting.models import Route, SortingDecision
 from tests.acceptance.intake import FixtureDocumentReader
-from tests.unit.sorting_helpers import EMAILS, FIXTURES, manifest
+from tests.unit.sorting_helpers import EMAILS, FIXTURES, OWN_VAT_IDS, manifest
 
 DOCUMENTS = FIXTURES / "documents"
 
@@ -213,7 +213,7 @@ def test_document_intelligence_gives_the_pages_of_each_invoice_it_sees() -> None
 @pytest.mark.req("IN-08")
 def test_two_invoices_in_one_pdf_are_found_as_two_invoices_of_the_same_attachment() -> None:
     raw = email_with_pdf(merged_pdf("D14", "D15"))
-    found = find_invoices(raw, Invoicing(FixtureDocumentReader()))
+    found = find_invoices(raw, Invoicing(FixtureDocumentReader(), OWN_VAT_IDS))
     assert found.doubts == ()
     assert [(i.source.position, i.source.pages) for i in found.invoices] == [(1, (1,)), (1, (2,))]
     assert [i.source.reading.value("invoice_number") for i in found.invoices] == [
@@ -238,7 +238,9 @@ def test_two_invoices_in_one_pdf_are_found_as_two_invoices_of_the_same_attachmen
 def test_every_incoming_invoice_fixture_holds_the_invoices_of_the_manifest(
     entry: dict[str, str],
 ) -> None:
-    found = find_invoices((EMAILS / entry["file"]).read_bytes(), Invoicing(FixtureDocumentReader()))
+    found = find_invoices(
+        (EMAILS / entry["file"]).read_bytes(), Invoicing(FixtureDocumentReader(), OWN_VAT_IDS)
+    )
     assert found.doubts == ()
     assert len(found.invoices) == int(entry["invoice_count"])
 
@@ -246,7 +248,7 @@ def test_every_incoming_invoice_fixture_holds_the_invoices_of_the_manifest(
 @pytest.mark.req("IN-08")
 def test_the_three_invoices_of_e14_are_three_attachments_with_three_keys() -> None:
     raw = next(EMAILS.glob("E14_*.eml")).read_bytes()
-    found = find_invoices(raw, Invoicing(FixtureDocumentReader()))
+    found = find_invoices(raw, Invoicing(FixtureDocumentReader(), OWN_VAT_IDS))
     assert [i.source.position for i in found.invoices] == [1, 2, 3]
     assert len({i.key for i in found.invoices}) == 3
     assert {i.kind for i in found.invoices} == {CaseKind.INCOMING_INVOICE}
@@ -255,7 +257,7 @@ def test_the_three_invoices_of_e14_are_three_attachments_with_three_keys() -> No
 @pytest.mark.req("IN-08")
 def test_an_e_invoice_and_its_pdf_copy_are_one_invoice() -> None:
     raw = next(EMAILS.glob("E09_*.eml")).read_bytes()  # ZUGFeRD: the XML is inside the PDF
-    [invoice] = find_invoices(raw, Invoicing(FixtureDocumentReader())).invoices
+    [invoice] = find_invoices(raw, Invoicing(FixtureDocumentReader(), OWN_VAT_IDS)).invoices
     assert invoice.source.reading.document == "attachment 1, embedded XML"
     assert invoice.source.reading.reader == "einvoice_xml"
     assert [(c.reading.document, c.pages) for c in invoice.copies] == [("attachment 1", (1,))]
@@ -264,7 +266,7 @@ def test_an_e_invoice_and_its_pdf_copy_are_one_invoice() -> None:
 @pytest.mark.req("IN-08")
 def test_a_credit_note_opens_a_credit_note_case() -> None:
     raw = next(EMAILS.glob("E10_*.eml")).read_bytes()
-    [invoice] = find_invoices(raw, Invoicing(FixtureDocumentReader())).invoices
+    [invoice] = find_invoices(raw, Invoicing(FixtureDocumentReader(), OWN_VAT_IDS)).invoices
     assert invoice.kind is CaseKind.INCOMING_CREDIT_NOTE
 
 
@@ -304,7 +306,9 @@ def test_two_vendors_that_both_use_number_1001_stay_two_invoices() -> None:
             invoice_page(2, "1001", "Beispiel Reinigung GmbH", "DE012345607"),
         )
     )
-    found = find_invoices(email_with_pdf(merged_pdf("D14")), Invoicing(PagesReader(analysis)))
+    found = find_invoices(
+        email_with_pdf(merged_pdf("D14")), Invoicing(PagesReader(analysis), OWN_VAT_IDS)
+    )
     assert [i.key for i in found.invoices] == ["vat:DE012345601|1001", "vat:DE012345607|1001"]
     assert found.doubts == ()
 
@@ -313,7 +317,7 @@ def test_two_vendors_that_both_use_number_1001_stay_two_invoices() -> None:
 def test_the_same_invoice_twice_in_one_email_needs_a_person() -> None:
     analysis = Analysis(pages=(invoice_page(1, "1001", "Muster Bürobedarf GmbH", "DE012345601"),))
     pdf = merged_pdf("D14")
-    found = find_invoices(email_with_pdf(pdf, pdf), Invoicing(PagesReader(analysis)))
+    found = find_invoices(email_with_pdf(pdf, pdf), Invoicing(PagesReader(analysis), OWN_VAT_IDS))
     assert len(found.invoices) == 1
     assert found.doubts == ("the invoice in the attachment 2, page 1 is in this email twice",)
 
@@ -322,7 +326,9 @@ def test_the_same_invoice_twice_in_one_email_needs_a_person() -> None:
 def test_a_page_that_restates_its_number_and_issuer_stays_with_its_invoice() -> None:
     page = invoice_page(1, "1001", "Muster Bürobedarf GmbH", "DE012345601")
     analysis = Analysis(pages=(page, replace(page, number=2)))
-    found = find_invoices(email_with_pdf(merged_pdf("D14")), Invoicing(PagesReader(analysis)))
+    found = find_invoices(
+        email_with_pdf(merged_pdf("D14")), Invoicing(PagesReader(analysis), OWN_VAT_IDS)
+    )
     assert [i.source.pages for i in found.invoices] == [(1, 2)]
     assert found.doubts == ()
 
@@ -332,7 +338,9 @@ def test_an_invoice_without_a_readable_number_or_issuer_needs_a_person() -> None
     analysis = Analysis(
         pages=(Page(1, "Rechnung\nVielen Dank für Ihren Auftrag.\nGesamtbetrag 119,00 EUR\n"),)
     )
-    found = find_invoices(email_with_pdf(merged_pdf("D14")), Invoicing(PagesReader(analysis)))
+    found = find_invoices(
+        email_with_pdf(merged_pdf("D14")), Invoicing(PagesReader(analysis), OWN_VAT_IDS)
+    )
     assert found.invoices == ()
     assert found.doubts == (
         "the invoice in the attachment 1, page 1 has no invoice number or issuer ARGUS can read",
@@ -345,7 +353,7 @@ def test_an_invoice_without_a_readable_number_or_issuer_needs_a_person() -> None
 
 def found_with(count: int) -> EmailInvoices:
     raw = next(EMAILS.glob("E14_*.eml")).read_bytes()
-    found = find_invoices(raw, Invoicing(FixtureDocumentReader()))
+    found = find_invoices(raw, Invoicing(FixtureDocumentReader(), OWN_VAT_IDS))
     return replace(found, invoices=found.invoices[:count])
 
 
@@ -391,3 +399,116 @@ def test_a_doubt_turns_the_decision_into_manual_review_with_its_reasons() -> Non
     assert review.reasons == ("the language model lists 2 invoices, ...",)
     assert review.audit_details()["model_invoices"] == 2
     assert SortingDecision.from_audit_details(review.audit_details()) == review
+
+
+# Review of PR 105: Max ASP's own VAT ID is never the issuer's.
+
+
+def buyer_vat_first(number: int, invoice_number: str, issuer: str, vat_id: str) -> Page:
+    """An invoice that prints the customer's VAT ID in the address block, above the supplier's
+    own in the footer."""
+    return Page(
+        number,
+        f"{issuer}\nMusterweg 1, 70000 Musterstadt, DE\nMax ASP GmbH\nTestallee 1\n"
+        "Ihre USt-IdNr.: DE099000001\nRechnung\n"
+        f"Nummer: {invoice_number}\nDatum: 12.10.2026\nGesamtbetrag 119,00 EUR\n"
+        f"{issuer}, Geschäftsführung Erika Mustermann, USt-IdNr. {vat_id}\n",
+    )
+
+
+@pytest.mark.req("IN-08")
+def test_the_customer_vat_id_printed_first_never_becomes_the_issuer_key() -> None:
+    analysis = Analysis(
+        pages=(
+            buyer_vat_first(1, "1001", "Alpha Technik GmbH", "DE012345611"),
+            buyer_vat_first(2, "1001", "Beta Handel GmbH", "DE012345622"),
+        )
+    )
+    found = find_invoices(
+        email_with_pdf(merged_pdf("D14")), Invoicing(PagesReader(analysis), OWN_VAT_IDS)
+    )
+    assert [i.key for i in found.invoices] == ["vat:DE012345611|1001", "vat:DE012345622|1001"]
+    assert found.doubts == ()
+
+
+@pytest.mark.req("IN-08")
+def test_a_second_page_with_the_customer_vat_id_stays_with_its_invoice() -> None:
+    analysis = Analysis(
+        pages=(
+            buyer_vat_first(1, "1001", "Alpha Technik GmbH", "DE012345611"),
+            Page(2, "Nummer: 1001\nIhre USt-IdNr.: DE099000001\nSeite 2 Übertrag"),
+        )
+    )
+    split = split_file(analysis, "attachment 1", OWN_VAT_IDS)
+    assert [part.pages for part in split.parts] == [(1, 2)]
+
+
+@pytest.mark.req("IN-08")
+def test_a_reader_that_names_max_asp_as_the_issuer_is_overruled_by_the_page() -> None:
+    own = ReadField("vendor_vat_id", "DE099000001", Source.DOCUMENT_INTELLIGENCE, 0.95, 1)
+    analysis = Analysis(
+        pages=(buyer_vat_first(1, "1001", "Alpha Technik GmbH", "DE012345611"),),
+        fields={"vendor_vat_id": own},
+    )
+    [invoice] = find_invoices(
+        email_with_pdf(merged_pdf("D14")), Invoicing(PagesReader(analysis), OWN_VAT_IDS)
+    ).invoices
+    assert invoice.source.reading.value("vendor_vat_id") == "DE012345611"
+
+
+# Review of PR 105: a document that looks like an invoice is never dropped without a trace.
+
+
+class ByContent:
+    """Reads each file from its own analysis, by its bytes."""
+
+    name = "by-content"
+
+    def __init__(self, analyses: dict[bytes, Analysis]) -> None:
+        self.analyses = analyses
+
+    def read(self, data: bytes, content_type: str) -> Analysis:
+        return self.analyses[data]
+
+
+@pytest.mark.req("IN-08", "IN-09", "EX-01")
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Muster Technik GmbH\nRechnung Nr. 1002 vom 01.10.2026 an Max ASP GmbH\n"
+        "Gesamtbetrag 238,00 EUR\n",
+        "Muster Technik GmbH\nIhre Unterlagen zum Auftrag vom Oktober 2026\nNr.: 1002\n",
+    ],
+)
+def test_a_document_without_an_invoice_title_but_a_number_or_total_needs_a_person(
+    text: str,
+) -> None:
+    invoice, odd = merged_pdf("D14"), merged_pdf("D15")
+    reader = ByContent(
+        {
+            invoice: Analysis(pages=(invoice_page(1, "1001", "Alpha GmbH", "DE012345611"),)),
+            odd: Analysis(pages=(Page(1, text),)),
+        }
+    )
+    found = find_invoices(email_with_pdf(invoice, odd), Invoicing(reader, OWN_VAT_IDS))
+    # The model may well list one invoice too, so the count alone would not catch it.
+    assert len(found.invoices) == 1
+    assert doubts_about(found, 1) == (
+        "the attachment 2, page 1 states an invoice number or a total but no document title"
+        " ARGUS knows",
+    )
+
+
+@pytest.mark.req("IN-08")
+def test_a_document_without_number_or_total_such_as_terms_raises_no_doubt() -> None:
+    invoice, terms = merged_pdf("D14"), merged_pdf("D15")
+    reader = ByContent(
+        {
+            invoice: Analysis(pages=(invoice_page(1, "1001", "Alpha GmbH", "DE012345611"),)),
+            terms: Analysis(
+                pages=(Page(1, "Allgemeine Geschäftsbedingungen\n1. Geltungsbereich\n" * 3),)
+            ),
+        }
+    )
+    found = find_invoices(email_with_pdf(invoice, terms), Invoicing(reader, OWN_VAT_IDS))
+    assert doubts_about(found, 1) == ()

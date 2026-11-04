@@ -36,7 +36,7 @@ from tests.integration.test_reminder_forward import (
     graph_for,
 )
 from tests.unit.intake.graph_helpers import TOKEN
-from tests.unit.sorting_helpers import MODEL_ANSWERS, fixture_config
+from tests.unit.sorting_helpers import MODEL_ANSWERS, OWN_VAT_IDS, fixture_config
 from tests.unit.test_invoice_split import email_with_pdf, merged_pdf
 
 TWO_IN_ONE_PDF = "<split.two-invoices-one-pdf@fixtures.argus.example>"
@@ -64,7 +64,7 @@ def setup(
         model=language_model,
         config=fixture_config(),
         read=EmailReader(FixtureDocumentReader()),
-        invoicing=Invoicing(FixtureDocumentReader()),
+        invoicing=Invoicing(FixtureDocumentReader(), OWN_VAT_IDS),
     )
     return documents, sorting, graph
 
@@ -240,6 +240,7 @@ def test_a_model_that_lists_two_of_three_invoices_sends_the_email_to_manual_revi
     [classified] = events(app, email_id, "email_classified")
     assert classified["details"]["route"] == "manual_review"
     assert classified["details"]["model_invoices"] == 2
+    assert classified["details"]["invoices_found"] == 3
     reason = "the language model lists 2 invoices, the documents and pages show 3"
     assert reason in classified["details"]["reasons"]
     [exception] = open_exceptions(app, email_id)

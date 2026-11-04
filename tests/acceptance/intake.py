@@ -38,6 +38,7 @@ from tests.unit.intake.graph_helpers import BASE_URL, TOKEN, StaticTokens, stand
 from tests.unit.sorting_helpers import (
     EMAILS,
     MODEL_ANSWERS,
+    OWN_VAT_IDS,
     READINGS,
     fixture_config,
     manifest,
@@ -145,7 +146,7 @@ def run_intake(owner: Engine, app: Engine, documents: DocumentStore) -> IntakeRu
         config=fixture_config(),
         read=EmailReader(FixtureDocumentReader()),
         reminders=graph,
-        invoicing=Invoicing(FixtureDocumentReader()),
+        invoicing=Invoicing(FixtureDocumentReader(), OWN_VAT_IDS),
     )
 
     first = sweep(app, graph, archive, sorting)
