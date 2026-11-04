@@ -1,10 +1,13 @@
-"""Send an email to manual review when its e-invoice cannot be trusted (#28, EX-01, ADR 0006).
+"""Send an email to manual review when its invoice cannot be trusted (#28, #32, EX-01, PR-03).
 
-Two checks can fail, both leading to the exception reason ``invoice_check_failed`` on the email:
+Three checks can fail, all leading to the exception reason ``invoice_check_failed`` on the email:
 
 - the PDF copy disagrees with its XML on the invoice number, the total or the IBAN; the detail
   shows both values, so the person sees what differs;
-- the KoSIT validator did not accept the XML; the detail names the rules it broke.
+- the KoSIT validator did not accept the XML; the detail names the rules it broke;
+- an invoice misses an item §14 UStG asks for (``argus.reading.formal_check``); the detail names
+  the missing items. This applies to PDFs, scans and e-invoices alike, so an email without any
+  e-invoice passes its §14 results here too, with no invoices and no validations.
 
 An email has at most one open exception per reason (``exception_open_once``, #19), so every
 failed check of every e-invoice on the email goes into one exception, the way
@@ -13,7 +16,8 @@ cannot read at all is an unreadable document and goes through ``queue_unreadable
 
 Like the other queue steps, this runs inside a ``unit_of_work`` after the reading, never around
 the validator call (PR #79 review). ``detail`` stays on the exception for the person who acts on
-it; ``facts`` go into the audit log and hold only positions, field names and rule codes (NF-03).
+it; ``facts`` go into the audit log and hold only positions, field names, item names and rule
+codes (NF-03).
 IBANs are masked in the detail like everywhere else in the queue (PR #86 review).
 """
 
@@ -25,10 +29,12 @@ from argus.cases.model import ExceptionReason
 from argus.cases.store import open_exception
 from argus.einvoice.pairing import Disagreement, EInvoiceWithCopy
 from argus.einvoice.validator import Validation
+from argus.reading.formal_check import FormalCheck
 from argus.sorting.models import mask_ibans
 
 PDF_MATCHES_XML = "pdf_matches_xml"
 KOSIT_VALIDATION = "kosit_validation"
+FORMAL_CHECK = "ustg14"
 
 LABELS = {"invoice_number": "invoice number", "gross_amount": "total", "iban_on_document": "IBAN"}
 # Enough for a person to see what is wrong; the full report is one click away in the validator.
@@ -40,11 +46,14 @@ def queue_failed_checks(
     email_id: int,
     invoices: Sequence[EInvoiceWithCopy],
     validations: Mapping[str, Validation],
+    formal: Sequence[FormalCheck] = (),
 ) -> int | None:
-    """One exception for every e-invoice of the email whose PDF copy disagrees with it or that
-    the validator did not accept. ``validations`` holds the validator's answer for each
-    e-invoice, by its ``document``. Returns the exception ID, or None when every check passed.
-    Safe to repeat: an email has at most one open exception for this."""
+    """One exception for every invoice of the email whose PDF copy disagrees with its XML, that
+    the validator did not accept, or that failed the §14 UStG check. ``validations`` holds the
+    validator's answer for each e-invoice, by its ``document``. ``formal`` holds the §14 UStG
+    results of the email's invoices: check an e-invoice from its XML, not its PDF copy. Returns
+    the exception ID, or None when every check passed. Safe to repeat: an email has at most one
+    open exception for this."""
     missing = [i.einvoice.document for i in invoices if i.einvoice.document not in validations]
     if missing:
         # An e-invoice nobody checked must never look like one that passed.
@@ -76,6 +85,15 @@ def queue_failed_checks(
             failed = True
         if failed:
             documents.append(document)
+    missing_items: set[str] = set()
+    for check in formal:
+        if check.passed:
+            continue
+        paragraphs.append(mask_ibans(check.paragraph()))
+        checks.add(FORMAL_CHECK)
+        missing_items.update(check.items)
+        if check.document not in documents:
+            documents.append(check.document)
     if not paragraphs:
         return None
 
@@ -100,6 +118,7 @@ def queue_failed_checks(
             "fields": sorted(fields),
             "scenarios": sorted(scenarios),
             "rules": sorted(rules),
+            "missing_items": sorted(missing_items),
         },
     )
 
