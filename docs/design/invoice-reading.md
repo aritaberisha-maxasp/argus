@@ -50,9 +50,9 @@ After reading, `check_invoice` (in `argus/reading/formal_check.py`, #32, PR-03) 
 
 An invoice that charges no VAT must say why (reverse charge, an exemption, §19 UStG). A VAT rate of 0 without that note fails. A field read with a flag counts as there, because the flag already sends it to a person. A field ARGUS could not read counts as missing, so the message says "missing or not readable".
 
-Only documents of kind invoice are checked: not credit notes, cancellations, pro formas, or invoices issued by Max ASP. Addresses and the quantity and kind of goods are not read yet (PR-01 has no such fields), so a person checks them when approving.
+Only invoices are checked: not credit notes, cancellations, pro formas, or invoices issued by Max ASP. A document whose title ARGUS does not recognise counts as an invoice when it states an invoice number or a gross amount, so an unusual title cannot skip the check. Addresses and the quantity and kind of goods are not read yet (PR-01 has no such fields), so a person checks them when approving.
 
-A failed check goes to the exception queue through `argus.einvoice.queue_failed_checks(..., formal=checks)` with the reason `invoice_check_failed`. It shares that one exception per email with the e-invoice checks. The detail starts with "Failed §14 UStG check" and names every missing item. The audit log gets only the item names (`missing_items`), never the values (NF-03).
+A failed check goes to the exception queue through `argus.einvoice.queue_failed_checks(..., formal=checks)` with the reason `invoice_check_failed`. It shares that one exception per email with the e-invoice checks. The detail starts with "Failed §14 UStG check" and names every missing item. The audit log gets only the item names (`missing_items`) and which list applied (`formal_rules`), never the values (NF-03).
 
 ## The type of a file
 
