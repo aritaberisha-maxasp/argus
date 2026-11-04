@@ -1,0 +1,4 @@
+# Made up keys in the first commit of PR 100 (#65). They were test data for tools/check_infra.py
+# and are now built at runtime instead. Nothing real was ever in these lines.
+4833fa2da1443071e36ff9a778c3be9bcb1f0be4:tests/unit/test_infra_check.py:generic-api-key:275
+4833fa2da1443071e36ff9a778c3be9bcb1f0be4:tests/unit/test_infra_check.py:generic-api-key:289
