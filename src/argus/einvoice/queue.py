@@ -86,12 +86,14 @@ def queue_failed_checks(
         if failed:
             documents.append(document)
     missing_items: set[str] = set()
+    formal_rules: set[str] = set()
     for check in formal:
         if check.passed:
             continue
         paragraphs.append(mask_ibans(check.paragraph()))
         checks.add(FORMAL_CHECK)
         missing_items.update(check.items)
+        formal_rules.add(check.rule)
         if check.document not in documents:
             documents.append(check.document)
     if not paragraphs:
@@ -119,6 +121,8 @@ def queue_failed_checks(
             "scenarios": sorted(scenarios),
             "rules": sorted(rules),
             "missing_items": sorted(missing_items),
+            # Which list applied (ustg14 or ustdv33), so the trail shows why an item was asked.
+            "formal_rules": sorted(formal_rules),
         },
     )
 

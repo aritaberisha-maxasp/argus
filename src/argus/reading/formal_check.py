@@ -23,8 +23,19 @@ What is out of scope here and why:
   read them yet (PR-01 has no such fields), so a person checks them when approving.
 - Whether the invoice number is sequential: one invoice cannot show that, and the vendor's
   numbering is the vendor's affair.
-- Credit notes, cancellations and pro forma invoices: only documents of kind ``invoice`` are
-  checked. Invoices issued by Max ASP itself are not checked here either.
+- Credit notes, cancellations and pro forma invoices: only invoices are checked. Invoices issued
+  by Max ASP itself are not checked here either.
+
+An invoice is a document of kind ``invoice``, or a document whose title ARGUS did not recognise
+(kind ``unknown``, for example "Rechnung Nr. 2026-0012 vom 01.10.2026") that states an invoice
+number or a gross amount. An unknown attachment without either, such as terms and conditions or a
+delivery note, is left alone, so it does not fill the queue (PR #104 review).
+
+The reason for charging no VAT is searched in the whole text, so a stray "steuerfrei" anywhere on
+the page lets a 0 % invoice pass. E-invoices take it from the XML instead. The 0 % rate of
+§12 Abs. 3 UStG (solar systems) is a real rate that needs no note; it fails here as "reason no VAT
+is charged" and a person confirms it. Both are rare for Max ASP; tune them if the shadow run (#72)
+shows otherwise.
 
 A field ARGUS read with a flag (low confidence, readers disagree, found by the model) counts as
 present: the flag already sends it to a person. A field that could not be read counts as missing,
@@ -130,12 +141,12 @@ def check_invoice(
     no_vat_reason: str | None = None,
 ) -> FormalCheck | None:
     """Check one reading. Returns None when the document is not an incoming invoice: a credit
-    note, a cancellation, a pro forma, a letter, an unreadable document, or an invoice issued by
-    Max ASP itself.
+    note, a cancellation, a pro forma, a letter, an untitled document without an invoice number or
+    gross amount, an unreadable document, or an invoice issued by Max ASP itself.
 
     ``tax_number`` and ``no_vat_reason`` are found in the text of the document. An e-invoice has
     no page text, so :func:`argus.einvoice.check_einvoice` passes what its XML states."""
-    if reading.unreadable is not None or reading.kind != "invoice":
+    if reading.unreadable is not None or not _is_invoice(reading):
         return None
     own = normalise(own_company)
     issuer = reading.value("issuer_name")
@@ -183,6 +194,15 @@ def check_invoices(
 ) -> list[FormalCheck]:
     """Check every reading of one email. Leaves out the documents that are not checked."""
     return [c for r in readings if (c := check_invoice(r, own_company)) is not None]
+
+
+def _is_invoice(reading: InvoiceReading) -> bool:
+    if reading.kind == "invoice":
+        return True
+    # A title ARGUS does not know must not let an invoice skip the check (PR #104 review).
+    return reading.kind == "unknown" and (
+        _present(reading, "invoice_number") or _present(reading, "gross_amount")
+    )
 
 
 def _present(reading: InvoiceReading, name: str) -> bool:

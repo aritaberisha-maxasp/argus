@@ -10,15 +10,19 @@ import pytest
 
 from argus.einvoice import EInvoice, check_einvoice, read_einvoices, read_xml
 from argus.reading import (
+    Analysis,
     Flag,
     InvoiceReading,
+    Page,
     ReadField,
+    ReadingSettings,
     Source,
     check_invoice,
     check_invoices,
     read_body,
 )
 from argus.reading.formal_check import FULL, SMALL
+from argus.reading.invoice import build_reading
 from tests.unit.test_reading import EXPECTED, READ_HERE, body_of, read_with_recording
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
@@ -303,3 +307,56 @@ def test_an_einvoice_with_reverse_charge_passes_without_vat() -> None:
 
     assert with_reason is not None and with_reason.passed
     assert without_reason is not None and without_reason.items == ["no_vat_reason"]
+
+
+UNTITLED_INVOICE = """Beispiel Werkstatt GmbH
+Musterweg 2, 70000 Musterstadt
+Max ASP GmbH
+Testallee 1
+70000 Musterstadt
+
+Rechnung Nr. 2026-0012 vom 01.10.2026
+Rechnungsnummer: 2026-0012
+Rechnungsdatum: 01.10.2026
+Wartung Drucker, 2 Stunden
+Nettobetrag: 400,00 EUR
+USt 19 %: 76,00 EUR
+Gesamtbetrag: 476,00 EUR
+Zahlbar bis 31.10.2026
+"""
+TERMS = """Allgemeine Geschäftsbedingungen der Beispiel Werkstatt GmbH
+1. Geltungsbereich. Diese Bedingungen gelten für alle Aufträge.
+2. Zahlung. Rechnungen sind innerhalb von 30 Tagen zu zahlen.
+"""
+
+
+def read_text(text: str) -> InvoiceReading:
+    analysis = Analysis(pages=(Page(1, text),))
+    return build_reading("attachment 1", "test", analysis, None, ReadingSettings())
+
+
+@pytest.mark.req("PR-03", "EX-01")
+def test_an_invoice_with_a_title_argus_does_not_know_is_still_checked() -> None:
+    reading = read_text(UNTITLED_INVOICE)
+    assert reading.kind == "unknown"
+
+    check = check_invoice(reading)
+
+    # No VAT ID and no service date: it must not pass silently (PR #104 review).
+    assert check is not None and check.rule == FULL
+    assert "vat_id_or_tax_number" in check.items and "service_date" in check.items
+
+
+@pytest.mark.req("PR-03")
+def test_a_known_invoice_read_without_its_title_fails_like_any_other() -> None:
+    reading = dataclasses.replace(without(full_invoice(), "service_period"), kind="unknown")
+
+    assert items(reading) == ["service_date"]
+
+
+@pytest.mark.req("PR-03")
+def test_an_untitled_attachment_without_invoice_number_or_amount_is_not_checked() -> None:
+    reading = read_text(TERMS)
+    assert reading.kind == "unknown"
+
+    assert check_invoice(reading) is None

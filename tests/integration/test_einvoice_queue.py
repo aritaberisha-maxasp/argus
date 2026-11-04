@@ -128,6 +128,7 @@ def test_the_audit_log_gets_the_fields_never_the_values(app: Engine) -> None:
         "scenarios": [],
         "rules": [],
         "missing_items": [],
+        "formal_rules": [],
     }
     assert "174.56" not in json.dumps(facts) and "3000" not in json.dumps(facts)
 
@@ -196,6 +197,7 @@ def test_an_einvoice_the_validator_rejects_goes_to_manual_review(app: Engine) ->
         "scenarios": [SCENARIO],
         "rules": ["BR-DE-15"],
         "missing_items": [],
+        "formal_rules": [],
     }
 
 

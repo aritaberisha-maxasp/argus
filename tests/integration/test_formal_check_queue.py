@@ -98,6 +98,7 @@ def test_the_audit_log_gets_the_item_names_never_the_values(app: Engine) -> None
         "scenarios": [],
         "rules": [],
         "missing_items": ["recipient"],
+        "formal_rules": ["ustg14"],
     }
     assert "Muster" not in json.dumps(facts)
 
