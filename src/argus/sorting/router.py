@@ -18,6 +18,7 @@ from argus.sorting.models import (
     Route,
     SortingDecision,
 )
+from argus.sorting.sender import SenderCheck
 
 log = logging.getLogger("argus.sorting")
 
@@ -35,7 +36,12 @@ def sort_email(email: EmailToSort, model: LanguageModel, config: SortingConfig) 
         answer = model.propose(email)
     except ModelAnswerInvalid as error:
         return _review(
-            (f"no usable model answer: {error}",), None, None, checks.category, evidence=()
+            (f"no usable model answer: {error}",),
+            None,
+            None,
+            checks.category,
+            evidence=(),
+            sender=checks.sender,
         )
 
     reasons: list[str] = []
@@ -65,6 +71,7 @@ def sort_email(email: EmailToSort, model: LanguageModel, config: SortingConfig) 
             answer.confidence,
             checks.category,
             quotes_only(answer.evidence, email),
+            sender=checks.sender,
         )
     else:
         decision = SortingDecision(
@@ -75,6 +82,7 @@ def sort_email(email: EmailToSort, model: LanguageModel, config: SortingConfig) 
             model_confidence=answer.confidence,
             check_category=checks.category,
             evidence=quotes_only(answer.evidence, email),
+            sender=checks.sender,
         )
     # No Message-ID in the log: it names the sender's domain. The caller logs its own record ID.
     log.debug("Email sorted: %s", decision.route)
@@ -101,6 +109,7 @@ def _review(
     model_confidence: float | None,
     check_category: Category | None,
     evidence: tuple[str, ...],
+    sender: SenderCheck | None,
 ) -> SortingDecision:
     return SortingDecision(
         route=Route.MANUAL_REVIEW,
@@ -110,4 +119,5 @@ def _review(
         model_confidence=model_confidence,
         check_category=check_category,
         evidence=evidence,
+        sender=sender,
     )

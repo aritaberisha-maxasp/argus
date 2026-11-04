@@ -37,6 +37,7 @@ from tests.unit.sorting_helpers import (
     MODEL_ANSWERS,
     fixture_config,
     manifest,
+    passes_for,
     read_fixture_email,
 )
 
@@ -88,6 +89,7 @@ def invoice_email(
         sender_name="Muster Bürobedarf GmbH",
         subject="Rechnung BB-1",
         body="Anbei unsere Rechnung.",
+        headers={"authentication-results": passes_for(sender)},
         attachments=(Attachment("Rechnung_BB-1.pdf", "application/pdf", text),),
     )
 
@@ -461,7 +463,7 @@ def test_the_audit_log_keeps_only_the_decision_and_short_evidence_snippets() -> 
 
     assert set(details) == {
         "route", "category", "model_category", "model_confidence", "check_category",
-        "reasons", "evidence",
+        "reasons", "evidence", "sender",
     }  # fmt: skip
     assert len(details["evidence"]) == 10
     assert all(len(snippet) <= 200 for snippet in details["evidence"])

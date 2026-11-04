@@ -23,6 +23,7 @@ from argus.einvoice.parser import EInvoiceRefused, looks_like_xml, read_xml
 from argus.reading.invoice import sniff_type
 from argus.reading.pages import DocumentNotReadable, DocumentReader
 from argus.sorting.models import Attachment, EmailToSort
+from argus.sorting.sender import first_headers
 
 TITLE_FOR_KIND = {"invoice": "Rechnung", "credit_note": "Gutschrift"}
 
@@ -44,7 +45,7 @@ class EmailReader:
             sender_name=name,
             subject=str(message.get("Subject", "")),
             body=body_of(message),
-            headers={key.lower(): str(value) for key, value in message.items()},
+            headers=first_headers(message.items()),
             attachments=tuple(
                 Attachment(
                     a.filename or "attachment", a.content_type, self.text_of(position, a.data)

@@ -1,3 +1,7 @@
+Authentication-Results: spf=pass (sender IP is 192.0.2.10)
+ smtp.mailfrom=example-software.example; dkim=pass (signature was verified)
+ header.d=example-software.example;dmarc=pass action=none
+ header.from=example-software.example;compauth=pass reason=100
 From: Example Software Ltd <accounts@example-software.example>
 To: accounts@maxasp.example
 Subject: Credit note ESL-CN-00412

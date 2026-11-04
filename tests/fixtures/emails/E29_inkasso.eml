@@ -1,3 +1,7 @@
+Authentication-Results: spf=pass (sender IP is 192.0.2.10)
+ smtp.mailfrom=beispiel-inkasso.example; dkim=pass (signature was verified)
+ header.d=beispiel-inkasso.example;dmarc=pass action=none
+ header.from=beispiel-inkasso.example;compauth=pass reason=100
 From: Beispiel Inkasso GmbH <forderung@beispiel-inkasso.example>
 To: accounts@maxasp.example
 Subject: Aktenzeichen IK-26-77310 Zahlungsaufforderung

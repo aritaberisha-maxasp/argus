@@ -10,6 +10,7 @@ These rules come from the document understanding prototype (spikes/document_unde
 import re
 from dataclasses import dataclass
 
+from argus.sorting import sender
 from argus.sorting.config import SortingConfig
 from argus.sorting.models import Attachment, Category, CheckResult, EmailToSort
 
@@ -74,13 +75,6 @@ def normalise(name: str) -> str:
     return re.sub(r"[^a-zäöüß0-9]+", " ", name).strip()
 
 
-def _slug(name: str) -> str:
-    name = normalise(name)
-    for umlaut, plain in (("ä", "ae"), ("ö", "oe"), ("ü", "ue"), ("ß", "ss"), (" ", "-")):
-        name = name.replace(umlaut, plain)
-    return name
-
-
 @dataclass(frozen=True)
 class _Document:
     source: str  # "attachment 2" or "the email text", never a file name (NF-03)
@@ -99,20 +93,36 @@ def _read_document(source: str, text: str, own: str) -> _Document:
     return _Document(source, document_kind(text), issuer, names_us)
 
 
-def sender_kind(email: EmailToSort, config: SortingConfig) -> str:
-    """Who the sender claims to be. Checking that claim is a story of its own (#70)."""
-    address = email.sender_address.lower()
-    if address == config.invoicing_agent.lower():
-        return "invoicing_agent"
-    domain = address.rpartition("@")[2]
-    if domain == config.own_domain.lower():
-        return "internal"
-    for kind, names in (("known_vendor", config.vendors), ("known_customer", config.customers)):
-        for name in names:
-            short = normalise(name)
-            if short and (short in normalise(email.sender_name) or _slug(name) in domain):
-                return kind
-    return "unknown"
+def claimed_sender(address: str, config: SortingConfig) -> str:
+    """Who the From address says the sender is. Only the exact address of the invoicing agent and
+    the exact domains of known partners count: a domain that merely looks like one is unknown."""
+    address = address.strip().lower()
+    domain = sender.domain_of(address) if "@" in address else ""
+    if address == config.invoicing_agent.strip().lower():
+        return sender.INVOICING_AGENT
+    if domain and domain == config.own_domain.strip().lower():
+        return sender.INTERNAL
+    for kind, domains in (
+        (sender.KNOWN_VENDOR, config.vendor_domains),
+        (sender.KNOWN_CUSTOMER, config.customer_domains),
+    ):
+        if domain and domain in {sender.domain_of(d) for d in domains}:
+            return kind
+    return sender.UNKNOWN
+
+
+def check_sender(email: EmailToSort, config: SortingConfig) -> sender.SenderCheck:
+    """The sender counts as the invoicing agent or a known partner only when the email really
+    comes from that domain (ADR 0006 point 4, #70). Otherwise it counts as unknown."""
+    claimed = claimed_sender(email.sender_address, config)
+    authentication = sender.authenticate(email.sender_address, email.headers)
+    if claimed in sender.NEEDS_CHECK and not authentication.passed:
+        return sender.SenderCheck(claimed, sender.UNKNOWN, authentication)
+    # Mail inside the tenant often carries no DMARC result, so Max ASP's own domain is not
+    # checked. But when Exchange says DMARC fails for it, the email came from outside.
+    if claimed == sender.INTERNAL and authentication.dmarc_failed:
+        return sender.SenderCheck(claimed, sender.UNKNOWN, authentication)
+    return sender.SenderCheck(claimed, claimed, authentication)
 
 
 def _readable(attachment: Attachment) -> bool:
@@ -123,13 +133,17 @@ def _readable(attachment: Attachment) -> bool:
 
 def check_email(email: EmailToSort, config: SortingConfig) -> CheckResult:
     own = normalise(config.own_company)
-    sender = sender_kind(email, config)
+    who = check_sender(email, config)
+    sender_kind = who.treated_as
     subject = email.subject.lower()
     body = email.body.lower()
     words = subject + "\n" + body
 
     signs: dict[Category, list[str]] = {}
     doubts: list[str] = []
+    if who.failed_claim:
+        # Always a person, whatever else the email says (ADR 0006 points 4 and 7).
+        doubts.append(who.reason())
 
     def sign(category: Category, why: str) -> None:
         signs.setdefault(category, []).append(why)
@@ -150,7 +164,7 @@ def check_email(email: EmailToSort, config: SortingConfig) -> CheckResult:
     issued_by_us = any(d.issuer == own for d in invoices)
     for doc in invoices:
         if doc.issuer == own:
-            if sender == "invoicing_agent":
+            if sender_kind == sender.INVOICING_AGENT:
                 sign(Category.OUTGOING_INVOICE, f"{doc.source} is issued by {config.own_company}")
             else:
                 doubts.append(
@@ -176,29 +190,29 @@ def check_email(email: EmailToSort, config: SortingConfig) -> CheckResult:
     if AUTO_REPLY_SUBJECT.search(subject) or email.headers.get("auto-submitted", "no") != "no":
         sign(Category.OTHER, "automatic reply")
     if (
-        sender == "unknown"
+        sender_kind == sender.UNKNOWN
         and not email.attachments
         and LINK.search(body)
         and CLICK_TO_ACT.search(body)
     ):
         sign(Category.OTHER, "unknown sender asks to click a link and brings no document")
-    if sender == "internal":
+    if sender_kind == sender.INTERNAL:
         if invoices:
             doubts.append("an employee forwarded an invoice")
         else:
             sign(Category.OTHER, "internal email without an invoice")
-    if sender in ("known_vendor", "known_customer") and not documents:
+    if sender_kind in (sender.KNOWN_VENDOR, sender.KNOWN_CUSTOMER) and not documents:
         if not INVOICE_WORDS.search(words):
             sign(Category.OTHER, "general notice from a business partner, no invoice words")
         elif "?" in body:
             doubts.append("a business partner asks about an invoice")
 
     if doubts:
-        return CheckResult(None, tuple(doubts), issued_by_us)
+        return CheckResult(None, tuple(doubts), issued_by_us, who)
     if len(signs) > 1:
         named = " and ".join(sorted(signs))
-        return CheckResult(None, (f"signs for {named} in one email",), issued_by_us)
+        return CheckResult(None, (f"signs for {named} in one email",), issued_by_us, who)
     if not signs:
-        return CheckResult(None, ("no clear sign for any category",), issued_by_us)
+        return CheckResult(None, ("no clear sign for any category",), issued_by_us, who)
     [(category, why)] = signs.items()
-    return CheckResult(category, tuple(why), issued_by_us)
+    return CheckResult(category, tuple(why), issued_by_us, who)

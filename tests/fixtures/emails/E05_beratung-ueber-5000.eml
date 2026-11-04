@@ -1,3 +1,7 @@
+Authentication-Results: spf=pass (sender IP is 192.0.2.10)
+ smtp.mailfrom=beispiel-beratung.example; dkim=pass (signature was verified)
+ header.d=beispiel-beratung.example;dmarc=pass action=none
+ header.from=beispiel-beratung.example;compauth=pass reason=100
 From: Beispiel Beratung Partner mbB <office@beispiel-beratung.example>
 To: accounts@maxasp.example
 Subject: Rechnung BBP-2026-0318 Beratungsleistungen September

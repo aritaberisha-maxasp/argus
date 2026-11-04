@@ -53,6 +53,16 @@ class SortingConfig:
     own_domain: str  # Max ASP's email domain
     invoicing_agent: str  # the address the invoicing agent sends from (AR-01)
     own_company: str = "Max ASP GmbH"
-    vendors: tuple[str, ...] = ()  # names of the vendors in DATEV
-    customers: tuple[str, ...] = ()  # names of the customers in DATEV
+    # The email domains the vendors and customers in DATEV really send from, exactly as written
+    # in their From addresses. A domain that only looks like one of these never matches (#70).
+    vendor_domains: frozenset[str] = frozenset()
+    customer_domains: frozenset[str] = frozenset()
     thresholds: Thresholds = field(default_factory=Thresholds)
+
+    def __post_init__(self) -> None:
+        # An empty setting would make an email with no readable From address look like it
+        # claims to be the invoicing agent or someone at Max ASP.
+        if "@" not in self.invoicing_agent.strip():
+            raise ValueError("the invoicing agent must be a full email address")
+        if not self.own_domain.strip():
+            raise ValueError("Max ASP's own email domain must be set")

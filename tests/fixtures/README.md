@@ -8,7 +8,7 @@ Test data for ARGUS. Everything here is invented. See the [test strategy](../../
 |---|---|
 | `emails/` | 50 test emails as `.eml` files for AC-1, and `manifest.csv` with the expected outcome of each |
 | `documents/` | Every invoice and letter on its own, and `expected.json` with the data ARGUS should extract from each invoice (PR-01) |
-| `master-data/` | `vendors.csv` (Kreditoren), `customers.csv` (Debitoren), `approvers.csv` (the ARGUS approver table, AP-01, AP-06, PY-13) and `roles.csv` (who approves above EUR 5,000, who gets reminders and exceptions) |
+| `master-data/` | `vendors.csv` (Kreditoren), `customers.csv` (Debitoren), `sender-domains.csv` (the email domain each vendor and customer really sends from, #70), `approvers.csv` (the ARGUS approver table, AP-01, AP-06, PY-13) and `roles.csv` (who approves above EUR 5,000, who gets reminders and exceptions) |
 | `tools/` | `generate.py` builds everything above except `datev/`, `check.py` checks it |
 | `readings/` | What a document reader gets out of the two readable scans (E07, E28), made from the same rows the generator drew. The unreadable scan (E46) has none on purpose. The sorting tests still use them until the reader of #29 is hooked into the sweep |
 | `document-intelligence/` | The recorded Document Intelligence answer for every PDF and scan invoice and for the unreadable scan, keyed by SHA-256, in the format of the real service. Written by hand from `expected.json` with `tools/record_document_intelligence.py` until they can be recorded from Azure ([invoice reading](../../docs/design/invoice-reading.md)) |
@@ -26,6 +26,8 @@ Test data for ARGUS. Everything here is invented. See the [test strategy](../../
 | `uncertain` (deliberately ambiguous, IN-09) | `manual_review` | 7 |
 
 `manifest.csv` columns: `email_id`, `file`, `expected_category`, `expected_route`, `invoice_count` (cases ARGUS should create, IN-08), `documents` (IDs in `expected.json`), `flags`, `requirements`, `note`.
+
+Every email starts with the `Authentication-Results` header Exchange Online would write. SPF, DKIM and DMARC pass for the From domain on all of them except the phishing email (E34) and the fake invoice (E43), where they fail.
 
 Formats covered: PDF invoices, a scanned paper invoice (E07) and a scanned dunning letter (E28) as JPEG, an unreadable scan (E46), XRechnung (E08 incoming, E21 outgoing with a PDF copy), ZUGFeRD (E09) and an invoice written in the email body (E16).
 

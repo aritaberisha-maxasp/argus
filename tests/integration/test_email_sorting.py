@@ -7,6 +7,7 @@ NF-05. The check that all 50 fixture emails end in the route of the manifest is 
 """
 
 import logging
+import re
 from typing import Any
 
 import pytest
@@ -27,6 +28,7 @@ from argus.sorting import (
     RecordedModel,
     Route,
 )
+from standins.graph.app import create_app
 from tests.acceptance.intake import FixtureDocumentReader
 from tests.integration.test_reminder_forward import (
     FORWARD_TO,
@@ -35,6 +37,7 @@ from tests.integration.test_reminder_forward import (
     fixture_path,
     graph_for,
 )
+from tests.unit.intake.graph_helpers import TOKEN
 from tests.unit.sorting_helpers import MODEL_ANSWERS, decision_for, fixture_config
 
 INVOICE, REMINDER, OTHER, REVIEW = "E01", "E25", "E32", "E45"
@@ -140,9 +143,11 @@ def test_each_stored_email_is_sorted_routed_and_filed_in_one_sweep(app: Engine) 
             "check_category",
             "reasons",
             "evidence",
+            "sender",
             "raw_sha256",
             "raw_location",
         }
+        assert classified["details"]["sender"]["authenticated"] is True
 
 
 @pytest.mark.req("IN-09", "NF-01")
@@ -323,3 +328,51 @@ def test_the_logs_hold_no_sender_subject_or_message_id(
         read = sorting.read(fixture_path(email_id).read_bytes())
         for secret in (read.message_id, read.sender_address, read.subject):
             assert secret not in logged
+
+
+# #70: the sender check is kept with the email and in the audit log.
+
+SPOOFED = (
+    b"Authentication-Results: spf=pass (sender IP is 192.0.2.66) smtp.mailfrom=attacker.invalid;"
+    b"\n dkim=none (message not signed) header.d=none;dmarc=fail action=quarantine\n"
+    b" header.from=maxasp.example;compauth=fail reason=000\n"
+)
+
+
+@pytest.mark.req("AR-02", "IN-09", "NF-01")
+@pytest.mark.usefixtures("clean")
+def test_an_outgoing_invoice_from_a_fake_invoicing_agent_goes_to_review(app: Engine) -> None:
+    # E17 is a real outgoing invoice from the invoicing agent; here Exchange says it is not.
+    raw = fixture_path("E17").read_bytes()
+    raw = re.sub(rb"^Authentication-Results:.*?\n(?=\S)", SPOOFED, raw, count=1, flags=re.S)
+    assert b"dmarc=fail" in raw
+    fake = create_app(token=TOKEN, emails=[raw])
+    documents, sorting, graph = run(fake, CountingModel())
+
+    sweep(app, graph, DocumentArchive(documents), sorting)
+
+    with app.connect() as connection:
+        row = connection.execute(text("select id, route, classification from mailbox_email")).one()
+    record_id: int = row.id
+    route: str = row.route
+    stored: dict[str, Any] = row.classification
+    assert route == "manual_review"
+    expected = {
+        "claimed": "invoicing_agent",
+        "treated_as": "unknown",
+        "from_domain": "maxasp.example",
+        "authenticated": False,
+        "passed_by": None,
+        "dmarc_failed": True,
+        "results": [
+            "spf=pass attacker.invalid",
+            "dkim=none (not a domain)",
+            "dmarc=fail maxasp.example",
+        ],
+    }
+    assert stored["sender"] == expected
+    [classified] = events(app, record_id, "email_classified")
+    assert classified["details"]["sender"] == expected
+    assert "the sender claims to be the invoicing agent" in " ".join(
+        classified["details"]["reasons"]
+    )
