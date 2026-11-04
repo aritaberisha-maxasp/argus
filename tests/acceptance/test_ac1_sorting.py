@@ -7,10 +7,12 @@ expensive mistake (test strategy).
 """
 
 import pytest
+from sqlalchemy import Engine, text
 
 from argus.intake.filing import REMOVED_FOLDER
 from argus.sorting import Route
 from tests.acceptance.intake import IntakeRun
+from tests.unit.sorting_helpers import manifest
 
 INVOICES = {"incoming_invoice", "outgoing_invoice"}
 
@@ -47,3 +49,25 @@ def test_the_sweep_sorts_every_email_on_its_own(intake_run: IntakeRun) -> None:
     """One sweep takes every email past the step stored, with no test stand in (#91)."""
     stuck = [i for i, step in intake_run.steps_after_first_sweep.items() if step == "stored"]
     assert stuck == []
+
+
+@pytest.mark.req("AC-1", "IN-08")
+def test_every_incoming_invoice_email_opens_one_case_per_invoice(
+    app: Engine, intake_run: IntakeRun
+) -> None:
+    """Splitting the invoices into cases (#30) sends no invoice email to manual review: each
+    one opens as many cases as the manifest says, E14 three of them."""
+    counts = {e["email_id"]: int(e["invoice_count"]) for e in manifest()}
+    with app.connect() as connection:
+        opened: dict[int, int] = dict(
+            connection.execute(
+                text(
+                    "select source_email_id, count(*) from invoice_case"
+                    " where source_email_id = any(:ids) group by source_email_id"
+                ),
+                {"ids": [e.record_id for e in intake_run.emails]},
+            ).all()
+        )
+    for e in intake_run.emails:
+        expected = counts[e.fixture_id] if e.decision.route is Route.INVOICE_PROCESSING else 0
+        assert opened.get(e.record_id, 0) == expected, e.fixture_id

@@ -7,6 +7,7 @@ with the reason. Invoices go on to invoice processing, outgoing invoices to the 
 
 import logging
 import re
+from dataclasses import replace
 
 from argus.sorting.checks import check_email, normalise
 from argus.sorting.config import SortingConfig
@@ -73,6 +74,7 @@ def sort_email(email: EmailToSort, model: LanguageModel, config: SortingConfig) 
             quotes_only(answer.evidence, email),
             sender=checks.sender,
         )
+        decision = replace(decision, model_invoices=len(answer.invoices))
     else:
         decision = SortingDecision(
             route=ROUTE_FOR[answer.category],
@@ -83,6 +85,7 @@ def sort_email(email: EmailToSort, model: LanguageModel, config: SortingConfig) 
             check_category=checks.category,
             evidence=quotes_only(answer.evidence, email),
             sender=checks.sender,
+            model_invoices=len(answer.invoices),
         )
     # No Message-ID in the log: it names the sender's domain. The caller logs its own record ID.
     log.debug("Email sorted: %s", decision.route)

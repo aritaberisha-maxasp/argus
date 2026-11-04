@@ -38,6 +38,7 @@ from argus.reading.fields import (
 )
 from argus.reading.language_model import MODEL_FIELDS, FieldModel
 from argus.reading.pages import Analysis, DocumentNotReadable, DocumentReader, Page
+from argus.reading.split import split_file
 from argus.reading.text_rules import (
     CREDIT_KINDS,
     INVOICE_KINDS,
@@ -110,6 +111,43 @@ def read_attachment(
     except DocumentNotReadable as error:
         return _unreadable(document, reader.name, str(error))
     return build_reading(document, reader.name, analysis, model, settings or ReadingSettings())
+
+
+@dataclass(frozen=True)
+class FileInvoices:
+    """What one attachment holds, split into its invoices page by page (#30, IN-08)."""
+
+    readings: tuple[tuple[tuple[int, ...], InvoiceReading], ...]  # (pages, reading) per part
+    doubts: tuple[str, ...] = ()  # why the file cannot be split safely
+
+
+def read_attachment_invoices(
+    position: int,
+    data: bytes,
+    reader: DocumentReader,
+    model: FieldModel | None = None,
+    settings: ReadingSettings | None = None,
+) -> FileInvoices | None:
+    """Read attachment number ``position`` like :func:`read_attachment`, but one reading per
+    invoice in the file: a PDF with two invoices on separate pages gives two readings, each with
+    the pages it stands on. Returns None for a file that is not a PDF or an image."""
+    document = f"attachment {position}"
+    content_type = sniff_type(data)
+    if content_type is None:
+        return None
+    try:
+        analysis = reader.read(data, content_type)
+    except DocumentNotReadable as error:
+        return FileInvoices((((), _unreadable(document, reader.name, str(error))),))
+    settings = settings or ReadingSettings()
+    split = split_file(analysis, document)
+    return FileInvoices(
+        tuple(
+            (part.pages, build_reading(document, reader.name, part.analysis, model, settings))
+            for part in split.parts
+        ),
+        split.doubts,
+    )
 
 
 def read_body(

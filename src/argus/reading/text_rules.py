@@ -245,6 +245,16 @@ def invoice_numbers(pages: tuple[Page, ...]) -> list[str]:
     return numbers
 
 
+def vat_ids(page: Page) -> list[str]:
+    """Every VAT ID a page states after a VAT ID label, cleaned, in order."""
+    found: list[str] = []
+    for m in _LABELS["vendor_vat_id"].finditer(page.text):
+        vat_id = clean_vat_id(m[1])
+        if vat_id not in found:
+            found.append(vat_id)
+    return found
+
+
 def vat_rates(pages: tuple[Page, ...]) -> list[str]:
     """Every VAT rate with an amount line. More than one means the invoice has several rates."""
     rates: list[str] = []

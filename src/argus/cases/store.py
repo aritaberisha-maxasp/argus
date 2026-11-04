@@ -149,8 +149,12 @@ def create_case(
     currency: str | None = None,
     duplicate_key: str | None = None,
     direct_debit: bool = False,
+    case_key: str | None = None,
 ) -> int:
-    """Create a case in Received. The database logs ``case_created``. Returns the case ID."""
+    """Create a case in Received. The database logs ``case_created``. Returns the case ID.
+
+    ``case_key`` names one invoice of the source email (issuer plus number, #30); the database
+    refuses a second case with the same key for the same email."""
     if gross_cents is not None and (
         isinstance(gross_cents, bool) or not isinstance(gross_cents, int)
     ):
@@ -159,9 +163,9 @@ def create_case(
         connection,
         """
         insert into invoice_case (kind, source_email_id, partner_account, document_number,
-                                  gross_minor, currency, duplicate_key, direct_debit)
+                                  gross_minor, currency, duplicate_key, direct_debit, case_key)
         values (:kind, :source_email_id, :partner_account, :document_number,
-                :gross_minor, :currency, :duplicate_key, :direct_debit)
+                :gross_minor, :currency, :duplicate_key, :direct_debit, :case_key)
         returning id
         """,
         {
@@ -173,6 +177,7 @@ def create_case(
             "currency": currency,
             "duplicate_key": duplicate_key,
             "direct_debit": direct_debit,
+            "case_key": case_key,
         },
     )
     case_id: int = result.scalar_one()

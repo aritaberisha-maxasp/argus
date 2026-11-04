@@ -140,6 +140,7 @@ def test_each_stored_email_is_sorted_routed_and_filed_in_one_sweep(app: Engine) 
             "category",
             "model_category",
             "model_confidence",
+            "model_invoices",
             "check_category",
             "reasons",
             "evidence",
