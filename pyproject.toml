@@ -10,6 +10,8 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.14,<2",
+    # the app signs in to PostgreSQL in Azure with its managed identity (#81)
+    "azure-identity>=1.19,<2",
     "azure-storage-blob>=12.20,<13",
     "fastapi>=0.115,<1",
     "holidays>=0.60,<1",
@@ -21,6 +23,8 @@ dependencies = [
     "sqlalchemy>=2.0.36,<3",
     # zoneinfo needs the IANA time zone data on hosts that do not ship it
     "tzdata>=2024.1",
+    # serves the web app in its container (Dockerfile, #81) and the fake DATEV locally
+    "uvicorn>=0.32,<1",
 ]
 
 [project.optional-dependencies]
@@ -28,9 +32,10 @@ dev = [
     "mypy>=1.13,<2",
     "pytest>=8.3,<9",
     "pytest-cov>=6.0,<7",
+    # reads the workflow files for the pipeline rules check (tools/check_pipeline.py, #81)
+    "pyyaml>=6.0,<7",
     "ruff>=0.8,<1",
-    # serves the fake DATEV locally (docs/design/datev-gateway.md)
-    "uvicorn>=0.32,<1",
+    "types-pyyaml>=6.0,<7",
 ]
 
 [tool.hatch.build.targets.wheel]

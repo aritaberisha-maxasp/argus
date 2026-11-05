@@ -241,6 +241,32 @@ def test_an_ai_region_outside_the_eu_fails(tmp_path: Path) -> None:
     assert any("aiLocation" in p for p in run(tmp_path, main))
 
 
+@pytest.mark.req("NF-03")
+@pytest.mark.parametrize("module_name", ["documents", "apps"])
+def test_the_ai_region_on_a_module_without_ai_accounts_fails(
+    tmp_path: Path, module_name: str
+) -> None:
+    main = good_main()
+    main["resources"][module_name]["properties"]["parameters"]["location"]["value"] = (
+        "[parameters('aiLocation')]"
+    )
+    assert any(f"module {module_name} gets aiLocation" in p for p in run(tmp_path, main))
+
+
+@pytest.mark.req("NF-03")
+def test_the_ai_module_may_not_place_anything_else_in_the_ai_region(tmp_path: Path) -> None:
+    main = good_main()
+    main["resources"]["ai"]["properties"]["template"]["resources"].append(
+        {
+            "type": "Microsoft.Storage/storageAccounts",
+            "name": "stsidecar",
+            "location": "[parameters('location')]",
+        }
+    )
+    problems = run(tmp_path, main)
+    assert any("also places Microsoft.Storage/storageAccounts" in p for p in problems)
+
+
 @pytest.mark.req("NF-01")
 def test_the_retention_lock_on_by_default_fails(tmp_path: Path) -> None:
     main = good_main()

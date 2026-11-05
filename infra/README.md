@@ -2,7 +2,7 @@
 
 This folder describes everything ARGUS needs in Azure as code (Bicep). It follows ADR 0001 and ADR 0006 and covers issue #65.
 
-Arita decided on 28 Oct 2026 that deployments run from CI. The pipeline in #81 applies `main.bicep` with `main.bicepparam` on every merge to `main`. Only the one time setup below and the retention lock switch stay Arita's steps.
+Arita decided on 28 Oct 2026 that deployments run from CI. The pipeline from #81 (`.github/workflows/deploy.yml`) applies `main.bicep` with `main.bicepparam` on every merge to `main`, and every PR that changes this folder shows a preview of what would change. Only the one time setup below and the retention lock switch stay Arita's steps.
 
 ## What gets created
 
@@ -18,13 +18,13 @@ Everything sits in ARGUS's own resource group in Germany West Central.
 | PostgreSQL Flexible Server 16, smallest burstable size, 35 days of backups | `modules/database.bicep` | Case data and audit log. Entra ID sign in only, no password exists. |
 | Azure OpenAI with an EU model deployment | `modules/ai.bicep` | Sorting emails (ADR 0006). |
 | Azure AI Document Intelligence | `modules/ai.bicep` | Reading PDFs and scans (ADR 0006). |
-| Container Apps environment and the web app | `modules/apps.bicep` | Runs ARGUS. The scheduled jobs from ADR 0001 join this environment as each job story adds its command. |
+| Container Apps environment and the web app | `modules/apps.bicep` | Runs ARGUS. The app signs in to the database as its own Entra role and works as `argus_app`. The scheduled jobs from ADR 0001 join this environment as each job story adds its command. |
 | Azure Policy for the resource group | `policy/eu-only.bicep` | Refuses resources outside the allowed regions and any Global model deployment type. |
 
 ## No secrets in the code
 
 - The storage connection string and the two AI keys are written straight from Azure into Key Vault by the templates. They never show up in the code, a parameter or a deployment output.
-- The database has no password at all. The app signs in with its managed identity.
+- The database has no password at all. The app signs in with a token from its managed identity, and the pipeline runs the migrations with a token of the deploy identity.
 - The Microsoft Graph and Wise secrets are the only ones Arita puts into Key Vault by hand. Once a secret is in the vault, add it to `manualSecrets` in `main.bicepparam` so the app gets it, for example `{ secretName: 'wise-api-token', envName: 'WISE_API_TOKEN' }`.
 - The app reads every secret as a Key Vault reference through its managed identity (`src/argus/secrets.py`).
 
@@ -51,13 +51,13 @@ python tools/check_infra.py build/infra
 
 ## One time setup (Arita)
 
-These need rights the pipeline must never have. The full runbook comes with #81 in `docs/operations/`.
+These need rights the pipeline must never have. The full runbook with every command is [docs/operations/deploy.md](../docs/operations/deploy.md). In short:
 
-1. Create the resource group, for example `rg-argus`, in Germany West Central in the subscription that pays for Fabric.
-2. Deploy the EU policy once:
+1. Create the resource group `rg-argus` in Germany West Central, and `rg-argus-cicd` for the two pipeline identities.
+2. Deploy the EU policy once, and assign the built in policy that keeps Key Vault on Azure roles:
    `az deployment sub create --location germanywestcentral --template-file infra/policy/eu-only.bicep --parameters resourceGroupName=rg-argus`
-3. Set up the deploy identity for #81. It needs Contributor on the resource group, plus "Role Based Access Control Administrator" on the resource group limited to the two roles the templates hand out (AcrPull and Key Vault Secrets User). It gets no right to read Key Vault secrets and no right to change policies.
-4. After the first deploy, put a delete lock on the storage account for originals and on the database server, so nobody can delete either one while the retention lock is still off. The deploy identity cannot create or remove locks, which is why this stays Arita's step. The account and server names are in the deployment outputs `documentsAccountName` and `databaseHost`.
+3. Create the app identity `id-argus-app`, then the deploy and preview identities with their GitHub trust. The deploy identity gets Contributor on `rg-argus`, plus "Role Based Access Control Administrator" limited to the two roles the templates hand out (AcrPull and Key Vault Secrets User) and to the app identity. It gets no right to read Key Vault secrets and no right to change policies. The preview identity may only read and ask for a what if.
+4. After the first deploy, put a delete lock on the storage account for originals and on the database server, so nobody can delete either one while the retention lock is still off. The deploy identity cannot create or remove locks, which is why this stays Arita's step. The account and server names are in the deployment outputs `documentsAccountName` and `databaseServerName`.
    `az lock create --name argus-keep --lock-type CanNotDelete --resource-group rg-argus --resource-type Microsoft.Storage/storageAccounts --resource-name <documents account>`
    `az lock create --name argus-keep --lock-type CanNotDelete --resource-group rg-argus --resource-type Microsoft.DBforPostgreSQL/flexibleServers --resource-name <database server>`
 5. After the first deploy, put the Microsoft Graph and Wise secrets into Key Vault.

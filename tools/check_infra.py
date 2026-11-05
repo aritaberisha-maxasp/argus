@@ -39,7 +39,9 @@ EU_REGIONS = frozenset(
     }
 )
 EU_DEPLOYMENT_SKUS = frozenset({"DataZoneStandard", "Standard"})
-LOCATION_EXPRESSIONS = frozenset({"[parameters('location')]", "[parameters('aiLocation')]"})
+AI_LOCATION = "[parameters('aiLocation')]"
+LOCATION_EXPRESSIONS = frozenset({"[parameters('location')]", AI_LOCATION})
+AI_ACCOUNT = "Microsoft.CognitiveServices/accounts"
 LOCK_PARAMETER = "retentionLocked"
 PERIOD_PARAMETER = "retentionDays"
 # 10 years from the end of the calendar year a file arrives in, plus the longest run to year
@@ -104,6 +106,25 @@ def sku_lists(value: Any) -> Iterator[str]:
             yield from sku_lists(item)
 
 
+def ai_location_problems(module: dict[str, Any]) -> list[str]:
+    """aiLocation may only place the AI accounts (ADR 0006). Everything else stays in the home
+    region, and the Azure Policy alone would not catch it, since it allows every EU AI region
+    (QA on PR 100, picked up in #81)."""
+    name = module.get("name", "?")
+    nested = module.get("properties", {}).get("template")
+    placed = {
+        resource.get("type")
+        for resource in resources(nested if isinstance(nested, dict) else {})
+        if "location" in resource
+    }
+    if AI_ACCOUNT not in placed:
+        return [f"module {name} gets aiLocation but creates no AI account"]
+    others = sorted(str(kind) for kind in placed - {AI_ACCOUNT})
+    if others:
+        return [f"module {name} gets aiLocation but also places {', '.join(others)}"]
+    return []
+
+
 def location_problems(main: dict[str, Any]) -> list[str]:
     problems = []
     location = main.get("parameters", {}).get("location", {})
@@ -121,6 +142,8 @@ def location_problems(main: dict[str, Any]) -> list[str]:
             given = resource.get("properties", {}).get("parameters", {}).get("location")
             if given is not None and given.get("value") not in LOCATION_EXPRESSIONS:
                 problems.append(f"module {name} gets a location that is not a region parameter")
+            elif given is not None and given.get("value") == AI_LOCATION:
+                problems.extend(ai_location_problems(resource))
         elif "location" in resource and resource["location"] != "[parameters('location')]":
             problems.append(f"resource {name} has a fixed location {resource['location']!r}")
     return problems
