@@ -44,7 +44,7 @@ ADR 0006 point 7 lists situations where ARGUS never decides on its own, however 
 | Pro forma | `pro_forma` | a document's title is pro forma | before the model |
 | Unreadable scan | `unreadable_document` | an attachment gives almost no text, or the reader cannot read it | before the model, and again when the invoices are read |
 | Invoice and reminder in one email | `invoice_and_reminder` | an invoice and reminder signs in the same email | before the model |
-| Question from a customer or vendor | `question` | no document, invoice words and a question mark, from a known partner, or from an unknown sender when nothing else marks the email as a newsletter or reminder | before the model |
+| Question from a customer or vendor | `question` | no document, invoice words and a question mark outside any link, from a known partner, or from an unknown sender when nothing else marks the email as a newsletter or reminder | before the model |
 | Failed plausibility check | `failed_plausibility` | one of the checks below fails | after the model, on the read invoice data |
 | PDF disagrees with its XML | `pdf_disagrees_with_xml` | the PDF copy states another invoice number, total or IBAN than the e-invoice | after the model |
 | E-invoice that cannot be read safely | `einvoice_unreadable` | the XML is refused (a DTD, a broken amount, too large and so on) | after the model |
@@ -57,7 +57,7 @@ ADR 0006 point 7 lists situations where ARGUS never decides on its own, however 
 - the VAT amount matches the VAT rate, within two cents, because vendors who round VAT per line can be a cent or two off,
 - the IBAN on the invoice has valid check digits,
 - the vendor's VAT ID has the format of its country (EU, Northern Ireland, United Kingdom, Switzerland, Norway; any other prefix fails),
-- the invoice is addressed to Max ASP (PR-03).
+- the invoice is addressed to Max ASP (PR-03). Only the recipient line before its first comma counts, labels in front such as "z. Hd." or "Bill to:" are dropped, and a department after the name ("Max ASP GmbH Buchhaltung") is fine. Another company that only mentions Max ASP later in the line fails. The name comes from `SortingConfig.own_company`.
 
 A value ARGUS could not read is not checked here: the reading already flags it for a person and the §14 UStG check (#32) names it as missing. The reasons name amounts but never the IBAN. When any check fails, the email goes to manual review and no case is opened from it.
 

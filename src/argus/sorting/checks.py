@@ -32,6 +32,7 @@ AUTO_REPLY_SUBJECT = re.compile(
     r"^(automatische antwort|auto(matic)?[ -]?reply|out of office|abwesenheit|abwesenheitsnotiz)"
 )
 LINK = re.compile(r"https?://")
+URL = re.compile(r"https?://\S+")
 CLICK_TO_ACT = re.compile(
     r"click here|klicken sie|bestätigen sie|confirm your|verify your|view and pay|login"
 )
@@ -208,7 +209,7 @@ def check_email(email: EmailToSort, config: SortingConfig) -> CheckResult:
     if (
         not documents
         and invoice_words
-        and "?" in body
+        and "?" in URL.sub(" ", body)  # a "?" inside a link is no question (review of PR 108)
         and (partner or (sender_kind == sender.UNKNOWN and not signs))
     ):
         who_asks = "a business partner" if partner else "a sender not known yet"

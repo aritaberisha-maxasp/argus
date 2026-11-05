@@ -44,6 +44,7 @@ from argus.reading.pages import DocumentReader
 from argus.reading.plausibility import check_plausible
 from argus.reading.text_rules import CREDIT_KINDS, INVOICE_KINDS, clean_vat_id
 from argus.sorting.checks import normalise
+from argus.sorting.config import OWN_COMPANY
 from argus.sorting.gates import Gate, GateHit
 from argus.sorting.models import Route, SortingDecision
 
@@ -120,7 +121,9 @@ def _position(document: str) -> int:
     return int(found[1])
 
 
-def find_invoices(raw: bytes, invoicing: Invoicing) -> EmailInvoices:
+def find_invoices(
+    raw: bytes, invoicing: Invoicing, own_company: str = OWN_COMPANY
+) -> EmailInvoices:
     """Every invoice in the email, read page by page. Calls the reader and the model, so never
     call it inside a unit of work. Raises ``ReaderUnavailable`` or ``ModelUnavailable`` when a
     service cannot be reached; the email then stays where it is and the next sweep tries again."""
@@ -203,7 +206,7 @@ def find_invoices(raw: bytes, invoicing: Invoicing) -> EmailInvoices:
             continue
         keys.append(key)
         # The deterministic checks after the model (ADR 0006 point 5): a failed one is a gate.
-        for hit in check_plausible(reading, where):
+        for hit in check_plausible(reading, where, own_company):
             gate(hit)
         kind = (
             CaseKind.INCOMING_CREDIT_NOTE

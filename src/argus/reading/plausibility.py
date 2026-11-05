@@ -23,9 +23,9 @@ from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from argus.reading.fields import Flag, InvoiceReading
 from argus.reading.text_rules import clean_vat_id, iban_valid
 from argus.sorting.checks import normalise
+from argus.sorting.config import OWN_COMPANY
 from argus.sorting.gates import Gate, GateHit
 
-OWN_COMPANY = "Max ASP GmbH"
 CENT = Decimal("0.01")
 VAT_TOLERANCE = Decimal("0.02")
 
@@ -96,6 +96,24 @@ def _text(reading: InvoiceReading, name: str) -> str | None:
     return str(found.value)
 
 
+# Words that may stand in front of the recipient's name: "z. Hd. Max ASP GmbH", "Bill to: ...".
+# They are matched on the normalised line, where punctuation has become spaces.
+RECIPIENT_LABELS = re.compile(
+    r"^(?:(?:z\s*hd|zu h(?:ä|ae)nden|an|to|attn|attention|bill to|invoice to|rechnung an"
+    r"|rechnungsempf(?:ä|ae)nger|kunde|customer|empf(?:ä|ae)nger|recipient)\s+)+"
+)
+
+
+def addressed_to_us(recipient: str, own_company: str) -> bool:
+    """Whether the recipient line names Max ASP. Only the part before the first comma counts
+    (the address often follows it), leading labels are dropped, and a department after the name
+    ("Max ASP GmbH Buchhaltung") is fine. Another company that merely mentions Max ASP later in
+    the line ("Muster AG c/o Max ASP GmbH") is not."""
+    own = normalise(own_company)
+    name = RECIPIENT_LABELS.sub("", normalise(recipient.split(",", 1)[0]))
+    return name == own or name.startswith(own + " ")
+
+
 def check_plausible(
     reading: InvoiceReading, where: str, own_company: str = OWN_COMPANY
 ) -> tuple[GateHit, ...]:
@@ -133,6 +151,6 @@ def check_plausible(
             Gate.FAILED_PLAUSIBILITY, "the vendor's VAT ID does not have the format of its country"
         )
     recipient = _text(reading, "recipient_name")
-    if recipient is not None and normalise(recipient) != normalise(own_company):
+    if recipient is not None and not addressed_to_us(recipient, own_company):
         fail(Gate.ADDRESSED_TO_SOMEONE_ELSE, f"it is addressed to someone else, not {own_company}")
     return tuple(hits)

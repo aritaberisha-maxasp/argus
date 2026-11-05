@@ -184,7 +184,7 @@ def classify(engine: Engine, sorting: Sorting, record: EmailRecord) -> SortingDe
     invoices = None
     if decision.route is Route.INVOICE_PROCESSING and sorting.invoicing is not None:
         # Also outside any transaction: the reader and the model may be called (#30).
-        invoices = find_invoices(raw, sorting.invoicing)
+        invoices = find_invoices(raw, sorting.invoicing, sorting.config.own_company)
         decision = replace(decision, invoices_found=len(invoices.invoices))
         doubts = doubts_about(invoices, decision.model_invoices)
         if doubts:

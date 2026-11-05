@@ -171,6 +171,15 @@ def test_a_newsletter_with_invoice_words_and_a_link_stays_other() -> None:
 
 
 @pytest.mark.req("IN-09")
+def test_a_question_mark_inside_the_link_is_no_question() -> None:
+    email = link_only(
+        "billing@portal.example",
+        "Your invoice is ready. Click here to view and pay: https://portal.example/pay?id=88812",
+    )
+    assert [hit.gate for hit in check_email(email, CONFIG).gates] == [Gate.NO_DOCUMENT]
+
+
+@pytest.mark.req("IN-09")
 def test_a_question_about_an_invoice_from_someone_not_known_yet_goes_to_review() -> None:
     email = link_only(
         "einkauf@neukunde.example",
@@ -410,6 +419,36 @@ def test_an_invoice_to_someone_else_fires_the_recipient_gate() -> None:
     )
     # The legal form or spelling of Max ASP's own name does not matter.
     assert check_plausible(reading(**{**GOOD, "recipient_name": "MAX ASP GmbH."}), "x") == ()
+
+
+@pytest.mark.req("PR-03")
+@pytest.mark.parametrize(
+    "recipient",
+    ["Max ASP GmbH Buchhaltung", "z. Hd. Max ASP GmbH", "Max ASP GmbH, Testallee 1, Musterstadt",
+     "Bill to: Max ASP GmbH", "Rechnungsempfänger: Max ASP GmbH, Buchhaltung"],
+)  # fmt: skip
+def test_a_recipient_line_with_a_label_department_or_address_is_still_max_asp(
+    recipient: str,
+) -> None:
+    assert check_plausible(reading(**{**GOOD, "recipient_name": recipient}), "x") == ()
+
+
+@pytest.mark.req("PR-03")
+@pytest.mark.parametrize(
+    "recipient",
+    ["Max Muster AG", "Muster AG c/o Max ASP GmbH", "Max ASPEN GmbH",
+     "Beispiel Handel GmbH, Max ASP"],
+)  # fmt: skip
+def test_another_company_on_the_recipient_line_still_fires_the_gate(recipient: str) -> None:
+    [hit] = check_plausible(reading(**{**GOOD, "recipient_name": recipient}), "x")
+    assert hit.gate is Gate.ADDRESSED_TO_SOMEONE_ELSE
+
+
+@pytest.mark.req("PR-03")
+def test_the_recipient_check_uses_the_company_name_it_is_given() -> None:
+    values = reading(**{**GOOD, "recipient_name": "Beispiel Handel GmbH"})
+    assert check_plausible(values, "x", own_company="Beispiel Handel GmbH") == ()
+    assert check_plausible(values, "x") != ()
 
 
 @pytest.mark.req("PR-03")
