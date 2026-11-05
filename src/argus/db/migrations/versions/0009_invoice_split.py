@@ -15,11 +15,11 @@ attachments or as several invoices in one PDF. Each becomes its own case:
   ``invoice_read`` with the IDs, the pages, the reader, the kind and the names of the flagged
   fields, never a value.
 
-The number 0008 is taken by #83 (PR 102). Whichever of the two lands second follows the other,
-so the chain stays one line, as agreed on #91.
+The number 0008 is taken by #83 (PR 102), which merged first, so this migration follows 0008
+and the chain stays one line, as agreed on #91.
 
 Revision ID: 0009
-Revises: 0005
+Revises: 0008
 Create Date: 2026-11-04
 """
 
@@ -28,7 +28,7 @@ from alembic import op
 from argus.db import run_script
 
 revision = "0009"
-down_revision = "0005"
+down_revision = "0008"
 branch_labels = None
 depends_on = None
 
