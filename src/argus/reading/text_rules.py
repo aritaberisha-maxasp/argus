@@ -14,7 +14,10 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from argus.reading.pages import Page
-from argus.vat_ids import VAT_ID_LABEL, VAT_LINE, clean_vat_id, states_only
+from argus.vat_ids import VAT_ID_LABEL, VAT_LINE, states_only
+
+# Still importable from here, so code written before #106 keeps working.
+from argus.vat_ids import clean_vat_id as clean_vat_id
 
 # ------------------------------------------------------------------ document kind
 
