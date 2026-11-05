@@ -17,7 +17,7 @@ import pytest
 from sqlalchemy import Connection, Engine, text
 
 import argus.intake.duplicates as duplicates
-from argus.cases.model import Actor, CaseKind, CaseStatus, ExceptionReason
+from argus.cases.model import Actor, CaseKind, CaseStatus, ExceptionReason, Outcome
 from argus.cases.store import (
     CaseRuleBroken,
     DuplicateRefused,
@@ -26,6 +26,7 @@ from argus.cases.store import (
     get_case,
     move_case,
     open_exception,
+    resolve_exception,
     unit_of_work,
 )
 from argus.intake.duplicates import duplicate_key, flag_if_duplicate, resolve_duplicate
@@ -410,4 +411,175 @@ def test_only_a_duplicate_exception_can_be_resolved_as_one(app: Engine) -> None:
         )
 
     with pytest.raises(ValueError, match="not a duplicate"), unit_of_work(app, CLERK) as db:
+        resolve_duplicate(db, exception_id, confirmed=True)
+
+
+# Review of PR 109: no approval without a key, and a corrected amount clears the key.
+
+
+def walk_to_approval(app: Engine, case_id: int) -> None:
+    with unit_of_work(app, INTAKE) as db:
+        assert move_case(db, case_id, expected=CaseStatus.RECEIVED, to=CaseStatus.AWAITING_APPROVAL)
+
+
+@pytest.mark.req("IN-10")
+@pytest.mark.parametrize("kind", [CaseKind.INCOMING_INVOICE, CaseKind.INCOMING_CREDIT_NOTE])
+def test_a_case_without_a_duplicate_key_is_not_sent_for_approval(
+    app: Engine, kind: CaseKind
+) -> None:
+    case_id, _ = invoice(app, f"{issuer()}|RE-90", gross_cents=None, kind=kind)
+
+    with pytest.raises(CaseRuleBroken, match="no duplicate key"):
+        walk_to_approval(app, case_id)
+    assert row_of(app, case_id)["status"] == CaseStatus.RECEIVED
+
+
+@pytest.mark.req("IN-10")
+def test_a_copy_whose_amount_is_confirmed_later_cannot_reach_approval_unchecked(
+    app: Engine,
+) -> None:
+    """The reviewer's case: copy A has a flagged amount, copy B is clean and takes the key,
+    then a person confirms A's amount. A must be checked before approval and is then flagged."""
+    key = f"{issuer()}|RE-91"
+    copy_a, _ = invoice(app, key, gross_cents=None)
+    copy_b, _ = invoice(app, key)
+    with unit_of_work(app, CLERK) as db:
+        change_case(db, copy_a, gross_cents=11900)
+
+    with pytest.raises(CaseRuleBroken, match="no duplicate key"):
+        walk_to_approval(app, copy_a)
+
+    with unit_of_work(app, INTAKE) as db:
+        assert flag_if_duplicate(db, copy_a) == copy_b
+    assert row_of(app, copy_a)["status"] == CaseStatus.EXCEPTION
+
+
+@pytest.mark.req("IN-10")
+@pytest.mark.parametrize(
+    "correction",
+    [{"gross_cents": 11900}, {"currency": "CHF"}, {"document_number": "RE-93"}],
+    ids=["amount", "currency", "number"],
+)
+def test_a_correction_clears_the_key_so_the_case_is_checked_again(
+    app: Engine, correction: dict[str, Any]
+) -> None:
+    case_id, _ = invoice(app, f"{issuer()}|RE-92", gross_cents=10000)
+    assert row_of(app, case_id)["duplicate_key"] is not None
+
+    with unit_of_work(app, CLERK) as db:
+        change_case(db, case_id, **correction)
+    assert row_of(app, case_id)["duplicate_key"] is None
+    with pytest.raises(CaseRuleBroken, match="no duplicate key"):
+        walk_to_approval(app, case_id)
+
+    with unit_of_work(app, INTAKE) as db:
+        assert flag_if_duplicate(db, case_id) is None
+    walk_to_approval(app, case_id)
+
+
+@pytest.mark.req("IN-10")
+def test_a_copy_at_the_corrected_amount_is_caught(app: Engine) -> None:
+    """A first copy read as 100.00 EUR and corrected to 119.00 EUR no longer keeps the stale
+    key, so a second copy at 119.00 EUR is flagged against it."""
+    key = f"{issuer()}|RE-94"
+    first_id, _ = invoice(app, key, gross_cents=10000)
+    with unit_of_work(app, CLERK) as db:
+        change_case(db, first_id, gross_cents=11900)
+        flag_if_duplicate(db, first_id)
+    assert row_of(app, first_id)["duplicate_key"] == duplicate_key(key, 11900, "EUR")
+
+    _, first = invoice(app, key, gross_cents=11900)
+    assert first == first_id
+
+
+@pytest.mark.req("IN-10")
+def test_an_approved_case_whose_key_is_cleared_cannot_be_approved_again_unchecked(
+    app: Engine,
+) -> None:
+    case_id, _ = invoice(app, f"{issuer()}|RE-95")
+    walk_to_approval(app, case_id)
+    with unit_of_work(app, CLERK) as db:
+        change_case(db, case_id, gross_cents=12000)
+
+    with (
+        pytest.raises(CaseRuleBroken, match="no duplicate key"),
+        unit_of_work(app, Actor.user("approver-entra-id")) as db,
+    ):
+        move_case(db, case_id, expected=CaseStatus.AWAITING_APPROVAL, to=CaseStatus.APPROVED)
+
+
+@pytest.mark.req("IN-10")
+def test_a_cleared_case_whose_amount_changes_is_checked_again(app: Engine) -> None:
+    key = f"{issuer()}|RE-96"
+    first_id, _ = invoice(app, key)
+    second_id, _ = invoice(app, key, gross_cents=12000)
+    with unit_of_work(app, CLERK) as db:
+        change_case(db, second_id, gross_cents=11900)
+        assert flag_if_duplicate(db, second_id) == first_id
+    [exception] = duplicate_exceptions(app, second_id)
+    with unit_of_work(app, CLERK) as db:
+        resolve_duplicate(db, exception["id"], confirmed=False, resolution="credit and rebill")
+        # Cleared: it holds its own key and is no longer reported as a duplicate.
+        assert flag_if_duplicate(db, second_id) is None
+        change_case(db, second_id, gross_cents=12000)
+        change_case(db, second_id, gross_cents=11900)
+        # Same amount as the first again: back to the queue, the first link stays.
+        assert flag_if_duplicate(db, second_id) == first_id
+    assert row_of(app, second_id)["duplicate_of"] == first_id
+    assert len(duplicate_exceptions(app, second_id)) == 2
+
+
+# Compliance on PR 109: only a person decides "not a duplicate", and with a reason.
+
+
+def flagged(app: Engine) -> int:
+    key = f"{issuer()}|RE-97"
+    invoice(app, key)
+    second_id, _ = invoice(app, key)
+    [exception] = duplicate_exceptions(app, second_id)
+    return int(exception["id"])
+
+
+@pytest.mark.req("IN-10", "NF-01")
+def test_argus_itself_cannot_decide_that_a_case_is_not_a_duplicate(app: Engine) -> None:
+    exception_id = flagged(app)
+
+    with (
+        pytest.raises(CaseRuleBroken, match="only a person"),
+        unit_of_work(app, INTAKE) as db,
+    ):
+        resolve_exception(db, exception_id, Outcome.NOT_A_DUPLICATE, resolution="looks fine")
+
+
+@pytest.mark.req("IN-10", "NF-01")
+@pytest.mark.parametrize("resolution", [None, "", "   "], ids=["none", "empty", "blank"])
+def test_not_a_duplicate_needs_a_reason(app: Engine, resolution: str | None) -> None:
+    exception_id = flagged(app)
+
+    with (
+        pytest.raises(CaseRuleBroken, match="needs a reason"),
+        unit_of_work(app, CLERK) as db,
+    ):
+        resolve_exception(db, exception_id, Outcome.NOT_A_DUPLICATE, resolution=resolution)
+    with pytest.raises(ValueError, match="needs a reason"), unit_of_work(app, CLERK) as db:
+        resolve_duplicate(db, exception_id, confirmed=False, resolution=resolution)
+
+
+@pytest.mark.req("IN-10")
+def test_a_duplicate_ends_only_confirmed_not_a_duplicate_or_rejected(app: Engine) -> None:
+    exception_id = flagged(app)
+
+    with (
+        pytest.raises(CaseRuleBroken, match="can only end as"),
+        unit_of_work(app, CLERK) as db,
+    ):
+        resolve_exception(db, exception_id, Outcome.DATA_CORRECTED, resolution="fixed")
+
+
+@pytest.mark.req("IN-10")
+def test_argus_may_still_confirm_a_duplicate(app: Engine) -> None:
+    """Confirming only stops processing, so any actor may do it."""
+    exception_id = flagged(app)
+
+    with unit_of_work(app, INTAKE) as db:
         resolve_duplicate(db, exception_id, confirmed=True)

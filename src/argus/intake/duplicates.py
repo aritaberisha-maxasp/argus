@@ -20,6 +20,7 @@ ID, or the normalised name when the invoice states no VAT ID, exactly as in the 
 """
 
 import re
+from typing import Any
 
 from sqlalchemy import Connection, text
 
@@ -52,27 +53,38 @@ def duplicate_key(
 
 
 def flag_if_duplicate(connection: Connection, case_id: int) -> int | None:
-    """Give a new case its duplicate key, or flag it as a duplicate when another case of the
-    same kind already holds the key. Returns the first case's ID for a duplicate, else None.
+    """Give a case its duplicate key, or flag it as a duplicate when another case of the same
+    kind already holds the key. Returns the first case's ID while the case waits as a
+    duplicate, else None.
 
-    Runs inside the caller's unit of work. Does nothing for a case that already has its key or
-    its link, or whose key cannot be built yet; call it again once a person has confirmed the
-    amount.
+    Runs inside the caller's unit of work. The sweep calls it for every new case. Whoever
+    confirms or corrects a number, amount or currency calls it again: the database clears the
+    key on such a change and refuses approval without a key (migration 0010), so a case that
+    is not checked again gets stuck instead of being paid twice. Calling it twice changes
+    nothing the second time.
     """
     row = (
         connection.execute(
             text(
-                "select kind, case_key, gross_minor, currency, duplicate_key, duplicate_of"
-                " from invoice_case where id = :id"
+                """
+                select kind, status, case_key, document_number, gross_minor, currency,
+                       duplicate_key, duplicate_of,
+                       (select max((x.facts->>'duplicate_of')::bigint) from exception_item x
+                        where x.case_id = c.id and x.reason = 'duplicate'
+                          and x.resolved_at is null) as waits_on
+                from invoice_case c where id = :id
+                """
             ),
             {"id": case_id},
         )
         .mappings()
         .one()
     )
-    if row["duplicate_key"] is not None or row["duplicate_of"] is not None:
-        return row["duplicate_of"]  # type: ignore[no-any-return]
-    key = duplicate_key(row["case_key"], row["gross_minor"], row["currency"])
+    if row["waits_on"] is not None:
+        return int(row["waits_on"])  # already in the queue as a duplicate
+    if row["duplicate_key"] is not None or row["status"] == CaseStatus.CLOSED.value:
+        return None
+    key = _key_of(row)
     if key is None:
         return None
     kind = CaseKind(row["kind"])
@@ -88,7 +100,10 @@ def flag_if_duplicate(connection: Connection, case_id: int) -> int | None:
             first = _holder(connection, kind, key)
             if first is None:
                 raise
-    change_case(connection, case_id, duplicate_of=first)
+    if row["duplicate_of"] is None:
+        # Set once (migration 0010). A case a person already cleared keeps its first link;
+        # the new exception names the case it collides with now.
+        change_case(connection, case_id, duplicate_of=first)
     open_exception(
         connection,
         ExceptionReason.DUPLICATE,
@@ -99,6 +114,16 @@ def flag_if_duplicate(connection: Connection, case_id: int) -> int | None:
         facts={"duplicate_of": first},
     )
     return first
+
+
+def _key_of(row: Any) -> str | None:
+    """The key from the issuer of the case key and the case's current number, amount and
+    currency, so a corrected number counts too."""
+    case_key, number = row["case_key"], row["document_number"]
+    if not case_key or not number or "|" not in case_key:
+        return None
+    issuer = case_key.split("|", 1)[0]
+    return duplicate_key(f"{issuer}|{number}", row["gross_minor"], row["currency"])
 
 
 def _holder(connection: Connection, kind: CaseKind, key: str) -> int | None:
@@ -118,11 +143,12 @@ def resolve_duplicate(
 ) -> None:
     """A person's answer to a duplicate in the exception queue. Run in a unit of work under
     that person. ``confirmed`` closes the case as a duplicate; otherwise the case gets its key
-    with its own case number added and goes back to where it was."""
+    with its own case number added and goes back to where it was. "Not a duplicate" needs a
+    ``resolution`` saying why, and the database only takes it from a person."""
     row = (
         connection.execute(
             text(
-                "select e.reason, c.id, c.case_key, c.gross_minor, c.currency"
+                "select e.reason, c.id, c.case_key, c.document_number, c.gross_minor, c.currency"
                 " from exception_item e join invoice_case c on c.id = e.case_id"
                 " where e.id = :id"
             ),
@@ -133,6 +159,10 @@ def resolve_duplicate(
     )
     if row is None or row["reason"] != ExceptionReason.DUPLICATE.value:
         raise ValueError(f"exception {exception_id} is not a duplicate of a case")
+    if not confirmed and not (resolution and resolution.strip()):
+        # Letting a possible second payment through needs a reason; the database also refuses
+        # it without one, and from anyone but a person (migration 0010).
+        raise ValueError("saying a case is not a duplicate needs a reason")
     if confirmed:
         resolve_exception(
             connection,
@@ -143,7 +173,7 @@ def resolve_duplicate(
             closed_reason=ClosedReason.DUPLICATE,
         )
         return
-    key = duplicate_key(row["case_key"], row["gross_minor"], row["currency"])
+    key = _key_of(row)
     if key is not None:
         change_case(connection, row["id"], duplicate_key=f"{key}|case:{row['id']}")
     resolve_exception(connection, exception_id, Outcome.NOT_A_DUPLICATE, resolution=resolution)
