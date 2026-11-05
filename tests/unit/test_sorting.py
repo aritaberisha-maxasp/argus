@@ -288,6 +288,99 @@ def test_a_max_asp_invoice_from_the_invoicing_agent_goes_to_the_outgoing_stream(
     assert decision.route == Route.MANUAL_REVIEW
 
 
+# Bug #106: Max ASP's block with its VAT ID printed above the supplier's
+
+# A supplier invoice that shows the customer's VAT ID on top, as EU reverse charge invoices must.
+UNDER_OUR_BLOCK = """Max ASP GmbH
+Testallee 1, 70000 Musterstadt
+USt-IdNr. {own}
+Beispiel Reinigung GmbH
+Glanzgasse 2, 70007 Beispielstadt, DE
+USt-IdNr. DE012345607
+Rechnung
+Nummer: 1001
+Gesamtbetrag 119,00 EUR
+"""
+FROM_SUPPLIER = "rechnungen@beispiel-reinigung.example"
+
+
+@pytest.mark.req("IN-04", "IN-07")
+@pytest.mark.parametrize("own", ["DE099000001", "DE 099 000 001", "DEO99000001"])
+def test_a_supplier_invoice_under_max_asps_block_is_an_incoming_invoice(own: str) -> None:
+    email = invoice_email(UNDER_OUR_BLOCK.format(own=own), sender=FROM_SUPPLIER)
+    result = check_email(email, CONFIG)
+    assert result.category == Category.INCOMING_INVOICE
+    assert result.reasons == ("attachment 1 is an invoice to Max ASP GmbH",)
+    assert not result.issued_by_us
+    decision = sort_email(email, FixedModel(Category.INCOMING_INVOICE, 0.99), CONFIG)
+    assert decision.route == Route.INVOICE_PROCESSING
+
+
+@pytest.mark.req("IN-04")
+def test_without_the_own_vat_ids_set_the_layout_still_reads_as_max_asps() -> None:
+    email = invoice_email(UNDER_OUR_BLOCK.format(own="DE099000001"), sender=FROM_SUPPLIER)
+    result = check_email(email, replace(CONFIG, own_vat_ids=frozenset()))
+    assert result.issued_by_us  # the old, careful reading: a person looks at it
+
+
+@pytest.mark.req("AR-02", "IN-09")
+@pytest.mark.parametrize(
+    "sender",
+    ["einkauf@beispiel-handel.example", "someone@unknown.example", "anna.muster@maxasp.example"],
+)
+def test_the_same_layout_from_anyone_but_a_known_supplier_goes_to_a_person(sender: str) -> None:
+    # It may be one of Max ASP's own invoices to an EU customer, sent back or forwarded.
+    email = invoice_email(UNDER_OUR_BLOCK.format(own="DE099000001"), sender=sender)
+    result = check_email(email, CONFIG)
+    assert result.category is None
+    assert (
+        "attachment 1 shows Max ASP GmbH's VAT ID above the issuer's and was not sent by a known "
+        "supplier" in result.reasons
+    )
+    decision = sort_email(email, FixedModel(Category.INCOMING_INVOICE, 0.99), CONFIG)
+    assert decision.route == Route.MANUAL_REVIEW
+
+
+# Max ASP's own reverse charge invoice: its block on top, the customer's VAT ID below.
+OURS_TO_EU_CUSTOMER = """Max ASP GmbH
+Testallee 1, 70000 Musterstadt, DE
+VAT ID DE099000001
+Voorbeeld Retail B.V.
+Voorbeeldstraat 1, 0000 XX Voorbeeldstad, NL
+VAT ID NL000000000B01
+Invoice
+Number: MA-2026-0102
+Total 2.400,00 EUR
+Reverse charge
+"""
+
+
+@pytest.mark.req("AR-01", "AR-02")
+def test_max_asps_own_invoice_to_an_eu_customer_is_still_recognised_as_ours() -> None:
+    from_agent = invoice_email(OURS_TO_EU_CUSTOMER, sender="rechnungen@maxasp.example")
+    result = check_email(from_agent, CONFIG)
+    assert result.category == Category.OUTGOING_INVOICE
+    assert result.issued_by_us
+    decision = sort_email(from_agent, FixedModel(Category.OUTGOING_INVOICE, 0.99), CONFIG)
+    assert decision.route == Route.OUTGOING_BOOKING
+    # The model calling it an incoming invoice cannot send it to approval.
+    decision = sort_email(from_agent, FixedModel(Category.INCOMING_INVOICE, 0.99), CONFIG)
+    assert decision.route == Route.MANUAL_REVIEW
+    assert "a document issued by Max ASP GmbH never goes to approval or payment" in (
+        decision.reasons
+    )
+
+
+@pytest.mark.req("AR-02")
+def test_max_asps_own_invoice_without_a_customer_vat_id_is_still_ours() -> None:
+    ours = OURS_TO_EU_CUSTOMER.replace("VAT ID NL000000000B01\n", "")
+    result = check_email(invoice_email(ours, sender=FROM_SUPPLIER), CONFIG)
+    assert result.issued_by_us
+    assert result.reasons == (
+        "attachment 1 is issued by Max ASP GmbH but was not sent by the invoicing agent",
+    )
+
+
 # The checks on their own
 
 

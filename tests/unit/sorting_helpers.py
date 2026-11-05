@@ -48,6 +48,7 @@ def fixture_config() -> SortingConfig:
         invoicing_agent="rechnungen@maxasp.example",
         vendor_domains=domains("vendor"),
         customer_domains=domains("customer"),
+        own_vat_ids=OWN_VAT_IDS,
     )
 
 
