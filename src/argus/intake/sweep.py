@@ -64,7 +64,9 @@ from argus.intake.records import (
 )
 from argus.intake.reminders import ReminderMailbox, forward_reminder
 from argus.sorting import EmailToSort, LanguageModel, Route, SortingConfig, SortingDecision
+from argus.sorting.gates import gate_labels
 from argus.sorting.router import sort_email
+from argus.vat_ids import clean_vat_id
 
 log = logging.getLogger("argus.intake.sweep")
 
@@ -114,6 +116,17 @@ class Sorting:
     # Reads the invoices of an email sent to invoice processing and opens one case per invoice
     # (#30). Without it, such emails are routed and filed without cases.
     invoicing: Invoicing | None = None
+
+    def __post_init__(self) -> None:
+        # Sorting and reading must skip the same VAT IDs as Max ASP's own. Otherwise sorting
+        # could call an invoice incoming while the reading keys its case on Max ASP (#106).
+        if self.invoicing is not None:
+            sorting = {clean_vat_id(v) for v in self.config.own_vat_ids}
+            reading = {clean_vat_id(v) for v in self.invoicing.reading_settings.own_vat_ids}
+            if sorting != reading:
+                raise ValueError(
+                    "Max ASP's own VAT IDs must be the same for sorting and invoice reading"
+                )
 
 
 @dataclass
@@ -183,11 +196,11 @@ def classify(engine: Engine, sorting: Sorting, record: EmailRecord) -> SortingDe
     invoices = None
     if decision.route is Route.INVOICE_PROCESSING and sorting.invoicing is not None:
         # Also outside any transaction: the reader and the model may be called (#30).
-        invoices = find_invoices(raw, sorting.invoicing)
+        invoices = find_invoices(raw, sorting.invoicing, sorting.config.own_company)
         decision = replace(decision, invoices_found=len(invoices.invoices))
         doubts = doubts_about(invoices, decision.model_invoices)
         if doubts:
-            decision, invoices = to_manual_review(decision, doubts), None
+            decision, invoices = to_manual_review(decision, doubts, invoices.gates), None
     with unit_of_work(engine, SWEEP_ACTOR) as db:
         if not mark_classified(db, record.id, decision):
             return None
@@ -211,7 +224,11 @@ def manual_review_detail(decision: SortingDecision) -> str:
     """What the person in the exception queue reads: why ARGUS could not sort the email. It
     stays on the exception; the audit log gets the decision from ``email_classified``."""
     reasons = "; ".join(decision.reasons) or "no reason given"
-    return f"ARGUS could not sort this email on its own. Check it and route it by hand: {reasons}"
+    detail = f"ARGUS could not sort this email on its own. Check it and route it by hand: {reasons}"
+    if decision.gates:
+        # The gates first, so the person sees at a glance which rule stopped the email (#71).
+        detail = f"Safety gate: {gate_labels(decision.gates)}. {detail}"
+    return detail
 
 
 def route(engine: Engine, sorting: Sorting, record: EmailRecord) -> bool:

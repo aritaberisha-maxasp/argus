@@ -14,6 +14,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from argus.reading.pages import Page
+from argus.vat_ids import VAT_ID_LABEL, VAT_LINE, clean_vat_id, states_only
 
 # ------------------------------------------------------------------ document kind
 
@@ -108,12 +109,6 @@ def parse_rate(value: str) -> str:
     return value.rstrip("0").rstrip(".") if "." in value else value
 
 
-def clean_vat_id(raw: str) -> str:
-    """Remove spaces and fix the usual OCR slip of letter O for digit 0 after the country code."""
-    raw = re.sub(r"\s", "", raw.upper())
-    return raw[:2] + raw[2:].replace("O", "0") if raw[:2] in ("DE", "AT") else raw
-
-
 def compact_iban(raw: str) -> str:
     return re.sub(r"\s", "", raw).upper()
 
@@ -144,7 +139,7 @@ _FLAGS = re.IGNORECASE | re.MULTILINE
 # One pattern per field: the value groups come after the label. ``[:\s]+`` also crosses a line
 # break, because some PDFs put the label and its value on separate lines.
 LABELS = {
-    "vendor_vat_id": r"(?:USt-?IdNr\.?|USt-ID|VAT ID|VAT No\.?)[: \t]+([A-Z]{2}[ A-Z0-9]{5,14})\b",
+    "vendor_vat_id": VAT_ID_LABEL,
     "invoice_number": (
         r"^(?:Rechnungsnummer|Rechnungs-Nr\.?|Nummer|Number|Invoice No\.?|Nr\.)[:\s]+(\S+)"
     ),
@@ -164,7 +159,6 @@ LABELS = {
     "iban": rf"IBAN[:\s]+{IBAN}",
 }
 _LABELS = {name: re.compile(pattern, _FLAGS) for name, pattern in LABELS.items()}
-VAT_LINE = re.compile(r"(USt-?IdNr|USt-ID|VAT ID|VAT No)", re.IGNORECASE)
 
 
 def _first(name: str, pages: tuple[Page, ...]) -> tuple[re.Match[str], int] | None:
@@ -198,15 +192,26 @@ def find_fields(
             (
                 i
                 for i, line in enumerate(lines[:20])
-                if VAT_LINE.match(line) and not _only_skipped(line, skip_vat_ids)
+                if VAT_LINE.match(line) and not states_only(line, skip_vat_ids)
             ),
             None,
         )
         # The issuer's name sits above its address line, which sits above its VAT ID. The
-        # recipient block follows that VAT ID.
+        # recipient block follows that VAT ID, unless Max ASP's own block with its VAT ID stands
+        # on top: then that block is the recipient (#106).
+        ours = next(
+            (
+                i
+                for i, line in enumerate(lines[: vat_line or 0])
+                if VAT_LINE.match(line) and states_only(line, skip_vat_ids)
+            ),
+            None,
+        )
         if vat_line is not None and vat_line >= 2:
             found["issuer_name"] = Found(lines[vat_line - 2], page.number, lines[vat_line - 2])
-            if vat_line + 1 < len(lines):
+            if ours is not None and ours >= 2:
+                found["recipient_name"] = Found(lines[ours - 2], page.number, lines[ours - 2])
+            elif vat_line + 1 < len(lines):
                 found["recipient_name"] = Found(
                     lines[vat_line + 1], page.number, lines[vat_line + 1]
                 )
@@ -265,12 +270,6 @@ def invoice_numbers(pages: tuple[Page, ...]) -> list[str]:
             if m[1] not in numbers:
                 numbers.append(m[1])
     return numbers
-
-
-def _only_skipped(line: str, skip_vat_ids: frozenset[str]) -> bool:
-    """The line states only VAT IDs that never belong to the issuer."""
-    stated = [clean_vat_id(m[1]) for m in _LABELS["vendor_vat_id"].finditer(line)]
-    return bool(stated) and all(v in skip_vat_ids for v in stated)
 
 
 def vat_ids(page: Page, skip_vat_ids: frozenset[str] = frozenset()) -> list[str]:

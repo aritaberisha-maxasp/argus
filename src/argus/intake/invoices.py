@@ -41,9 +41,13 @@ from argus.reading.fields import InvoiceReading
 from argus.reading.invoice import ReadingSettings, read_attachment_invoices, read_body
 from argus.reading.language_model import FieldModel
 from argus.reading.pages import DocumentReader
-from argus.reading.text_rules import CREDIT_KINDS, INVOICE_KINDS, clean_vat_id
+from argus.reading.plausibility import check_plausible
+from argus.reading.text_rules import CREDIT_KINDS, INVOICE_KINDS
 from argus.sorting.checks import normalise
+from argus.sorting.config import OWN_COMPANY
+from argus.sorting.gates import Gate, GateHit
 from argus.sorting.models import Route, SortingDecision
+from argus.vat_ids import clean_vat_id
 
 
 @dataclass(frozen=True)
@@ -85,6 +89,8 @@ class EmailInvoices:
     invoices: tuple[FoundInvoice, ...]
     doubts: tuple[str, ...]  # why the invoices cannot be taken as found
     attachment_sha256: tuple[str, ...]  # by position, from 1
+    # The safety gates among the doubts (ADR 0006 point 7, #71). Their reasons are in ``doubts``.
+    gates: tuple[GateHit, ...] = ()
 
 
 def case_key(reading: InvoiceReading) -> str | None:
@@ -116,7 +122,9 @@ def _position(document: str) -> int:
     return int(found[1])
 
 
-def find_invoices(raw: bytes, invoicing: Invoicing) -> EmailInvoices:
+def find_invoices(
+    raw: bytes, invoicing: Invoicing, own_company: str = OWN_COMPANY
+) -> EmailInvoices:
     """Every invoice in the email, read page by page. Calls the reader and the model, so never
     call it inside a unit of work. Raises ``ReaderUnavailable`` or ``ModelUnavailable`` when a
     service cannot be reached; the email then stays where it is and the next sweep tries again."""
@@ -124,6 +132,12 @@ def find_invoices(raw: bytes, invoicing: Invoicing) -> EmailInvoices:
     attachments = attachments_of(raw)
     datas = [a.data for a in attachments]
     doubts: list[str] = []
+    gates: list[GateHit] = []
+
+    def gate(hit: GateHit) -> None:
+        gates.append(hit)
+        doubts.append(hit.reason)
+
     sources: list[Source] = []
     for position, data in enumerate(datas, start=1):
         found = read_attachment_invoices(
@@ -141,9 +155,14 @@ def find_invoices(raw: bytes, invoicing: Invoicing) -> EmailInvoices:
 
     for source in sources:
         if source.reading.unreadable is not None:
-            doubts.append(f"the {source.reading.document} cannot be read")
+            gate(GateHit(Gate.UNREADABLE_DOCUMENT, f"the {source.reading.document} cannot be read"))
     einvoices = read_einvoices(datas)
-    doubts += [f"the e-invoice in the {r.document} cannot be read" for r in einvoices.refused]
+    for refused in einvoices.refused:
+        gate(
+            GateHit(
+                Gate.EINVOICE_UNREADABLE, f"the e-invoice in the {refused.document} cannot be read"
+            )
+        )
 
     by_reading = {id(s.reading): s for s in sources}
     paired, alone = pair(einvoices.einvoices, [s.reading for s in sources])
@@ -152,9 +171,12 @@ def find_invoices(raw: bytes, invoicing: Invoicing) -> EmailInvoices:
         xml = Source(item.einvoice.reading, _position(item.einvoice.document))
         copy = by_reading.get(id(item.pdf)) if item.pdf is not None else None
         for disagreement in item.disagreements:
-            doubts.append(
-                f"the PDF copy of the e-invoice in the {item.einvoice.document} states another "
-                f"{disagreement.field.replace('_', ' ')}"
+            gate(
+                GateHit(
+                    Gate.PDF_DISAGREES_WITH_XML,
+                    f"the PDF copy of the e-invoice in the {item.einvoice.document} states "
+                    f"another {disagreement.field.replace('_', ' ')}",
+                )
             )
         invoices.append((item.einvoice.reading, xml, (copy,) if copy else ()))
     for reading in alone:
@@ -184,6 +206,9 @@ def find_invoices(raw: bytes, invoicing: Invoicing) -> EmailInvoices:
             doubts.append(f"the invoice in {where} is in this email twice")
             continue
         keys.append(key)
+        # The deterministic checks after the model (ADR 0006 point 5): a failed one is a gate.
+        for hit in check_plausible(reading, where, own_company):
+            gate(hit)
         kind = (
             CaseKind.INCOMING_CREDIT_NOTE
             if reading.kind in CREDIT_KINDS
@@ -194,6 +219,7 @@ def find_invoices(raw: bytes, invoicing: Invoicing) -> EmailInvoices:
         tuple(found_invoices),
         tuple(doubts),
         tuple(hashlib.sha256(data).hexdigest() for data in datas),
+        tuple(gates),
     )
 
 
@@ -220,13 +246,16 @@ def doubts_about(found: EmailInvoices, model_invoices: int | None) -> tuple[str,
     return tuple(doubts)
 
 
-def to_manual_review(decision: SortingDecision, doubts: Sequence[str]) -> SortingDecision:
-    """The same decision, sent to a person with the reasons (IN-09)."""
+def to_manual_review(
+    decision: SortingDecision, doubts: Sequence[str], gates: Sequence[GateHit] = ()
+) -> SortingDecision:
+    """The same decision, sent to a person with the reasons and the gates that fired (IN-09)."""
     return replace(
         decision,
         route=Route.MANUAL_REVIEW,
         category=None,
         reasons=(*decision.reasons, *doubts),
+        gates=tuple(dict.fromkeys((*decision.gates, *(hit.gate.value for hit in gates)))),
     )
 
 

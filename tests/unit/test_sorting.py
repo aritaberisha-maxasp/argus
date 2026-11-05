@@ -316,6 +316,15 @@ def test_a_supplier_invoice_under_max_asps_block_is_an_incoming_invoice(own: str
     assert decision.route == Route.INVOICE_PROCESSING
 
 
+@pytest.mark.req("IN-04", "IN-07")
+@pytest.mark.parametrize("label", ["USt-ID:", "USt-ID-Nr.", "VAT No."])
+def test_the_vat_id_labels_the_reading_knows_count_for_sorting_too(label: str) -> None:
+    text = UNDER_OUR_BLOCK.format(own="DE099000001").replace("USt-IdNr.", label)
+    result = check_email(invoice_email(text, sender=FROM_SUPPLIER), CONFIG)
+    assert result.category == Category.INCOMING_INVOICE
+    assert not result.issued_by_us
+
+
 @pytest.mark.req("IN-04")
 def test_without_the_own_vat_ids_set_the_layout_still_reads_as_max_asps() -> None:
     email = invoice_email(UNDER_OUR_BLOCK.format(own="DE099000001"), sender=FROM_SUPPLIER)
@@ -388,7 +397,7 @@ def test_max_asps_own_invoice_without_a_customer_vat_id_is_still_ours() -> None:
 @pytest.mark.parametrize(
     ("email_id", "category"),
     [("E01", "incoming_invoice"), ("E21", "outgoing_invoice"), ("E28", "payment_reminder"),
-     ("E35", "other"), ("E40", "other"), ("E43", "other")],
+     ("E35", "other"), ("E40", "other"), ("E42", "other")],
 )  # fmt: skip
 def test_the_checks_name_the_category_from_their_own_rules(email_id: str, category: str) -> None:
     emails = {row["email_id"]: email for row, email in fixture_emails()}
@@ -402,7 +411,10 @@ def test_the_checks_name_the_category_from_their_own_rules(email_id: str, catego
         ("E44", "a business partner asks about an invoice"),
         ("E45", "attachment 1 is a pro forma invoice, not a VAT invoice"),
         ("E46", "attachment 1 cannot be read"),
-        ("E47", "signs for incoming_invoice and payment_reminder in one email"),
+        (
+            "E47",
+            "an invoice and a payment reminder in one email: reminder words in the subject or text",
+        ),
         ("E48", "an employee forwarded an invoice"),
         ("E49", "attachment 1 is an invoice that does not name Max ASP GmbH"),
         (

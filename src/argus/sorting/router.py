@@ -2,7 +2,9 @@
 
 ARGUS routes an email on its own only when the model's confidence is above the threshold for
 its category and our own checks name the same category. Anything in doubt goes to manual review
-with the reason. Invoices go on to invoice processing, outgoing invoices to the outgoing stream.
+with the reason. A safety gate (ADR 0006 point 7, #71) always sends the email to a person, however
+sure the model is; the decision names every gate that fired. Invoices go on to invoice
+processing, outgoing invoices to the outgoing stream.
 """
 
 import logging
@@ -11,6 +13,7 @@ from dataclasses import replace
 
 from argus.sorting.checks import check_email, normalise
 from argus.sorting.config import SortingConfig
+from argus.sorting.gates import GateHit
 from argus.sorting.language_model import LanguageModel, ModelAnswerInvalid
 from argus.sorting.models import (
     ROUTE_FOR,
@@ -43,6 +46,7 @@ def sort_email(email: EmailToSort, model: LanguageModel, config: SortingConfig) 
             checks.category,
             evidence=(),
             sender=checks.sender,
+            gates=gate_names(checks.gates),
         )
 
     reasons: list[str] = []
@@ -73,6 +77,7 @@ def sort_email(email: EmailToSort, model: LanguageModel, config: SortingConfig) 
             checks.category,
             quotes_only(answer.evidence, email),
             sender=checks.sender,
+            gates=gate_names(checks.gates),
         )
         decision = replace(decision, model_invoices=len(answer.invoices))
     else:
@@ -106,6 +111,11 @@ def quotes_only(evidence: tuple[str, ...], email: EmailToSort) -> tuple[str, ...
     return tuple(snippet for snippet in evidence if _squash(snippet) and _squash(snippet) in text)
 
 
+def gate_names(hits: tuple[GateHit, ...]) -> tuple[str, ...]:
+    """The names of the gates that fired, each once, in the order they fired."""
+    return tuple(dict.fromkeys(hit.gate.value for hit in hits))
+
+
 def _review(
     reasons: tuple[str, ...],
     model_category: Category | None,
@@ -113,6 +123,7 @@ def _review(
     check_category: Category | None,
     evidence: tuple[str, ...],
     sender: SenderCheck | None,
+    gates: tuple[str, ...] = (),
 ) -> SortingDecision:
     return SortingDecision(
         route=Route.MANUAL_REVIEW,
@@ -123,4 +134,5 @@ def _review(
         check_category=check_category,
         evidence=evidence,
         sender=sender,
+        gates=gates,
     )

@@ -11,6 +11,11 @@ Things that must be done before ARGUS works on the real accounts mailbox, the re
 - [ ] Mailbox sweep follow ups against the real mailbox (#90).
 - [ ] Two weeks of shadow mode before ARGUS routes anything (#72).
 
+## Settings in production
+
+- [ ] **Invoice reading is switched on in the sweep.** The sweep reads the invoices of an email only when `Sorting.invoicing` is set; it is off by default. Without it no case is opened, and the safety gates that need the invoice data (failed plausibility checks, a PDF that disagrees with its XML, an e-invoice that cannot be read safely, an unreadable document) never fire. Flagged by the compliance review of PR 108 (#71). The team sets it in the production wiring and checks it in the shadow run (#72).
+- [ ] **Max ASP's own VAT IDs are set once for both sorting and reading.** `SortingConfig.own_vat_ids` and `Invoicing.own_vat_ids` hold every VAT ID Max ASP prints on documents. The sweep refuses to start when the two lists differ. If the list is empty, supplier invoices that print Max ASP's VAT ID above their own go to a person instead of opening a case (#106).
+
 ## One time steps for Arita in Azure
 
 - [ ] The one time setup and the retention lock switch in [infra/README.md](../../infra/README.md).
