@@ -417,19 +417,17 @@ def test_an_invoice_to_someone_else_fires_the_recipient_gate() -> None:
         Gate.ADDRESSED_TO_SOMEONE_ELSE,
         "the invoice in x: it is addressed to someone else, not Max ASP GmbH",
     )
-    # The legal form or spelling of Max ASP's own name does not matter.
+    # Upper or lower case and a full stop after the legal form do not matter.
     assert check_plausible(reading(**{**GOOD, "recipient_name": "MAX ASP GmbH."}), "x") == ()
 
 
 @pytest.mark.req("PR-03")
 @pytest.mark.parametrize(
     "recipient",
-    ["Max ASP GmbH Buchhaltung", "z. Hd. Max ASP GmbH", "Max ASP GmbH, Testallee 1, Musterstadt",
-     "Bill to: Max ASP GmbH", "Rechnungsempfänger: Max ASP GmbH, Buchhaltung"],
+    ["z. Hd. Max ASP GmbH", "Max ASP GmbH, Testallee 1, Musterstadt", "Bill to: Max ASP GmbH",
+     "Rechnungsempfänger: Max ASP GmbH, Buchhaltung", "MAX ASP GMBH"],
 )  # fmt: skip
-def test_a_recipient_line_with_a_label_department_or_address_is_still_max_asp(
-    recipient: str,
-) -> None:
+def test_a_recipient_line_with_a_label_or_address_is_still_max_asp(recipient: str) -> None:
     assert check_plausible(reading(**{**GOOD, "recipient_name": recipient}), "x") == ()
 
 
@@ -437,9 +435,12 @@ def test_a_recipient_line_with_a_label_department_or_address_is_still_max_asp(
 @pytest.mark.parametrize(
     "recipient",
     ["Max Muster AG", "Muster AG c/o Max ASP GmbH", "Max ASPEN GmbH",
-     "Beispiel Handel GmbH, Max ASP"],
+     "Beispiel Handel GmbH, Max ASP", "Max ASP Holding AG", "Max ASP GmbH & Co. KG", "Max ASP",
+     "Max ASP GmbH Buchhaltung"],
 )  # fmt: skip
-def test_another_company_on_the_recipient_line_still_fires_the_gate(recipient: str) -> None:
+def test_any_other_name_on_the_recipient_line_fires_the_gate(recipient: str) -> None:
+    # Another legal entity gives Max ASP no input VAT (§14 UStG), so only the full legal name
+    # passes. A department after it goes to a person too; that is the safe side.
     [hit] = check_plausible(reading(**{**GOOD, "recipient_name": recipient}), "x")
     assert hit.gate is Gate.ADDRESSED_TO_SOMEONE_ELSE
 

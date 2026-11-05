@@ -57,7 +57,7 @@ ADR 0006 point 7 lists situations where ARGUS never decides on its own, however 
 - the VAT amount matches the VAT rate, within two cents, because vendors who round VAT per line can be a cent or two off,
 - the IBAN on the invoice has valid check digits,
 - the vendor's VAT ID has the format of its country (EU, Northern Ireland, United Kingdom, Switzerland, Norway; any other prefix fails),
-- the invoice is addressed to Max ASP (PR-03). Only the recipient line before its first comma counts, labels in front such as "z. Hd." or "Bill to:" are dropped, and a department after the name ("Max ASP GmbH Buchhaltung") is fine. Another company that only mentions Max ASP later in the line fails. The name comes from `SortingConfig.own_company`.
+- the invoice is addressed to Max ASP (PR-03). Only the recipient line before its first comma counts, labels in front such as "z. Hd." or "Bill to:" are dropped, and what is left must be Max ASP's full legal name and nothing else. "Max ASP Holding AG" is another company and gives no input VAT, so it fails, and so does a department after the name, which is the safe side. The name comes from `SortingConfig.own_company`.
 
 A value ARGUS could not read is not checked here: the reading already flags it for a person and the §14 UStG check (#32) names it as missing. The reasons name amounts but never the IBAN. When any check fails, the email goes to manual review and no case is opened from it.
 

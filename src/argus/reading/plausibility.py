@@ -22,7 +22,6 @@ from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 from argus.reading.fields import Flag, InvoiceReading
 from argus.reading.text_rules import clean_vat_id, iban_valid
-from argus.sorting.checks import normalise
 from argus.sorting.config import OWN_COMPANY
 from argus.sorting.gates import Gate, GateHit
 
@@ -105,13 +104,21 @@ RECIPIENT_LABELS = re.compile(
 
 
 def addressed_to_us(recipient: str, own_company: str) -> bool:
-    """Whether the recipient line names Max ASP. Only the part before the first comma counts
-    (the address often follows it), leading labels are dropped, and a department after the name
-    ("Max ASP GmbH Buchhaltung") is fine. Another company that merely mentions Max ASP later in
-    the line ("Muster AG c/o Max ASP GmbH") is not."""
-    own = normalise(own_company)
-    name = RECIPIENT_LABELS.sub("", normalise(recipient.split(",", 1)[0]))
-    return name == own or name.startswith(own + " ")
+    """Whether the recipient line names Max ASP by its full legal name. Only the part before the
+    first comma counts (the address often follows it) and leading labels such as "z. Hd." are
+    dropped. What is left must be the legal name and nothing else, legal form included: "Max ASP
+    Holding AG" or "Max ASP GmbH & Co. KG" is another company, and an invoice to it gives Max ASP
+    no input VAT (§14 UStG). A department after the name ("Max ASP GmbH Buchhaltung") goes to a
+    person too, which is the safe side (compliance review of PR 108)."""
+    own = _plain(own_company)
+    name = RECIPIENT_LABELS.sub("", _plain(recipient.split(",", 1)[0]))
+    return name == own
+
+
+def _plain(text: str) -> str:
+    """Lower case, every run of punctuation or space one space. Unlike
+    :func:`argus.sorting.checks.normalise` the legal form stays: it tells companies apart."""
+    return re.sub(r"[^a-zäöüß0-9]+", " ", text.lower()).strip()
 
 
 def check_plausible(
