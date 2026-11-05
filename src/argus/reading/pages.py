@@ -24,6 +24,16 @@ class Page:
 
 
 @dataclass(frozen=True)
+class InvoiceSpan:
+    """One invoice the reader found in the file, with the pages it stands on and its own fields.
+    Document Intelligence gives one per invoice it sees; ``pages`` is empty when it does not say
+    where the invoice stands."""
+
+    pages: frozenset[int]
+    fields: Mapping[str, ReadField] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class Analysis:
     pages: tuple[Page, ...]
     fields: Mapping[str, ReadField] = field(default_factory=dict)
@@ -32,6 +42,9 @@ class Analysis:
     text_confidence: float | None = None
     # How many invoices the reader sees in the file. None when it does not say.
     invoice_count: int | None = None
+    # Every invoice the reader found, in its order, so a file with several can be split (#30).
+    # ``fields`` above are those of the first one.
+    invoices: tuple[InvoiceSpan, ...] = ()
 
     @property
     def text(self) -> str:

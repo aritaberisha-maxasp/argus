@@ -31,6 +31,8 @@ FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 EMAILS = FIXTURES / "emails"
 READINGS = FIXTURES / "readings"
 MODEL_ANSWERS = FIXTURES / "model-answers" / "answers.json"
+# Max ASP's placeholder VAT ID in the fixtures (tests/fixtures/tools/fixture_data.py).
+OWN_VAT_IDS = frozenset({"DE099000001"})
 
 # Type codes of EN 16931: 380 invoice, 381 credit note, 384 corrected invoice.
 TITLE_FOR_TYPE_CODE = {"380": "Rechnung", "381": "Gutschrift", "384": "Rechnungskorrektur"}

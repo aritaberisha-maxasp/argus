@@ -463,7 +463,7 @@ def test_the_audit_log_keeps_only_the_decision_and_short_evidence_snippets() -> 
 
     assert set(details) == {
         "route", "category", "model_category", "model_confidence", "check_category",
-        "reasons", "evidence", "sender",
+        "reasons", "evidence", "sender", "model_invoices",
     }  # fmt: skip
     assert len(details["evidence"]) == 10
     assert all(len(snippet) <= 200 for snippet in details["evidence"])

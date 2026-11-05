@@ -178,9 +178,14 @@ def _lines(text: str) -> list[str]:
     return [line.strip() for line in text.splitlines() if line.strip()]
 
 
-def find_fields(pages: tuple[Page, ...]) -> dict[str, Found]:
+def find_fields(
+    pages: tuple[Page, ...], skip_vat_ids: frozenset[str] = frozenset()
+) -> dict[str, Found]:
     """Every PR-01 field our rules can read, with its page and words. A field the rules cannot
-    read is left out; nothing is guessed."""
+    read is left out; nothing is guessed.
+
+    ``skip_vat_ids`` are VAT IDs that never belong to the issuer: Max ASP's own, for incoming
+    invoices that print the customer's VAT ID above the supplier's (review of PR 105)."""
     found: dict[str, Found] = {}
 
     def put(name: str, value: Any, m: re.Match[str], page: int) -> None:
@@ -189,7 +194,14 @@ def find_fields(pages: tuple[Page, ...]) -> dict[str, Found]:
 
     for page in pages:
         lines = _lines(page.text)
-        vat_line = next((i for i, line in enumerate(lines[:20]) if VAT_LINE.match(line)), None)
+        vat_line = next(
+            (
+                i
+                for i, line in enumerate(lines[:20])
+                if VAT_LINE.match(line) and not _only_skipped(line, skip_vat_ids)
+            ),
+            None,
+        )
         # The issuer's name sits above its address line, which sits above its VAT ID. The
         # recipient block follows that VAT ID.
         if vat_line is not None and vat_line >= 2:
@@ -200,8 +212,18 @@ def find_fields(pages: tuple[Page, ...]) -> dict[str, Found]:
                 )
             break
 
-    if hit := _first("vendor_vat_id", pages):
-        put("vendor_vat_id", clean_vat_id(hit[0][1]), *hit)
+    for page in pages:
+        vat_hit = next(
+            (
+                m
+                for m in _LABELS["vendor_vat_id"].finditer(page.text)
+                if clean_vat_id(m[1]) not in skip_vat_ids
+            ),
+            None,
+        )
+        if vat_hit is not None:
+            put("vendor_vat_id", clean_vat_id(vat_hit[1]), vat_hit, page.number)
+            break
     if hit := _first("invoice_number", pages):
         put("invoice_number", hit[0][1], *hit)
     if hit := _first("invoice_date", pages):
@@ -243,6 +265,23 @@ def invoice_numbers(pages: tuple[Page, ...]) -> list[str]:
             if m[1] not in numbers:
                 numbers.append(m[1])
     return numbers
+
+
+def _only_skipped(line: str, skip_vat_ids: frozenset[str]) -> bool:
+    """The line states only VAT IDs that never belong to the issuer."""
+    stated = [clean_vat_id(m[1]) for m in _LABELS["vendor_vat_id"].finditer(line)]
+    return bool(stated) and all(v in skip_vat_ids for v in stated)
+
+
+def vat_ids(page: Page, skip_vat_ids: frozenset[str] = frozenset()) -> list[str]:
+    """Every VAT ID a page states after a VAT ID label, cleaned, in order, without the skipped
+    ones (Max ASP's own on an incoming invoice)."""
+    found: list[str] = []
+    for m in _LABELS["vendor_vat_id"].finditer(page.text):
+        vat_id = clean_vat_id(m[1])
+        if vat_id not in found and vat_id not in skip_vat_ids:
+            found.append(vat_id)
+    return found
 
 
 def vat_rates(pages: tuple[Page, ...]) -> list[str]:

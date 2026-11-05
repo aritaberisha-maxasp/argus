@@ -23,7 +23,13 @@ from pydantic import SecretStr
 
 from argus.documents.store import fingerprint
 from argus.reading.fields import Flag, ReadField, Source
-from argus.reading.pages import Analysis, DocumentNotReadable, Page, ReaderUnavailable
+from argus.reading.pages import (
+    Analysis,
+    DocumentNotReadable,
+    InvoiceSpan,
+    Page,
+    ReaderUnavailable,
+)
 from argus.reading.text_rules import clean_vat_id, compact_iban, parse_rate, squash
 from argus.secrets import SecretStore
 
@@ -167,11 +173,23 @@ def parse_analyze_result(result: Mapping[str, Any]) -> Analysis:
         pages.append(Page(int(page["pageNumber"]), "\n".join(lines)))
         confidences += [w["confidence"] for w in page.get("words") or [] if "confidence" in w]
     documents = result.get("documents") or []
+    spans = tuple(
+        InvoiceSpan(
+            pages=frozenset(
+                int(region["pageNumber"])
+                for region in document.get("boundingRegions") or []
+                if "pageNumber" in region
+            ),
+            fields=_fields(document),
+        )
+        for document in documents
+    )
     return Analysis(
         pages=tuple(pages),
-        fields=_fields(documents[0]) if documents else {},
+        fields=spans[0].fields if spans else {},
         text_confidence=sum(confidences) / len(confidences) if confidences else None,
         invoice_count=len(documents),
+        invoices=spans,
     )
 
 

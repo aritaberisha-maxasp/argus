@@ -32,7 +32,7 @@ import logging
 import threading
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import timedelta
 from typing import Protocol
 
@@ -45,6 +45,13 @@ from argus.documents.records import record_email_documents
 from argus.documents.store import DocumentStore
 from argus.intake.filing import Folders, file_routed
 from argus.intake.graph import GraphClient, InboxMessage
+from argus.intake.invoices import (
+    Invoicing,
+    doubts_about,
+    find_invoices,
+    open_cases,
+    to_manual_review,
+)
 from argus.intake.records import (
     EmailRecord,
     EmailStep,
@@ -104,6 +111,9 @@ class Sorting:
     config: SortingConfig
     read: Callable[[bytes], EmailToSort]
     reminders: ReminderMailbox | None = None
+    # Reads the invoices of an email sent to invoice processing and opens one case per invoice
+    # (#30). Without it, such emails are routed and filed without cases.
+    invoicing: Invoicing | None = None
 
 
 @dataclass
@@ -166,11 +176,24 @@ def classify(engine: Engine, sorting: Sorting, record: EmailRecord) -> SortingDe
     first. Raises when the model or the reader cannot be reached; nothing is recorded then."""
     if record.step is not EmailStep.STORED or record.raw_sha256 is None:
         return None
-    email = sorting.read(sorting.documents.get(record.raw_sha256))
-    decision = sort_email(email, sorting.model, sorting.config)  # outside any transaction
+    raw = sorting.documents.get(record.raw_sha256)
+    decision = sort_email(
+        sorting.read(raw), sorting.model, sorting.config
+    )  # outside any transaction
+    invoices = None
+    if decision.route is Route.INVOICE_PROCESSING and sorting.invoicing is not None:
+        # Also outside any transaction: the reader and the model may be called (#30).
+        invoices = find_invoices(raw, sorting.invoicing)
+        decision = replace(decision, invoices_found=len(invoices.invoices))
+        doubts = doubts_about(invoices, decision.model_invoices)
+        if doubts:
+            decision, invoices = to_manual_review(decision, doubts), None
     with unit_of_work(engine, SWEEP_ACTOR) as db:
         if not mark_classified(db, record.id, decision):
             return None
+        if invoices is not None:
+            # In the same unit of work, so sorting twice never opens a case twice (IN-08).
+            open_cases(db, record.id, invoices)
         if decision.route is Route.MANUAL_REVIEW:
             # In the same unit of work, so sorting twice never opens a second one (IN-09, EX-01).
             open_exception(

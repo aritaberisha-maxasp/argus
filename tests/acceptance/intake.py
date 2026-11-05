@@ -2,7 +2,8 @@
 
 What runs for real: the fake Graph serves the 50 ``.eml`` fixtures, the mailbox sweep of #24
 picks them up and stores them in Azurite, sorts each one as read back from the document store
-(#91, with the sorting of #25 and the email reader of #91), routes it, forwards the payment
+(#91, with the sorting of #25 and the email reader of #91), opens one case per invoice of
+every incoming invoice email (#30), routes it, forwards the payment
 reminders (#27) and files each email into its ARGUS folder (#26). A second sweep finds nothing
 left to do.
 
@@ -27,6 +28,7 @@ from argus.documents.store import DocumentStore
 from argus.intake.email_text import EmailReader
 from argus.intake.filing import FOLDER_FOR
 from argus.intake.graph import GraphClient
+from argus.intake.invoices import Invoicing
 from argus.intake.records import classification_of
 from argus.intake.sweep import DocumentArchive, Sorting, SweepResult, sweep
 from argus.reading.pages import Analysis, DocumentNotReadable, Page
@@ -36,6 +38,7 @@ from tests.unit.intake.graph_helpers import BASE_URL, TOKEN, StaticTokens, stand
 from tests.unit.sorting_helpers import (
     EMAILS,
     MODEL_ANSWERS,
+    OWN_VAT_IDS,
     READINGS,
     fixture_config,
     manifest,
@@ -143,6 +146,7 @@ def run_intake(owner: Engine, app: Engine, documents: DocumentStore) -> IntakeRu
         config=fixture_config(),
         read=EmailReader(FixtureDocumentReader()),
         reminders=graph,
+        invoicing=Invoicing(FixtureDocumentReader(), OWN_VAT_IDS),
     )
 
     first = sweep(app, graph, archive, sorting)

@@ -119,11 +119,17 @@ class SortingDecision:
     evidence: tuple[str, ...]
     # Kept with the email and in the audit log (#70). None only on decisions recorded before.
     sender: SenderCheck | None = None
+    # How many invoices the model listed, so the split into cases is checked against it without
+    # asking the model again (#30, IN-08). None when the model gave no usable answer.
+    model_invoices: int | None = None
+    # How many invoices ARGUS found in the documents and pages, page by page (#30). Kept next to
+    # the model's count so the trail shows why cases were opened or not. None when not read.
+    invoices_found: int | None = None
 
     def audit_details(self) -> dict[str, Any]:
         """What goes into the audit log: the decision and the evidence snippets, never the
         prompt or the full model answer (ADR 0006 point 8)."""
-        return {
+        details: dict[str, Any] = {
             "route": self.route.value,
             "category": self.category.value if self.category else None,
             "model_category": self.model_category.value if self.model_category else None,
@@ -136,6 +142,11 @@ class SortingDecision:
             ],
             "sender": self.sender.audit_details() if self.sender else None,
         }
+        if self.model_invoices is not None:
+            details["model_invoices"] = self.model_invoices
+        if self.invoices_found is not None:
+            details["invoices_found"] = self.invoices_found
+        return details
 
     @classmethod
     def from_audit_details(cls, details: Mapping[str, Any]) -> "SortingDecision":
@@ -157,4 +168,6 @@ class SortingDecision:
             sender=SenderCheck.from_audit_details(details["sender"])
             if details.get("sender")
             else None,
+            model_invoices=details.get("model_invoices"),
+            invoices_found=details.get("invoices_found"),
         )
