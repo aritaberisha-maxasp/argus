@@ -1,16 +1,25 @@
 """Helpers for the deploy pipeline (.github/workflows/deploy.yml, issue #81).
 
-Three steps of the pipeline live here, so they can be tested without Azure:
+The steps of the pipeline that need logic live here, so they can be tested without Azure:
 
-    python tools/deploy.py check-config --mode deploy
+    python tools/deploy.py check-config --mode deploy [--commit <sha> --main-tip <sha>]
         Are the GitHub variables for Azure set? None set means Azure is not set up yet: the
         pipeline skips the deploy with a notice. Some set, or a value that is not a real ID,
-        fails the run with a list of what is missing.
+        fails the run with a list of what is missing. With --commit and --main-tip, a commit
+        that is no longer the tip of main is skipped, so a re-run of an old CI run can never
+        put old code or old infrastructure live.
+
+    python tools/deploy.py migrate
+        Runs ``alembic upgrade head``. On a failure it prints only the SQLSTATE, the table,
+        column and constraint names and the last good migration. The database's own error
+        text is held back, because PostgreSQL puts the failing row in it and the GitHub log
+        is stored outside the EU (NF-03).
 
     python tools/deploy.py app-db-role --identity-name id-argus-app --object-id <guid>
         Maps the app's managed identity to its own Entra role in PostgreSQL and makes it a
         member of argus_app, so the app signs in with its identity and works as argus_app.
-        Uses ARGUS_DATABASE_URL, PGUSER and PGPASSWORD like the migrations do.
+        Uses ARGUS_DATABASE_URL, PGUSER and PGPASSWORD like the migrations do, and holds
+        back database error text the same way.
 
     python tools/deploy.py smoke --url https://<app> --build <commit>
         Waits until the new version answers, then checks it reaches the database as
@@ -26,9 +35,13 @@ import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 
 import httpx
+from alembic import command
+from alembic.config import Config as AlembicConfig
 from sqlalchemy import Connection, Engine, text
+from sqlalchemy.exc import DBAPIError
 
 from argus.db import engine_from_env
 
@@ -57,6 +70,11 @@ IDS = frozenset(
     }
 )
 APP_ROLE = "argus_app"
+ALEMBIC_INI = Path(__file__).resolve().parents[1] / "alembic.ini"
+HELD_BACK = (
+    "The database error text is held back because it can contain row data (NF-03). "
+    "Rerun the step against a copy of the database inside Azure to read it."
+)
 
 
 @dataclass(frozen=True)
@@ -75,6 +93,70 @@ def check_config(mode: str, environ: Mapping[str, str]) -> Config:
         if value and name in IDS and (not GUID.match(value) or value == ZERO_GUID):
             problems.append(f"GitHub variable {name} is not a real Azure ID")
     return Config(configured=not problems, problems=problems)
+
+
+def latest_problem(commit: str, main_tip: str) -> str | None:
+    """None when ``commit`` is the tip of main, else why it must not deploy."""
+    if not main_tip:
+        return "could not read the tip of main"
+    if commit != main_tip:
+        return f"commit {commit} is no longer the tip of main ({main_tip})"
+    return None
+
+
+def database_error_summary(error: BaseException) -> str:
+    """What may go into a log about a database error: codes and names, never values."""
+    original = getattr(error, "orig", error)
+    parts = [f"SQLSTATE {getattr(original, 'sqlstate', None) or 'unknown'}"]
+    diag = getattr(original, "diag", None)
+    for label, attribute in (
+        ("schema", "schema_name"),
+        ("table", "table_name"),
+        ("column", "column_name"),
+        ("constraint", "constraint_name"),
+    ):
+        value = getattr(diag, attribute, None) if diag is not None else None
+        if value:
+            parts.append(f"{label} {value}")
+    return ", ".join(parts)
+
+
+def failure_summary(error: BaseException) -> str:
+    if isinstance(error, DBAPIError):
+        return database_error_summary(error)
+    return type(error).__name__
+
+
+def current_revision() -> str:
+    try:
+        with engine_from_env().connect() as connection:
+            revision = connection.execute(
+                text("select version_num from alembic_version")
+            ).scalar_one_or_none()
+    except Exception:
+        return "unknown"
+    return str(revision) if revision else "none"
+
+
+def upgrade_to_head() -> None:
+    command.upgrade(AlembicConfig(str(ALEMBIC_INI)), "head")
+
+
+def migrate(
+    run_upgrade: Callable[[], None] = upgrade_to_head,
+    read_revision: Callable[[], str] = current_revision,
+    say: Callable[[str], None] = print,
+) -> int:
+    try:
+        run_upgrade()
+    except Exception as error:
+        say(
+            f"::error::The migration after revision {read_revision()} failed: "
+            f"{failure_summary(error)}. {HELD_BACK}"
+        )
+        return 1
+    say(f"The database is on revision {read_revision()}.")
+    return 0
 
 
 def quote(connection: Connection, name: str) -> str:
@@ -167,6 +249,32 @@ def smoke(
         sleep(interval)
 
 
+def run_check_config(
+    mode: str, commit: str | None, main_tip: str | None, environ: Mapping[str, str]
+) -> int:
+    result = check_config(mode, environ)
+    for problem in result.problems:
+        print(f"::error::{problem}")
+    ready = result.configured
+    failed = bool(result.problems)
+    if not ready and not failed:
+        print(
+            "::notice::Azure is not set up for ARGUS yet, so nothing was deployed. "
+            "docs/operations/deploy.md lists the one time steps."
+        )
+    if ready and commit is not None:
+        stale = latest_problem(commit, main_tip or "")
+        if stale is not None:
+            ready = False
+            if main_tip:
+                print(f"::notice::Nothing deployed: {stale}. The newer commit deploys itself.")
+            else:
+                failed = True
+                print(f"::error::{stale}")
+    write_output("configured", "true" if ready else "false", environ)
+    return 1 if failed else 0
+
+
 def write_output(name: str, value: str, environ: Mapping[str, str]) -> None:
     target = environ.get("GITHUB_OUTPUT")
     if target:
@@ -180,6 +288,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     config = commands.add_parser("check-config")
     config.add_argument("--mode", choices=sorted(REQUIRED), required=True)
+    config.add_argument("--commit", help="the commit this run would deploy")
+    config.add_argument("--main-tip", help="the commit main points to right now")
+
+    commands.add_parser("migrate")
 
     role = commands.add_parser("app-db-role")
     role.add_argument("--identity-name", required=True)
@@ -199,18 +311,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "check-config":
-        result = check_config(args.mode, os.environ)
-        write_output("configured", "true" if result.configured else "false", os.environ)
-        if result.problems:
-            for problem in result.problems:
-                print(f"::error::{problem}")
-            return 1
-        if not result.configured:
-            print(
-                "::notice::Azure is not set up for ARGUS yet, so nothing was deployed. "
-                "docs/operations/deploy.md lists the one time steps."
-            )
-        return 0
+        return run_check_config(args.mode, args.commit, args.main_tip, os.environ)
+
+    if args.command == "migrate":
+        return migrate()
 
     if args.command == "app-db-role":
         app_engine = engine_from_env()
@@ -219,7 +323,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                 hide_password=False
             )
         )
-        created = ensure_app_role(principal_engine, app_engine, args.identity_name, args.object_id)
+        try:
+            created = ensure_app_role(
+                principal_engine, app_engine, args.identity_name, args.object_id
+            )
+        except Exception as error:
+            print(f"::error::Giving the app its database role failed: {failure_summary(error)}.")
+            print(HELD_BACK)
+            return 1
         print(
             f"{'created' if created else 'kept'} database role {args.identity_name}, "
             f"member of {APP_ROLE}"

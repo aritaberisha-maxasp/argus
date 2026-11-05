@@ -7,12 +7,15 @@ and fails when one of the promises in the issue no longer holds:
 
 - Azure sign in uses OpenID Connect only. No secret of any kind is read from GitHub.
 - The deploy runs only on main, after CI passed or by hand. Never on a PR.
+- Only the tip of main deploys, so a re-run of an old CI run is skipped.
 - The order keeps the running version alive: infrastructure with the running image, then the
   migrations, then the new image, then the smoke test. Nothing in the deploy may carry on
-  after an error.
+  after an error, and none of those steps may have its own condition.
+- The migrations run through ``tools/deploy.py migrate``, which keeps row data out of the
+  log (NF-03). A firewall rule that cannot be closed fails the run.
 - The preview never changes anything in Azure.
-- Neither workflow nor its scripts touch the retention lock, Key Vault secrets or Wise
-  (#65, NF-04).
+- Neither workflow nor its scripts touch the retention lock, the immutability policy, a
+  Complete mode deployment, Key Vault secrets or Wise (#65, NF-04).
 """
 
 import ast
@@ -34,6 +37,11 @@ DEPLOY_ORDER = ("infra", "image", "migrate", "release", "smoke")
 # Nothing in the pipeline may change the lock, read a vault secret or talk to Wise.
 FORBIDDEN_ANYWHERE = {
     "the retention lock": re.compile(r"retention_?locked", re.IGNORECASE),
+    # Changing the immutability policy directly, or a Complete deployment that removes what
+    # the templates do not list, would get around the lock as well (compliance on PR 110).
+    "the locked document store": re.compile(
+        r"immutability|legal-hold|--mode\s+complete", re.IGNORECASE
+    ),
     "Key Vault secrets": re.compile(r"az\s+keyvault|vaults/secrets|\.vault\.azure\.net"),
     "Wise": re.compile(r"\bwise\b|api\.(sandbox\.)?transferwise|wise\.com", re.IGNORECASE),
 }
@@ -107,6 +115,9 @@ def deploy_problems(workflow: dict[str, Any]) -> list[str]:
         condition
     ):
         problems.append("deploy.yml config job must require main and a passed CI run")
+    check_runs = " ".join(str(step.get("run", "")) for step in steps(gate))
+    if "check-config" not in check_runs or "--main-tip" not in check_runs:
+        problems.append("deploy.yml config job must skip commits that are not the tip of main")
     deploy = jobs.get("deploy", {})
     if deploy.get("needs") != "config":
         problems.append("deploy.yml deploy job must wait for the config job")
@@ -120,8 +131,18 @@ def deploy_problems(workflow: dict[str, Any]) -> list[str]:
     release_image = str(by_id.get("release", {}).get("env", {}).get("ARGUS_APP_IMAGE", ""))
     if "steps.image." not in release_image:
         problems.append("deploy.yml must deploy the image it just pushed")
-    if "alembic upgrade head" not in str(by_id.get("migrate", {}).get("run", "")):
-        problems.append("deploy.yml migrate step must run alembic upgrade head")
+    if "tools/deploy.py migrate" not in str(by_id.get("migrate", {}).get("run", "")):
+        problems.append("deploy.yml migrate step must run tools/deploy.py migrate")
+    if re.search(r"\balembic\b", runs(workflow)):
+        problems.append(
+            "deploy.yml must run the migrations through tools/deploy.py, which keeps row "
+            "data out of the log (NF-03)"
+        )
+    for step_id in DEPLOY_ORDER:
+        if "if" in by_id.get(step_id, {}):
+            problems.append(f"deploy.yml step {step_id} may not have its own if condition")
+    if "||" in str(by_id.get("close-firewall", {}).get("run", "")):
+        problems.append("deploy.yml must fail when the database firewall cannot be closed")
     for job_name, job in jobs.items():
         if job.get("continue-on-error"):
             problems.append(f"deploy.yml job {job_name} may not continue on error")

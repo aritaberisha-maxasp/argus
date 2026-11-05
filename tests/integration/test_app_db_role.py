@@ -120,3 +120,23 @@ def test_the_health_check_says_behind_when_a_migration_is_missing(
     assert response.status_code == 503
     assert response.json()["status"] == "behind"
     assert response.json()["revision"] == "older"
+
+
+@pytest.mark.req("NF-03")
+def test_a_real_constraint_error_reaches_the_log_without_the_row(owner: Engine) -> None:
+    secret_row = "Erika " + "Mustermann"
+    said: list[str] = []
+
+    def failing_migration() -> None:
+        with owner.connect() as connection, connection.begin():
+            connection.execute(
+                text("create table nf03_probe (name text constraint nf03_name check (name = ''))")
+            )
+            connection.execute(text("insert into nf03_probe values (:n)"), {"n": secret_row})
+
+    assert deploy.migrate(failing_migration, lambda: head(), said.append) == 1
+
+    assert secret_row not in said[0]
+    assert "Failing row" not in said[0]
+    assert "SQLSTATE 23514" in said[0]
+    assert "constraint nf03_name" in said[0]

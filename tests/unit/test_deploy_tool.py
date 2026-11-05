@@ -207,3 +207,95 @@ def test_smoke_waits_while_the_app_is_not_reachable() -> None:
 def test_the_app_role_needs_a_real_object_id(object_id: str) -> None:
     with pytest.raises(ValueError, match="object ID"):
         deploy.ensure_app_role(None, None, "id-argus-app", object_id)
+
+
+TIP = "a" * 40
+OLD = "b" * 40
+
+
+def test_an_old_commit_is_skipped_and_stays_green(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    environ = {**full_config(), "GITHUB_OUTPUT": str(tmp_path / "output")}
+
+    assert deploy.run_check_config("deploy", OLD, TIP, environ) == 0
+    assert (tmp_path / "output").read_text() == "configured=false\n"
+    assert "no longer the tip of main" in capsys.readouterr().out
+
+
+def test_the_tip_of_main_deploys(tmp_path: Path) -> None:
+    environ = {**full_config(), "GITHUB_OUTPUT": str(tmp_path / "output")}
+
+    assert deploy.run_check_config("deploy", TIP, TIP, environ) == 0
+    assert (tmp_path / "output").read_text() == "configured=true\n"
+
+
+def test_an_unknown_tip_of_main_fails(tmp_path: Path) -> None:
+    environ = {**full_config(), "GITHUB_OUTPUT": str(tmp_path / "output")}
+
+    assert deploy.run_check_config("deploy", TIP, "", environ) == 1
+    assert (tmp_path / "output").read_text() == "configured=false\n"
+
+
+class FakeDiag:
+    schema_name = "public"
+    table_name = "vendor"
+    column_name = None
+    constraint_name = "vendor_iban_check"
+
+
+class FakeDriverError(Exception):
+    sqlstate = "23514"
+    diag = FakeDiag()
+
+
+# Built at runtime so nothing here looks like real personal data to a scanner.
+PERSON = "Erika " + "Mustermann"
+IBAN = "DE" + "00" * 10
+
+
+def row_data_error() -> Exception:
+    from sqlalchemy.exc import IntegrityError
+
+    original = FakeDriverError(
+        'new row for relation "vendor" violates check constraint "vendor_iban_check"\n'
+        f"DETAIL:  Failing row contains ({PERSON}, {IBAN})."
+    )
+    return IntegrityError("insert into vendor values (%(name)s)", {"name": PERSON}, original)
+
+
+@pytest.mark.req("NF-03")
+def test_a_failed_migration_logs_codes_and_names_but_no_row_data() -> None:
+    said: list[str] = []
+
+    def fail() -> None:
+        raise row_data_error()
+
+    assert deploy.migrate(fail, lambda: "0009", said.append) == 1
+    log = "\n".join(said)
+    assert PERSON not in log
+    assert IBAN not in log
+    assert "Failing row" not in log
+    assert "SQLSTATE 23514" in log
+    assert "table vendor" in log
+    assert "constraint vendor_iban_check" in log
+    assert "after revision 0009" in log
+
+
+@pytest.mark.req("NF-03")
+def test_any_other_migration_error_shows_only_its_type() -> None:
+    said: list[str] = []
+
+    def fail() -> None:
+        raise ValueError(f"cannot parse {IBAN}")
+
+    assert deploy.migrate(fail, lambda: "0008", said.append) == 1
+    assert IBAN not in said[0]
+    assert "ValueError" in said[0]
+
+
+def test_a_good_migration_says_where_the_database_is() -> None:
+    said: list[str] = []
+
+    assert deploy.migrate(lambda: None, lambda: "0009", said.append) == 0
+    assert said == ["The database is on revision 0009."]

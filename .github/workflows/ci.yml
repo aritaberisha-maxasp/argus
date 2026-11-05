@@ -270,7 +270,7 @@ jobs:
       - name: The app does not run as root
         run: test "$(docker run --rm argus:ci id -u)" != "0"
       - name: Run the migrations as the admin
-        run: alembic upgrade head
+        run: python tools/deploy.py migrate
       - name: Give the app identity its database role
         run: |
           psql --dbname postgres --file standins/postgres/pgaadauth.sql

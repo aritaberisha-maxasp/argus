@@ -54,7 +54,7 @@ python tools/check_infra.py build/infra
 These need rights the pipeline must never have. The full runbook with every command is [docs/operations/deploy.md](../docs/operations/deploy.md). In short:
 
 1. Create the resource group `rg-argus` in Germany West Central, and `rg-argus-cicd` for the two pipeline identities.
-2. Deploy the EU policy once, and assign the built in policy that keeps Key Vault on Azure roles:
+2. Deploy the EU policy once, assign the built in policy that keeps Key Vault on Azure roles, and the policy that blocks new sign ins (federated credentials) for identities in `rg-argus`:
    `az deployment sub create --location germanywestcentral --template-file infra/policy/eu-only.bicep --parameters resourceGroupName=rg-argus`
 3. Create the app identity `id-argus-app`, then the deploy and preview identities with their GitHub trust. The deploy identity gets Contributor on `rg-argus`, plus "Role Based Access Control Administrator" limited to the two roles the templates hand out (AcrPull and Key Vault Secrets User) and to the app identity. It gets no right to read Key Vault secrets and no right to change policies. The preview identity may only read and ask for a what if.
 4. After the first deploy, put a delete lock on the storage account for originals and on the database server, so nobody can delete either one while the retention lock is still off. The deploy identity cannot create or remove locks, which is why this stays Arita's step. The account and server names are in the deployment outputs `documentsAccountName` and `databaseServerName`.

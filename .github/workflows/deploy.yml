@@ -6,6 +6,7 @@
 # Vault secrets, has no path to Wise (NF-04) and never touches the retention lock (#65).
 #
 # Order, so a failed migration leaves the running version alone:
+#   0. skip unless this commit is the tip of main
 #   1. build the image          4. run the migrations as the database admin
 #   2. apply the infrastructure  5. deploy the new image
 #      with the running image    6. smoke test /health and /health/database
@@ -60,16 +61,21 @@ jobs:
         run: pip install -e .
       # None of the variables set: Azure is not ready yet, so the run skips the deploy and
       # stays green. Some set, or not real IDs: the run fails and names what is missing.
-      - name: Check the GitHub variables
+      # Only the tip of main deploys. A re-run of an old CI run, or CI runs that finish out
+      # of order, are skipped, so old code or old infrastructure never goes live again.
+      - name: Check the GitHub variables and that this is the tip of main
         id: check
         env:
+          COMMIT: ${{ github.event.workflow_run.head_sha || github.sha }}
           AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
           AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
           AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
           ARGUS_RESOURCE_GROUP: ${{ vars.ARGUS_RESOURCE_GROUP }}
           ARGUS_DATABASE_ADMIN_OBJECT_ID: ${{ vars.ARGUS_DATABASE_ADMIN_OBJECT_ID }}
           ARGUS_DATABASE_ADMIN_NAME: ${{ vars.ARGUS_DATABASE_ADMIN_NAME }}
-        run: python tools/deploy.py check-config --mode deploy
+        run: |
+          tip=$(git ls-remote origin refs/heads/main | cut -f1)
+          python tools/deploy.py check-config --mode deploy --commit "$COMMIT" --main-tip "$tip"
 
   deploy:
     name: Deploy to Azure
@@ -133,12 +139,21 @@ jobs:
           echo "image=$REGISTRY/argus:$COMMIT" >> "$GITHUB_OUTPUT"
 
       # The database only lets in Azure services. This runner gets a rule for its own address
-      # for the length of the migrations, and the step after them takes it away again.
+      # for the length of the migrations, and the step after them takes it away again. Rules
+      # left behind by an earlier run that broke off are removed first.
       - name: Let this runner reach the database
         id: firewall
         env:
           SERVER: ${{ steps.infra.outputs.databaseServerName }}
         run: |
+          az postgres flexible-server firewall-rule list \
+            --resource-group "$RESOURCE_GROUP" --name "$SERVER" \
+            --query "[?starts_with(name, 'github-deploy-')].name" --output tsv \
+          | while read -r old; do
+              echo "Removing the leftover firewall rule $old."
+              az postgres flexible-server firewall-rule delete \
+                --resource-group "$RESOURCE_GROUP" --name "$SERVER" --rule-name "$old" --yes
+            done
           rule="github-deploy-$GITHUB_RUN_ID"
           echo "rule=$rule" >> "$GITHUB_OUTPUT"
           address=$(curl --silent --show-error --fail https://api.ipify.org)
@@ -149,6 +164,8 @@ jobs:
       # Signs in as the database admin (the deploy identity) with an Entra token, no password.
       # Then maps the app identity to its own database role, a member of argus_app.
       # If anything here fails, the run stops and the running version stays as it is.
+      # tools/deploy.py keeps the database's error text out of this log, because it can
+      # hold the failing row and the log is stored outside the EU (NF-03).
       - name: Run the database migrations
         id: migrate
         env:
@@ -160,19 +177,20 @@ jobs:
           PGPASSWORD=$(az account get-access-token --resource-type oss-rdbms --query accessToken --output tsv)
           echo "::add-mask::$PGPASSWORD"
           export PGPASSWORD
-          alembic upgrade head
+          python tools/deploy.py migrate
           python tools/deploy.py app-db-role \
             --identity-name "$APP_IDENTITY_NAME" --object-id "$APP_IDENTITY_OBJECT_ID"
 
+      # A rule that cannot be removed fails the run before the new image goes out.
       - name: Close the database to this runner again
+        id: close-firewall
         if: always() && steps.firewall.outputs.rule != ''
         env:
           SERVER: ${{ steps.infra.outputs.databaseServerName }}
           RULE: ${{ steps.firewall.outputs.rule }}
         run: |
           az postgres flexible-server firewall-rule delete \
-            --resource-group "$RESOURCE_GROUP" --name "$SERVER" --rule-name "$RULE" --yes \
-            || echo "::warning::Could not remove firewall rule $RULE. Remove it by hand."
+            --resource-group "$RESOURCE_GROUP" --name "$SERVER" --rule-name "$RULE" --yes
 
       - name: Deploy the new version
         id: release

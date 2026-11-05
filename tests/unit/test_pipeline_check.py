@@ -193,3 +193,64 @@ def test_a_token_permission_without_a_sign_in_fails(tmp_path: Path) -> None:
         ),
     )
     assert any("'contents: read'" in p for p in check_pipeline.check(root))
+
+
+@pytest.mark.req("NF-01")
+@pytest.mark.parametrize(
+    "line",
+    [
+        "az storage container immutability-policy delete --account-name st --container-name c",
+        "az deployment group create --resource-group x --mode Complete --template-file t.json",
+    ],
+)
+def test_getting_around_the_lock_fails(tmp_path: Path, line: str) -> None:
+    root = copy_repo(tmp_path)
+    edit(root, DEPLOY, lambda s: s.replace("az acr login", f"{line}\n          az acr login"))
+    assert "deploy.yml mentions the locked document store" in check_pipeline.check(root)
+
+
+def test_deploying_without_the_tip_of_main_check_fails(tmp_path: Path) -> None:
+    root = copy_repo(tmp_path)
+    edit(root, DEPLOY, lambda s: s.replace(' --main-tip "$tip"', ""))
+    assert any("tip of main" in p for p in check_pipeline.check(root))
+
+
+@pytest.mark.parametrize("step_id", ["release", "migrate", "smoke"])
+def test_a_condition_on_a_deploy_step_fails(tmp_path: Path, step_id: str) -> None:
+    root = copy_repo(tmp_path)
+    edit(
+        root,
+        DEPLOY,
+        lambda s: s.replace(
+            f"        id: {step_id}\n", f"        id: {step_id}\n        if: always()\n"
+        ),
+    )
+    assert f"deploy.yml step {step_id} may not have its own if condition" in (
+        check_pipeline.check(root)
+    )
+
+
+@pytest.mark.req("NF-03")
+def test_a_bare_alembic_call_fails(tmp_path: Path) -> None:
+    root = copy_repo(tmp_path)
+    edit(
+        root, DEPLOY, lambda s: s.replace("python tools/deploy.py migrate", "alembic upgrade head")
+    )
+    problems = check_pipeline.check(root)
+    assert "deploy.yml migrate step must run tools/deploy.py migrate" in problems
+    assert any("keeps row data out of the log" in p for p in problems)
+
+
+def test_a_firewall_rule_left_open_quietly_fails(tmp_path: Path) -> None:
+    root = copy_repo(tmp_path)
+    edit(
+        root,
+        DEPLOY,
+        lambda s: s.replace(
+            '--rule-name "$RULE" --yes\n',
+            '--rule-name "$RULE" --yes \\\n            || echo "::warning::left open"\n',
+        ),
+    )
+    assert "deploy.yml must fail when the database firewall cannot be closed" in (
+        check_pipeline.check(root)
+    )

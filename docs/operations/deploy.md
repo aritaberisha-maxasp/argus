@@ -10,15 +10,18 @@ This runbook has three parts: what the pipeline does, the one time setup Arita d
 
 **After every merge to `main`**, once CI has passed on `main`, the workflow "Deploy" runs these steps in order:
 
+0. Checks that the commit is still the tip of `main`. A re-run of an old CI run, or two CI runs that finish out of order, are skipped with a notice, so old code or an old Azure setup never goes live again.
 1. Builds the app image from the [Dockerfile](../../Dockerfile), stamped with the commit.
 2. Signs in to Azure with OpenID Connect. GitHub hands the run a short lived token that Azure trusts for runs on `main` only. No Azure password, client secret or key is stored in GitHub.
 3. Applies `infra/main.bicep` with `infra/main.bicepparam`. The app keeps the image it runs right now.
 4. Pushes the new image to ARGUS's own Container Registry.
-5. Opens the database firewall for the runner's address, runs `alembic upgrade head` as the database admin with an Entra token, gives the app identity its database role, and closes the firewall again.
+5. Opens the database firewall for the runner's address, runs the migrations (`tools/deploy.py migrate`, which runs `alembic upgrade head`) as the database admin with an Entra token, gives the app identity its database role, and closes the firewall again. Leftover rules from a run that broke off are removed first, and a rule that cannot be removed fails the run before the new image goes out.
 6. Deploys the new image.
 7. Smoke test: waits until `/health` shows the new commit and `/health/database` shows that the app works as `argus_app` and the database is on the newest migration. If not, the run fails.
 
 If any step fails, the steps after it do not run. So when the migrations fail, the new image is never deployed and the running version keeps running.
+
+When a migration fails, the log shows the error code, the table and constraint names and the last good migration, never the database's own error text. PostgreSQL puts the failing row into that text, and the GitHub log is stored outside the EU (NF-03).
 
 A redeploy of `main` is possible by hand: Actions, Deploy, Run workflow, branch `main`. Runs on any other branch are refused, both by the workflow and by Azure.
 
@@ -31,6 +34,7 @@ Until Azure is set up, the deploy and the preview skip themselves with a notice 
 | Change resources in the ARGUS resource group | Yes | No, read only |
 | Change anything outside that group | No | No |
 | Change its own trust or rights | No, it lives in another resource group | No |
+| Add a sign in to the app identity | No, a Deny policy blocks federated credentials in `rg-argus` | No |
 | Read Key Vault secrets | No | No |
 | Hand out roles | Only AcrPull and Key Vault Secrets User, only to the app identity | No |
 | Change Azure Policy or locks | No | No |
@@ -42,7 +46,7 @@ The CI job "Deploy pipeline" checks these promises in the workflow files on ever
 
 Two limits to know about:
 
-- Whoever can deploy code can run code as the app identity, and the app identity reads the app's secrets. That is true for every deploy pipeline. The guard is that only `main` deploys and only Arita merges to `main`. Even with the Wise token, nobody can release a payment: Wise refuses funding for that token and approval rules stop any payment by the ARGUS user (ADR 0004).
+- Whoever can deploy code can run code as the app identity, and the app identity reads the app's secrets. A revert of the merge takes that away again, because no new sign in for the app identity can be added (step 2). That is true for every deploy pipeline. The guard is that only `main` deploys and only Arita merges to `main`. Even with the Wise token, nobody can release a payment: Wise refuses funding for that token and approval rules stop any payment by the ARGUS user (ADR 0004).
 - As Contributor, the deploy identity can list the storage account and AI keys. The templates need that to write them into Key Vault. Moving the app to its managed identity for storage and AI, so no keys exist at all, is a possible follow up.
 
 ## One time setup (Arita)
@@ -74,6 +78,20 @@ az policy assignment create --name argus-keyvault-rbac-only \
   --policy 12d4fa5e-1f9f-4c21-97a9-b99b3c6611b5 \
   --scope /subscriptions/<subscription id>/resourceGroups/rg-argus \
   --params '{"effect": {"value": "Deny"}}'
+```
+
+Nobody may add a sign in (a federated credential) to an identity in `rg-argus`. Otherwise one merged workflow change could give something outside this repository a lasting way to act as the app identity and read its secrets, and that would survive a revert. The pipeline identities sit in `rg-argus-cicd`, so this does not block step 4.
+
+```
+az policy definition create --name argus-no-federated-credentials \
+  --display-name "ARGUS: no federated credentials on identities" \
+  --description "Refuses new sign ins for managed identities in the ARGUS resource group (#81)." \
+  --mode All \
+  --rules '{"if": {"field": "type", "equals": "Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials"}, "then": {"effect": "deny"}}'
+
+az policy assignment create --name argus-no-federated-credentials \
+  --policy argus-no-federated-credentials \
+  --scope /subscriptions/<subscription id>/resourceGroups/rg-argus
 ```
 
 ### 3. The app identity
@@ -225,9 +243,10 @@ Open the failed run under Actions, Deploy. The step that failed says what happen
 - **"Check the GitHub variables" failed.** A variable from step 7 is missing or not a real ID. The error names it.
 - **"Sign in to Azure" failed.** The federated credential in step 4 does not match. Check the subject is exactly `repo:aritaberisha-maxasp/argus:ref:refs/heads/main` and the run was on `main`.
 - **"Apply the infrastructure code" failed.** The error text comes from Azure. A "RoleAssignmentUpdateNotPermitted" or "AuthorizationFailed" usually means step 5 is incomplete. The running version is not changed by a failed infrastructure step except for the parts Azure already applied.
-- **"Run the database migrations" failed.** The new version was not deployed and the old one keeps running. Fix the migration in a new PR. A migration that stopped halfway is rolled back by PostgreSQL, since each migration runs in its own transaction.
-- **"Close the database to this runner again" warns.** Remove the rule named in the warning: `az postgres flexible-server firewall-rule delete --resource-group rg-argus --name <server> --rule-name <rule> --yes`.
+- **"Check the GitHub variables and that this is the tip of main" says nothing was deployed.** A newer commit is on `main`, and its own run deploys it. Nothing to do.
+- **"Run the database migrations" failed.** The new version was not deployed and the old one keeps running. The log names the error code, the table and the constraint. To read the full error, run the migration against a copy of the database inside Azure, never in GitHub. Fix the migration in a new PR. A migration that stopped halfway is rolled back by PostgreSQL, since each migration runs in its own transaction.
+- **"Close the database to this runner again" failed.** The new version was not deployed. The next deploy removes the leftover rule on its own. To remove it at once: `az postgres flexible-server firewall-rule delete --resource-group rg-argus --name <server> --rule-name <rule> --yes`.
 - **"Deploy the new version" failed twice.** Look at the app's revisions in the portal (Container App, Revisions and replicas) and its log in Log Analytics.
 - **"Smoke test" failed.** The log lists what each try saw. "still shows build" means the new version never started. "works as" a role other than `argus_app` means the app's database settings are wrong. "behind" means the database is not on the newest migration.
 
-To go back to the previous version, revert the PR that broke it and merge the revert. The pipeline deploys `main` again. Migrations only go forward in Azure, so a migration has to keep working with the version before it until the next one is out.
+To go back to the previous version, revert the PR that broke it and merge the revert. The pipeline deploys `main` again. Migrations only go forward in Azure, so a migration has to keep working with the version before it until the next one is out. The same holds for app settings in the templates: step 3 applies new settings while the old image still runs, so a renamed setting must keep working with the version before it.
