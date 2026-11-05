@@ -4,6 +4,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from argus.einvoice.embedded import embedded_xml
+from argus.einvoice.formal import check_einvoice
 from argus.einvoice.pairing import Disagreement, EInvoiceWithCopy, compare, pair
 from argus.einvoice.parser import (
     READER,
@@ -76,6 +77,7 @@ __all__ = [
     "Validator",
     "ValidatorUnavailable",
     "XmlRefused",
+    "check_einvoice",
     "compare",
     "embedded_xml",
     "looks_like_xml",

@@ -14,6 +14,7 @@ from argus.reading.fields import (
     ReadField,
     Source,
 )
+from argus.reading.formal_check import FormalCheck, MissingItem, check_invoice, check_invoices
 from argus.reading.invoice import (
     ReadingSettings,
     queue_unreadable,
@@ -41,8 +42,10 @@ __all__ = [
     "DocumentReader",
     "FieldModel",
     "Flag",
+    "FormalCheck",
     "InvoiceReading",
     "LocalReader",
+    "MissingItem",
     "ModelField",
     "Page",
     "ReadField",
@@ -50,6 +53,8 @@ __all__ = [
     "ReadingSettings",
     "RecordedDocumentIntelligence",
     "Source",
+    "check_invoice",
+    "check_invoices",
     "parse_analyze_result",
     "queue_unreadable",
     "read_attachment",

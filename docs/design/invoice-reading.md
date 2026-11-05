@@ -39,6 +39,21 @@ A document is unreadable when it has fewer than 40 readable characters, when the
 
 If Document Intelligence or the language model cannot be reached, the reading raises `ReaderUnavailable` or `ModelUnavailable`, and the email is tried again in the next sweep.
 
+## The §14 UStG check
+
+After reading, `check_invoice` (in `argus/reading/formal_check.py`, #32, PR-03) checks each incoming invoice for the items an invoice needs so Max ASP can claim the input VAT. An e-invoice is checked from its XML with `check_einvoice`, never from its PDF copy.
+
+| List | When | Items |
+|---|---|---|
+| §14 Abs. 4 UStG | gross amount over EUR 250, any foreign currency, or gross amount not read | Max ASP as the recipient, vendor name, invoice number, invoice date, VAT ID or tax number, service date or period, net amount, VAT rate, VAT amount |
+| §33 UStDV | gross amount up to and including EUR 250.00 | vendor name, invoice date, gross amount, VAT rate |
+
+An invoice that charges no VAT must say why (reverse charge, an exemption, §19 UStG). A VAT rate of 0 without that note fails. A field read with a flag counts as there, because the flag already sends it to a person. A field ARGUS could not read counts as missing, so the message says "missing or not readable".
+
+Only invoices are checked: not credit notes, cancellations, pro formas, or invoices issued by Max ASP. A document whose title ARGUS does not recognise counts as an invoice when it states an invoice number or a gross amount, so an unusual title cannot skip the check. Addresses and the quantity and kind of goods are not read yet (PR-01 has no such fields), so a person checks them when approving.
+
+A failed check goes to the exception queue through `argus.einvoice.queue_failed_checks(..., formal=checks)` with the reason `invoice_check_failed`. It shares that one exception per email with the e-invoice checks. The detail starts with "Failed §14 UStG check" and names every missing item. The audit log gets only the item names (`missing_items`) and which list applied (`formal_rules`), never the values (NF-03).
+
 ## The type of a file
 
 ARGUS decides whether a file is a PDF, JPEG, PNG or TIFF from its first bytes, not from the content type in the email, which the sender chose. Anything else is not read here.
