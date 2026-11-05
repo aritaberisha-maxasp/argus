@@ -255,7 +255,7 @@ jobs:
           cache: pip
       - name: Install
         run: |
-          pip install -e .
+          pip install -e ".[dev]"
           pip install "actionlint-py==$ACTIONLINT_VERSION" "shellcheck-py==$SHELLCHECK_VERSION"
       - name: Lint the workflows and scripts
         run: |
