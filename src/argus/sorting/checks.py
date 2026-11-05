@@ -2,7 +2,8 @@
 
 The checks name a category only when every sign in the email points to the same one. Mixed or
 missing signs give no category, and then the email goes to manual review because the model and
-the checks do not agree. The named safety gates of ADR 0006 point 7 are their own story (#71).
+the checks do not agree. Every doubt here is one of the named safety gates of ADR 0006 point 7
+(:mod:`argus.sorting.gates`, #71): it sends the email to manual review whatever the model says.
 
 These rules come from the document understanding prototype (spikes/document_understanding).
 """
@@ -12,6 +13,7 @@ from dataclasses import dataclass
 
 from argus.sorting import sender
 from argus.sorting.config import SortingConfig
+from argus.sorting.gates import Gate, GateHit
 from argus.sorting.models import Attachment, Category, CheckResult, EmailToSort
 
 # Below this many characters a document counts as unreadable (IN-03).
@@ -140,10 +142,14 @@ def check_email(email: EmailToSort, config: SortingConfig) -> CheckResult:
     words = subject + "\n" + body
 
     signs: dict[Category, list[str]] = {}
-    doubts: list[str] = []
+    gates: list[GateHit] = []
+
+    def doubt(gate: Gate, why: str) -> None:
+        gates.append(GateHit(gate, why))
+
     if who.failed_claim:
         # Always a person, whatever else the email says (ADR 0006 points 4 and 7).
-        doubts.append(who.reason())
+        doubt(Gate.SENDER_FAILS_AUTHENTICATION, who.reason())
 
     def sign(category: Category, why: str) -> None:
         signs.setdefault(category, []).append(why)
@@ -155,7 +161,7 @@ def check_email(email: EmailToSort, config: SortingConfig) -> CheckResult:
         if _readable(attachment):
             documents.append(_read_document(f"attachment {position}", attachment.text or "", own))
         else:
-            doubts.append(f"attachment {position} cannot be read")
+            doubt(Gate.UNREADABLE_DOCUMENT, f"attachment {position} cannot be read")
     body_document = _read_document("the email text", email.body, own)
     if body_document.kind in INVOICE_KINDS:
         documents.append(body_document)  # an invoice written in the email itself (E16)
@@ -167,21 +173,25 @@ def check_email(email: EmailToSort, config: SortingConfig) -> CheckResult:
             if sender_kind == sender.INVOICING_AGENT:
                 sign(Category.OUTGOING_INVOICE, f"{doc.source} is issued by {config.own_company}")
             else:
-                doubts.append(
+                doubt(
+                    Gate.OWN_INVOICE_NOT_FROM_AGENT,
                     f"{doc.source} is issued by {config.own_company} but was not sent by the "
-                    "invoicing agent"
+                    "invoicing agent",
                 )
         elif doc.names_us:
             sign(Category.INCOMING_INVOICE, f"{doc.source} is an invoice to {config.own_company}")
         else:
-            doubts.append(f"{doc.source} is an invoice that does not name {config.own_company}")
+            doubt(
+                Gate.ADDRESSED_TO_SOMEONE_ELSE,
+                f"{doc.source} is an invoice that does not name {config.own_company}",
+            )
     for doc in documents:
         if doc.kind == "reminder":
             sign(Category.PAYMENT_REMINDER, f"{doc.source} is a payment reminder")
         elif doc.kind in NOT_INVOICE_KINDS:
             sign(Category.OTHER, f"{doc.source} is a {doc.kind.replace('_', ' ')}, not an invoice")
         elif doc.kind == "proforma":
-            doubts.append(f"{doc.source} is a pro forma invoice, not a VAT invoice")
+            doubt(Gate.PRO_FORMA, f"{doc.source} is a pro forma invoice, not a VAT invoice")
 
     if REMINDER_WORDS.search(words):
         sign(Category.PAYMENT_REMINDER, "reminder words in the subject or text")
@@ -189,26 +199,46 @@ def check_email(email: EmailToSort, config: SortingConfig) -> CheckResult:
         sign(Category.OTHER, "marketing or newsletter wording")
     if AUTO_REPLY_SUBJECT.search(subject) or email.headers.get("auto-submitted", "no") != "no":
         sign(Category.OTHER, "automatic reply")
+    link_to_click = bool(LINK.search(body) and CLICK_TO_ACT.search(body))
+    invoice_words = bool(INVOICE_WORDS.search(words))
+    partner = sender_kind in (sender.KNOWN_VENDOR, sender.KNOWN_CUSTOMER)
+    # A partner who asks about an invoice always goes to a person (Arita on #9). Someone not
+    # known yet may be a new customer; their question counts unless the email already reads
+    # as a newsletter or a reminder.
     if (
-        sender_kind == sender.UNKNOWN
-        and not email.attachments
-        and LINK.search(body)
-        and CLICK_TO_ACT.search(body)
+        not documents
+        and invoice_words
+        and "?" in body
+        and (partner or (sender_kind == sender.UNKNOWN and not signs))
     ):
+        who_asks = "a business partner" if partner else "a sender not known yet"
+        doubt(Gate.QUESTION, f"{who_asks} asks about an invoice")
+    elif not documents and not email.attachments and invoice_words:
+        if link_to_click and Category.OTHER not in signs:
+            # An invoice only as a link to click is either spam or a real invoice that never
+            # reached ARGUS as a document. Arita decided on #25 that a person looks at it.
+            doubt(
+                Gate.NO_DOCUMENT,
+                "the email speaks of an invoice and asks to click a link, but brings no document",
+            )
+    elif sender_kind == sender.UNKNOWN and not email.attachments and link_to_click:
         sign(Category.OTHER, "unknown sender asks to click a link and brings no document")
     if sender_kind == sender.INTERNAL:
         if invoices:
-            doubts.append("an employee forwarded an invoice")
+            doubt(Gate.EMPLOYEE_FORWARD, "an employee forwarded an invoice")
         else:
             sign(Category.OTHER, "internal email without an invoice")
-    if sender_kind in (sender.KNOWN_VENDOR, sender.KNOWN_CUSTOMER) and not documents:
-        if not INVOICE_WORDS.search(words):
-            sign(Category.OTHER, "general notice from a business partner, no invoice words")
-        elif "?" in body:
-            doubts.append("a business partner asks about an invoice")
+    if partner and not documents and not invoice_words:
+        sign(Category.OTHER, "general notice from a business partner, no invoice words")
+    if invoices and Category.PAYMENT_REMINDER in signs:
+        doubt(
+            Gate.INVOICE_AND_REMINDER,
+            "an invoice and a payment reminder in one email: "
+            + "; ".join(signs[Category.PAYMENT_REMINDER]),
+        )
 
-    if doubts:
-        return CheckResult(None, tuple(doubts), issued_by_us, who)
+    if gates:
+        return CheckResult(None, tuple(g.reason for g in gates), issued_by_us, who, tuple(gates))
     if len(signs) > 1:
         named = " and ".join(sorted(signs))
         return CheckResult(None, (f"signs for {named} in one email",), issued_by_us, who)

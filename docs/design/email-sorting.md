@@ -32,6 +32,35 @@ The result is kept in `SortingDecision.sender`, and so with the email (`mailbox_
 
 If Azure OpenAI cannot be reached, the email is not sorted at all and the next sweep tries again. If it answers in the wrong format or its content filter stops the request, the email goes to manual review.
 
+## Safety gates (#71)
+
+ADR 0006 point 7 lists situations where ARGUS never decides on its own, however sure the model is. Each one is a named gate (`src/argus/sorting/gates.py`). A gate always sends the email to manual review. The decision keeps the names of every gate that fired (`SortingDecision.gates`, and `gates` in the `email_classified` audit event), the reasons say what was found and where, and the exception in the queue starts with "Safety gate:" and the plain names, so the person sees at a glance which rule stopped the email.
+
+| Gate | Name in the trail | Fires when | Checked |
+|---|---|---|---|
+| Invoice addressed to someone else | `addressed_to_someone_else` | an invoice does not name Max ASP, or names another recipient | before the model, and again on the read invoice data |
+| Max ASP invoice not from the invoicing agent | `own_invoice_not_from_agent` | a document issued by Max ASP comes from anyone but the invoicing agent | before the model |
+| Employee forwarding an invoice | `employee_forward` | someone on Max ASP's own domain sends an invoice | before the model |
+| Pro forma | `pro_forma` | a document's title is pro forma | before the model |
+| Unreadable scan | `unreadable_document` | an attachment gives almost no text, or the reader cannot read it | before the model, and again when the invoices are read |
+| Invoice and reminder in one email | `invoice_and_reminder` | an invoice and reminder signs in the same email | before the model |
+| Question from a customer or vendor | `question` | no document, invoice words and a question mark, from a known partner, or from an unknown sender when nothing else marks the email as a newsletter or reminder | before the model |
+| Failed plausibility check | `failed_plausibility` | one of the checks below fails | after the model, on the read invoice data |
+| PDF disagrees with its XML | `pdf_disagrees_with_xml` | the PDF copy states another invoice number, total or IBAN than the e-invoice | after the model |
+| E-invoice that cannot be read safely | `einvoice_unreadable` | the XML is refused (a DTD, a broken amount, too large and so on) | after the model |
+| Sender fails authentication | `sender_fails_authentication` | the From address claims the invoicing agent, a known partner or Max ASP, but SPF, DKIM and DMARC do not pass (#70) | before the model |
+| Mentions an invoice but brings no document | `no_document` | no attachment, invoice words, and a link to click, unless the email already reads as a newsletter. Arita decided on #25 that an invoice only as a link goes to a person; fixture E43 | before the model |
+
+**The deterministic checks after the model** (ADR 0006 point 5, `src/argus/reading/plausibility.py`) run on every invoice of an email sent to invoice processing, once it has been read (#29, #30):
+
+- the net amount plus the VAT amount equals the gross amount, to the cent,
+- the VAT amount matches the VAT rate, within two cents, because vendors who round VAT per line can be a cent or two off,
+- the IBAN on the invoice has valid check digits,
+- the vendor's VAT ID has the format of its country (EU, Northern Ireland, United Kingdom, Switzerland, Norway; any other prefix fails),
+- the invoice is addressed to Max ASP (PR-03).
+
+A value ARGUS could not read is not checked here: the reading already flags it for a person and the §14 UStG check (#32) names it as missing. The reasons name amounts but never the IBAN. When any check fails, the email goes to manual review and no case is opened from it.
+
 ## Settings
 
 | Setting | Default | Meaning |
@@ -54,5 +83,4 @@ Prompts and model answers are never written to the application logs. The logs sa
 
 - **Hooked up to the mailbox records of #24 (#91).** The sweep reads the stored copy with `argus.intake.email_text.EmailReader`, calls `sort_email` outside any transaction, then records the decision with `mark_classified` in a short unit of work. Migration 0005 keeps the decision on the record and the database puts it into the `email_classified` event; the application still cannot write any `email_*` event. The route the email later gets must match the recorded decision. The sweep then routes it from the recorded decision, so a retry never asks the model again.
 - **Reading the documents** (#28 e-invoices, #29 PDFs and scans) fills the attachment text. Until then the tests read the fixture PDFs directly and use a recorded reading for the two scans.
-- **The named safety gates** (#71). The gate for a sender who fails the check is already in place (#70).
 - **Recording real answers.** The recorded answers in `tests/fixtures/model-answers/` are written by hand. Once the Azure setup (#65) exists, they are recorded from the real deployment and the fixture run is repeated before every model change.
