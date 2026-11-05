@@ -196,6 +196,8 @@ A unique index on the key makes the database the final judge, so two copies arri
 
 The key can only be built once the vendor is matched. Until then the case sits in Received or in the Unknown vendor exception, and nothing is sent for approval. When the key is set and already exists, the new case goes to the exception queue as a duplicate, with `duplicate_of` pointing to the first case. It is never sent for approval, booked or paid. If a person decides it is not a duplicate, ARGUS stores the key with the case number added, logs who decided it and why, and carries on.
 
+**As built in #31.** Until vendors are matched to DATEV accounts (#35), the vendor part of the key is the issuer part of the case key from #30: the VAT ID, or the normalised name when the invoice states no VAT ID. The key is `<issuer>|<number>|<gross in cents>|<currency>`; the direction and document type come from the case kind, which is part of the unique index. The key is only set when the amount and currency were read without a flag. An amount a person still has to check gets its key through the same function (`argus.intake.duplicates.flag_if_duplicate`) once it is confirmed. The database also keeps `duplicate_of` honest (migration 0010): it is set once, never points to the case itself, and only to a case of the same kind. "Same file again" and "same number, different amount" below are not built yet; the acceptance criteria of #31 say a different amount is not a duplicate.
+
 Two more checks, both cheap:
 
 - **Same file again.** Every stored file has a SHA-256. The same file arriving a second time (for example forwarded twice) is flagged as a duplicate even before the vendor is known.

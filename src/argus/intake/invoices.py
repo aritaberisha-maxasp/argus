@@ -15,7 +15,9 @@ its own document and with its own reading:
    sorting the same email twice never opens a case twice.
 
 Each case is keyed on its issuer plus its invoice number (:func:`case_key`): two vendors that
-both use number 1001 stay two cases. Duplicates across emails are #31's.
+both use number 1001 stay two cases. An invoice that already came with another email is
+flagged as a duplicate of the first case (:func:`argus.intake.duplicates.flag_if_duplicate`,
+#31, IN-10).
 
 Only incoming invoices and credit notes get cases here; outgoing invoices are #52's.
 """
@@ -36,6 +38,7 @@ from argus.cases.store import create_case
 from argus.documents.email import attachments_of
 from argus.documents.records import link_document_to_case
 from argus.einvoice import pair, read_einvoices
+from argus.intake.duplicates import flag_if_duplicate
 from argus.intake.email_text import body_of
 from argus.reading.fields import InvoiceReading
 from argus.reading.invoice import ReadingSettings, read_attachment_invoices, read_body
@@ -232,7 +235,8 @@ def to_manual_review(decision: SortingDecision, doubts: Sequence[str]) -> Sortin
 
 def open_cases(connection: Connection, email_id: int, found: EmailInvoices) -> list[int]:
     """Open one case per invoice for the email, link each to its own document and store its
-    reading. Run inside the unit of work that records the decision. Returns the case IDs."""
+    reading, then flag it when the same invoice came before (IN-10). Run inside the unit of work
+    that records the decision. Returns the case IDs."""
     case_ids = []
     for invoice in found.invoices:
         reading = invoice.source.reading
@@ -252,6 +256,7 @@ def open_cases(connection: Connection, email_id: int, found: EmailInvoices) -> l
                 link_document_to_case(connection, case_id, document_id)
                 linked.add(document_id)
             _store_reading(connection, case_id, document_id, role, source)
+        flag_if_duplicate(connection, case_id)
         case_ids.append(case_id)
     return case_ids
 
