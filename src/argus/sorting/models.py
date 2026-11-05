@@ -46,6 +46,9 @@ class Attachment:
     filename: str
     content_type: str
     text: str | None  # what a reader got out of it; None when nothing could be read
+    # An e-invoice XML the e-invoice reader refused (a DTD, a broken amount): it gets its own
+    # safety gate instead of "cannot be read" (#71, QA on PR 108).
+    einvoice_refused: bool = False
 
 
 @dataclass(frozen=True)

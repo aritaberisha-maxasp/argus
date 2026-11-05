@@ -161,6 +161,10 @@ def check_email(email: EmailToSort, config: SortingConfig) -> CheckResult:
     for position, attachment in enumerate(email.attachments, start=1):
         if _readable(attachment):
             documents.append(_read_document(f"attachment {position}", attachment.text or "", own))
+        elif attachment.einvoice_refused:
+            doubt(
+                Gate.EINVOICE_UNREADABLE, f"the e-invoice in attachment {position} cannot be read"
+            )
         else:
             doubt(Gate.UNREADABLE_DOCUMENT, f"attachment {position} cannot be read")
     body_document = _read_document("the email text", email.body, own)

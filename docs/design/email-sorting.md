@@ -47,7 +47,7 @@ ADR 0006 point 7 lists situations where ARGUS never decides on its own, however 
 | Question from a customer or vendor | `question` | no document, invoice words and a question mark outside any link, from a known partner, or from an unknown sender when nothing else marks the email as a newsletter or reminder | before the model |
 | Failed plausibility check | `failed_plausibility` | one of the checks below fails | after the model, on the read invoice data |
 | PDF disagrees with its XML | `pdf_disagrees_with_xml` | the PDF copy states another invoice number, total or IBAN than the e-invoice | after the model |
-| E-invoice that cannot be read safely | `einvoice_unreadable` | the XML is refused (a DTD, a broken amount, too large and so on) | after the model |
+| E-invoice that cannot be read safely | `einvoice_unreadable` | the XML is refused (a DTD, a broken amount, too large and so on), as a plain XML attachment or inside a PDF | before the model for a plain XML file, and again when the invoices are read |
 | Sender fails authentication | `sender_fails_authentication` | the From address claims the invoicing agent, a known partner or Max ASP, but SPF, DKIM and DMARC do not pass (#70) | before the model |
 | Mentions an invoice but brings no document | `no_document` | no attachment, invoice words, and a link to click, unless the email already reads as a newsletter. Arita decided on #25 that an invoice only as a link goes to a person; fixture E43 | before the model |
 

@@ -36,7 +36,7 @@ from tests.integration.test_reminder_forward import (
 )
 from tests.unit.sorting_helpers import OWN_VAT_IDS
 from tests.unit.test_invoice_split import PagesReader, email_with_pdf, merged_pdf
-from tests.unit.test_safety_gates import GOOD_PAGE
+from tests.unit.test_safety_gates import GOOD_PAGE, d08_with_dtd
 
 LINK_ONLY = "E43"
 
@@ -85,3 +85,21 @@ def test_an_invoice_that_fails_a_plausibility_check_opens_no_case(app: Engine) -
     assert reason in classified["details"]["reasons"]
     [exception] = open_exceptions(app, email_id)
     assert "invoice data fails a plausibility check" in exception["detail"]
+
+
+@pytest.mark.req("IN-09", "NF-02", "NF-01")
+@pytest.mark.usefixtures("clean")
+def test_a_refused_plain_xml_e_invoice_goes_to_review_with_its_own_gate(app: Engine) -> None:
+    # QA on PR 108: a plain XRechnung with a DTD, through the whole sweep with invoice reading on.
+    raw = d08_with_dtd()
+    documents, sorting, graph = setup([raw], model())
+
+    sweep(app, graph, DocumentArchive(documents), sorting)
+
+    email_id = record_for(app, raw)
+    assert cases_of(app, email_id) == []
+    [classified] = events(app, email_id, "email_classified")
+    assert classified["details"]["route"] == "manual_review"
+    assert classified["details"]["gates"] == ["einvoice_unreadable"]
+    [exception] = open_exceptions(app, email_id)
+    assert exception["detail"].startswith("Safety gate: e-invoice cannot be read safely.")

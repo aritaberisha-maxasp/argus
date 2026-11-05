@@ -85,7 +85,8 @@ def read_raw_email(raw: bytes) -> EmailToSort:
         filename, data = p.get_filename() or "attachment", p.get_payload(decode=True)
         assert isinstance(data, bytes)
         text = _read(filename, p.get_content_type(), data)
-        attachments.append(Attachment(filename, p.get_content_type(), text))
+        refused = text is None and p.get_content_type() in ("application/xml", "text/xml")
+        attachments.append(Attachment(filename, p.get_content_type(), text, refused))
     return EmailToSort(
         message_id=str(message.get("Message-ID", "")).strip(),
         sender_address=address.lower(),

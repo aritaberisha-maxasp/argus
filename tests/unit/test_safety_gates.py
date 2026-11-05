@@ -18,6 +18,7 @@ from functools import cache
 
 import pytest
 
+from argus.intake.email_text import EmailReader
 from argus.intake.invoices import EmailInvoices, Invoicing, find_invoices, to_manual_review
 from argus.intake.sweep import manual_review_detail
 from argus.reading.fields import Flag, InvoiceReading, ReadField, Source
@@ -336,6 +337,34 @@ def test_an_e_invoice_that_cannot_be_read_safely_fires_its_gate() -> None:
     found = find_invoices(raw, Invoicing(PagesReader(Analysis(pages=())), OWN_VAT_IDS))
     assert [hit.gate for hit in found.gates] == [Gate.EINVOICE_UNREADABLE]
     assert found.gates[0].reason == "the e-invoice in the attachment 1 cannot be read"
+
+
+def d08_with_dtd() -> bytes:
+    """E08 with only the D08 XRechnung, a DTD in front of it: refused, because entities could
+    change its values."""
+    with_dtd = D08_XML.replace(b"?>", b'?>\n<!DOCTYPE x [<!ENTITY a "1">]>', 1)
+    assert with_dtd != D08_XML
+    return email_with((with_dtd, "xml", "xrechnung.xml"))
+
+
+@pytest.mark.req("IN-09", "NF-02", "EX-01")
+def test_a_plain_xml_e_invoice_that_is_refused_fires_its_own_gate_before_the_model() -> None:
+    # QA on PR 108: this used to say "attachment 1 cannot be read", the gate for unreadable scans.
+    email = EmailReader(PagesReader(Analysis(pages=())))(d08_with_dtd())
+    assert email.attachments[0].einvoice_refused
+    assert check_email(email, CONFIG).gates == (
+        GateHit(Gate.EINVOICE_UNREADABLE, "the e-invoice in attachment 1 cannot be read"),
+    )
+    decision = sort_email(email, sure_model(), CONFIG)
+    assert decision.gates == (Gate.EINVOICE_UNREADABLE.value,)
+
+
+@pytest.mark.req("IN-09")
+def test_a_readable_xml_e_invoice_is_not_marked_refused() -> None:
+    raw = email_with((D08_XML, "xml", "xrechnung.xml"))
+    email = EmailReader(PagesReader(Analysis(pages=())))(raw)
+    assert not email.attachments[0].einvoice_refused
+    assert email.attachments[0].text
 
 
 @pytest.mark.req("IN-03", "IN-09")
