@@ -563,3 +563,18 @@ def test_max_asps_block_on_top_is_read_as_the_recipient_not_the_issuer() -> None
     assert found["issuer_name"].value == "Beispiel Reinigung GmbH"
     assert found["recipient_name"].value == "Max ASP GmbH"
     assert found["vendor_vat_id"].value == "DE012345607"
+
+
+@pytest.mark.req("IN-07")
+@pytest.mark.parametrize("own", ["DE 099 000 001", "de099000001", "DEO99000001"])
+def test_own_vat_ids_written_with_spaces_are_still_skipped_by_the_reading(own: str) -> None:
+    page = Page(
+        1,
+        "Max ASP GmbH\nTestallee 1, 70000 Musterstadt\nUSt-IdNr. DE099000001\n"
+        "Beispiel Reinigung GmbH\nGlanzgasse 2, 70007 Beispielstadt, DE\n"
+        "USt-IdNr. DE012345607\nRechnung\nNummer: 1001\nGesamtbetrag 119,00 EUR\n",
+    )
+    invoicing = Invoicing(PagesReader(Analysis(pages=(page,))), frozenset({own}))
+    assert invoicing.reading_settings.own_vat_ids == OWN_VAT_IDS  # the setting itself is cleaned
+    [invoice] = find_invoices(email_with_pdf(merged_pdf("D14")), invoicing).invoices
+    assert invoice.key == "vat:DE012345607|1001"
