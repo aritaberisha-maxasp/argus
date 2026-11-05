@@ -64,7 +64,8 @@ class TraceEvent:
 @dataclass(frozen=True)
 class OpenException:
     """One entry in the exception queue that still needs a person (EX-01). Exactly one of
-    ``case_id``, ``email_id`` and ``statement_id`` is set."""
+    ``case_id``, ``email_id`` and ``statement_id`` is set, except for a failed nightly copy of
+    the audit log or its check (#83), which has none of them."""
 
     id: int
     reason: ExceptionReason

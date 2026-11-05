@@ -50,6 +50,10 @@ class ExceptionReason(StrEnum):
     PAYMENT_FAILED = "payment_failed"
     CUSTOMER_QUERY = "customer_query"
     FORWARD_FAILED = "forward_failed"  # a payment reminder could not be forwarded (#27)
+    # The nightly copy of the audit log, or the check against the copies, failed (#83).
+    # These two belong to no case, email or bank statement.
+    AUDIT_COPY_FAILED = "audit_copy_failed"
+    AUDIT_CHECK_FAILED = "audit_check_failed"
 
 
 class Outcome(StrEnum):
