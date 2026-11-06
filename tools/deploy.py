@@ -36,6 +36,7 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import httpx
 from alembic import command
@@ -205,6 +206,17 @@ class Check:
     message: str
 
 
+def json_object(response: httpx.Response) -> dict[str, Any] | None:
+    """The body as a JSON object, or None. While a new revision takes over, Azure's ingress
+    can answer with a plain text or HTML page, which is one more try, not a crash (QA on PR
+    110)."""
+    try:
+        body = response.json()
+    except ValueError:
+        return None
+    return body if isinstance(body, dict) else None
+
+
 def check_once(client: httpx.Client, build: str, role: str) -> Check:
     try:
         health = client.get("/health")
@@ -212,14 +224,19 @@ def check_once(client: httpx.Client, build: str, role: str) -> Check:
         return Check(False, f"/health not reachable yet ({type(error).__name__})")
     if health.status_code != 200:
         return Check(False, f"/health answered {health.status_code}")
-    running = health.json().get("build")
+    body = json_object(health)
+    if body is None:
+        return Check(False, f"/health answered {health.status_code}, not JSON")
+    running = body.get("build")
     if running != build:
         return Check(False, f"/health still shows build {running}, waiting for {build}")
     try:
         database = client.get("/health/database")
     except httpx.HTTPError as error:
         return Check(False, f"/health/database not reachable ({type(error).__name__})")
-    body = database.json()
+    body = json_object(database)
+    if body is None:
+        return Check(False, f"/health/database answered {database.status_code}, not JSON")
     if database.status_code != 200 or body.get("status") != "ok":
         return Check(False, f"/health/database answered {database.status_code}: {body}")
     if body.get("role") != role:

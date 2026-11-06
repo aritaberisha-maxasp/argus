@@ -254,3 +254,16 @@ def test_a_firewall_rule_left_open_quietly_fails(tmp_path: Path) -> None:
     assert "deploy.yml must fail when the database firewall cannot be closed" in (
         check_pipeline.check(root)
     )
+
+
+def test_a_smoke_step_that_does_not_run_the_smoke_test_fails(tmp_path: Path) -> None:
+    root = copy_repo(tmp_path)
+    edit(
+        root,
+        DEPLOY,
+        lambda s: s.replace(
+            'run: python tools/deploy.py smoke --url "$APP_URL" --build "$COMMIT"',
+            "run: echo skipped",
+        ),
+    )
+    assert "deploy.yml smoke step must run tools/deploy.py smoke" in check_pipeline.check(root)

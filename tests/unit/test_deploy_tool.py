@@ -299,3 +299,40 @@ def test_a_good_migration_says_where_the_database_is() -> None:
 
     assert deploy.migrate(lambda: None, lambda: "0009", said.append) == 0
     assert said == ["The database is on revision 0009."]
+
+
+def text_answer(path_with_text: str, status: int, text: str) -> httpx.Client:
+    """A fake app where one endpoint answers with a page that is not a JSON object."""
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.url.path == path_with_text:
+            return httpx.Response(status, text=text)
+        if request.url.path == "/health":
+            return httpx.Response(200, json={"status": "ok", "version": "0.1.0", "build": "abc"})
+        return httpx.Response(
+            200, json={"status": "ok", "role": "argus_app", "revision": "1", "head": "1"}
+        )
+
+    return httpx.Client(base_url="https://x.invalid", transport=httpx.MockTransport(handle))
+
+
+@pytest.mark.parametrize(
+    ("path", "status", "text", "message"),
+    [
+        ("/health", 200, "<html>starting</html>", "/health answered 200, not JSON"),
+        ("/health", 200, '["not", "an", "object"]', "/health answered 200, not JSON"),
+        (
+            "/health/database",
+            503,
+            "upstream connect error",
+            "/health/database answered 503, not JSON",
+        ),
+    ],
+)
+def test_a_page_that_is_not_json_is_one_more_try(
+    path: str, status: int, text: str, message: str
+) -> None:
+    passed, said = run_smoke(text_answer(path, status, text))
+
+    assert not passed
+    assert said == [message] * 4  # kept trying until the deadline, no crash

@@ -133,6 +133,8 @@ def deploy_problems(workflow: dict[str, Any]) -> list[str]:
         problems.append("deploy.yml must deploy the image it just pushed")
     if "tools/deploy.py migrate" not in str(by_id.get("migrate", {}).get("run", "")):
         problems.append("deploy.yml migrate step must run tools/deploy.py migrate")
+    if "tools/deploy.py smoke" not in str(by_id.get("smoke", {}).get("run", "")):
+        problems.append("deploy.yml smoke step must run tools/deploy.py smoke")
     if re.search(r"\balembic\b", runs(workflow)):
         problems.append(
             "deploy.yml must run the migrations through tools/deploy.py, which keeps row "
