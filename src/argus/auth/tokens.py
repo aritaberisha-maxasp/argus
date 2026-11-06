@@ -29,6 +29,9 @@ DEFAULT_AUTHORITY = f"https://{LOGIN_HOST}"
 DEFAULT_SCOPE = "access_as_user"
 # Clocks drift a little between Entra and the app.
 LEEWAY_SECONDS = 60
+# A token naming a key ID ARGUS does not know makes it fetch Entra's keys again, at most once
+# in this many seconds. Without the pause, forged tokens could make ARGUS fetch on every request.
+KEY_REFETCH_COOLDOWN_SECONDS = 30
 
 TENANT_ENV = "ARGUS_ENTRA_TENANT_ID"
 CLIENT_ENV = "ARGUS_ENTRA_API_CLIENT_ID"
@@ -45,6 +48,11 @@ REQUIRED_CLAIMS = ["exp", "iat", "nbf", "iss", "aud", "tid", "oid", "scp"]
 
 class SignInNotSetUp(RuntimeError):
     """A sign in setting is missing or wrong. The message names the setting, never a value."""
+
+
+class SignInUnavailable(Exception):
+    """ARGUS cannot check tokens right now, because Entra's published keys cannot be fetched.
+    The token may be fine, so the caller gets 503 and should try again, not sign in again."""
 
 
 class SignInRefused(Exception):
@@ -115,8 +123,15 @@ KeyResolver = Callable[[str], Any]
 
 def published_keys(settings: EntraSettings) -> KeyResolver:
     """The keys Entra publishes for the tenant. They are cached, and fetched again when a token
-    names a key that is not in the cache yet (Entra rolls its keys now and then)."""
-    client = jwt.PyJWKClient(settings.jwks_url, cache_keys=True, lifespan=3600, timeout=10)
+    names a key that is not in the cache yet (Entra rolls its keys now and then), but at most
+    once per cooldown. PyJWT has the cooldown from 2.14 on, hence the floor in pyproject.toml."""
+    client = jwt.PyJWKClient(
+        settings.jwks_url,
+        cache_keys=True,
+        lifespan=3600,
+        timeout=10,
+        cooldown_duration=KEY_REFETCH_COOLDOWN_SECONDS,
+    )
 
     def key_for(token: str) -> Any:
         return client.get_signing_key_from_jwt(token).key
@@ -130,7 +145,8 @@ class TokenVerifier:
         self._keys = keys or published_keys(settings)
 
     def verify(self, token: str) -> SignedInUser:
-        """The person the token belongs to, with their ARGUS roles. Raises ``SignInRefused``."""
+        """The person the token belongs to, with their ARGUS roles. Raises ``SignInRefused``,
+        or ``SignInUnavailable`` when Entra's keys cannot be fetched."""
         settings = self.settings
         try:
             claims: dict[str, Any] = jwt.decode(
@@ -142,6 +158,8 @@ class TokenVerifier:
                 leeway=LEEWAY_SECONDS,
                 options={"require": REQUIRED_CLAIMS},
             )
+        except jwt.PyJWKClientConnectionError as error:
+            raise SignInUnavailable("Entra's published keys cannot be fetched") from error
         except jwt.PyJWTError as error:
             raise SignInRefused(f"token check failed: {type(error).__name__}") from error
 

@@ -1,7 +1,7 @@
 # 0007: Signing in to ARGUS
 
 Status: proposed
-Requirements: NF-03, AP-04, AP-06, AP-08
+Requirements: NF-03, AP-04, AP-06, AP-08, NF-01
 
 ## Context
 
@@ -31,5 +31,7 @@ Option 2.
 
 - The approval page (#38) signs people in with Microsoft's sign in library for single page apps and sends the token. ARGUS never sees a password.
 - When someone is in more than about 200 groups, Entra leaves the groups out of the token. ARGUS then gives no role. The app registration therefore sends only the groups assigned to the app ([sign in setup](../operations/sign-in.md)).
-- Who belongs to which role is managed in Entra by Max ASP's admin, not in ARGUS. Removing someone from a group takes effect when their token expires, at most about an hour later.
+- Who belongs to which role is managed in Entra by Max ASP's admin, not in ARGUS. Removing someone from a group takes effect when their token expires, within about 90 minutes. For an urgent leaver the admin also blocks their sign in.
+- The object ID alone will not say who someone was once their Entra account is deleted. So when a person makes a decision (#38), ARGUS also keeps their name and sign in address as they were at that moment, next to the object ID, for the full retention period (GoBD, AP-08). That is a legal duty, so GDPR allows it (Art. 6(1)(c), and Art. 17(3)(b) for erasure requests).
+- When Entra's published keys cannot be fetched, ARGUS answers 503 and asks the page to try again, instead of calling a good token bad. A token that names an unknown key makes ARGUS fetch the keys again at most every 30 seconds, so forged tokens cannot make it fetch on every request.
 - The approver table (#34) and approval (#38) must provide who decides on a case. Until then an approver sees no case, which is the safe side.

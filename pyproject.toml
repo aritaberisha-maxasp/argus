@@ -18,8 +18,9 @@ dependencies = [
     "httpx>=0.27,<1",
     "psycopg[binary]>=3.2,<4",
     "pydantic>=2.9,<3",
-    # checks the Entra ID access tokens people sign in with (ADR 0007, #23)
-    "PyJWT[crypto]>=2.9,<3",
+    # checks the Entra ID access tokens people sign in with (ADR 0007, #23). 2.14 is the first
+    # version with a cooldown on fetching the keys again for an unknown key ID.
+    "PyJWT[crypto]>=2.14,<3",
     # reads the text layer of PDF invoices (docs/design/invoice-reading.md)
     "pypdf>=5.0,<6",
     "sqlalchemy>=2.0.36,<3",

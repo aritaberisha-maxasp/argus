@@ -16,7 +16,7 @@ The approval page (#38) adds a single page app platform with its redirect addres
 
 ## 2. Create three groups and assign them
 
-Create three security groups, for example `ARGUS approvers`, `ARGUS finance` and `ARGUS admins`. Add the approvers, Benjamin and Arita. Then, under Enterprise applications, ARGUS, Users and groups, assign all three groups to the app. Only assigned groups appear in tokens.
+Create three security groups, for example `ARGUS approvers`, `ARGUS finance` and `ARGUS admins`. Add the approvers, Benjamin and Arita. Then, under Enterprise applications, ARGUS, Users and groups, assign all three groups to the app. Only assigned groups appear in tokens. Under Properties, set **Assignment required** to Yes, so people outside the three groups cannot get a token for ARGUS at all.
 
 A person may be in more than one group. Someone in none of them can sign in but sees nothing.
 

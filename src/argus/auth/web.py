@@ -1,7 +1,8 @@
 """Sign in for the ARGUS web app: FastAPI dependencies (NF-03, ADR 0007).
 
 Every route with data depends on ``current_user``. It answers
-- 503 when sign in is not set up, so a missing setting never opens the app,
+- 503 when sign in is not set up, so a missing setting never opens the app, or when Entra's
+  keys cannot be fetched for a moment (the token may be fine, so the page should retry),
 - 401 without a valid token,
 - 403 when the person has no ARGUS role.
 """
@@ -14,7 +15,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from argus.auth.roles import Role, SignedInUser
-from argus.auth.tokens import SignInRefused, TokenVerifier
+from argus.auth.tokens import SignInRefused, SignInUnavailable, TokenVerifier
 
 log = logging.getLogger(__name__)
 
@@ -37,6 +38,13 @@ def current_user(
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "sign in needed", headers=_CHALLENGE)
     try:
         user = verifier.verify(credentials.credentials)
+    except SignInUnavailable as outage:
+        log.warning("sign in check unavailable: %s", outage)
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "sign in is unavailable for a moment, try again",
+            headers={"Retry-After": "30"},
+        ) from None
     except SignInRefused as refusal:
         # The reason only, never the token.
         log.info("sign in refused: %s", refusal.reason)

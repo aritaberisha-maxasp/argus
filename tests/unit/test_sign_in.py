@@ -7,9 +7,11 @@ same code it uses in Azure.
 import hashlib
 import hmac
 import json
+import socket
 import threading
 import time
 from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
@@ -29,6 +31,8 @@ from argus.auth import (
     SignedInUser,
     SignInNotSetUp,
     SignInRefused,
+    SignInUnavailable,
+    TokenVerifier,
     install_sign_in,
     may_view_case,
     require_role,
@@ -217,6 +221,16 @@ def test_a_token_from_another_fake_is_refused(entra: FakeEntra) -> None:
 # The web app: no data without sign in
 
 
+def unchecked_routes(app: FastAPI) -> list[str]:
+    """Anything the route walk below cannot call: a mount (static files, a sub app) or another
+    kind of route. Each one must be looked at and decided on, so the test fails until then."""
+    return [
+        getattr(r, "path", repr(r))
+        for r in app.routes
+        if not isinstance(r, APIRoute) and getattr(r, "path", None) not in PUBLIC_PATHS
+    ]
+
+
 def protected_routes(app: FastAPI) -> list[APIRoute]:
     routes = [r for r in app.routes if isinstance(r, APIRoute) and r.path not in PUBLIC_PATHS]
     assert routes, "the app should have routes with data"
@@ -233,8 +247,16 @@ def test_only_the_health_checks_are_open(client: TestClient) -> None:
     open_routes = {r.path for r in client.app.routes if isinstance(r, APIRoute)}  # type: ignore[attr-defined]
 
     assert open_routes & PUBLIC_PATHS == PUBLIC_PATHS
+    assert unchecked_routes(client.app) == []  # type: ignore[arg-type]
     for path in ("/docs", "/redoc", "/openapi.json"):
         assert client.get(path).status_code == 404
+
+
+def test_a_mounted_sub_app_is_caught_by_the_route_walk(entra: FakeEntra) -> None:
+    app = create_app(no_database, sign_in=entra.verifier)
+    app.mount("/files", FastAPI())
+
+    assert unchecked_routes(app) == ["/files"]
 
 
 @pytest.mark.parametrize("case", ["no header", "not bearer", *BAD_TOKENS])
@@ -308,14 +330,25 @@ def test_require_role_lets_only_those_roles_in(entra: FakeEntra) -> None:
 # The real key lookup, against the fake served over HTTP
 
 
+@dataclass
+class ServedKeys:
+    url: str
+    fetches: list[str]
+
+
 @pytest.fixture
-def served_keys(entra: FakeEntra) -> Iterator[str]:
-    """Serves the fake's published keys on a free local port, the way Entra serves them."""
+def served_keys(entra: FakeEntra, monkeypatch: pytest.MonkeyPatch) -> Iterator[ServedKeys]:
+    """Serves the fake's published keys on a free local port, the way Entra serves them, and
+    counts every fetch."""
+    for name in ("HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "ALL_PROXY"):
+        monkeypatch.delenv(name, raising=False)
     body = json.dumps(entra.jwks()).encode()
     keys_path = f"/{TENANT_ID}/discovery/v2.0/keys"
+    fetches: list[str] = []
 
     class Keys(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
+            fetches.append(self.path)
             ok = self.path == keys_path
             self.send_response(200 if ok else 404)
             self.send_header("Content-Type", "application/json")
@@ -328,18 +361,22 @@ def served_keys(entra: FakeEntra) -> Iterator[str]:
     server = ThreadingHTTPServer(("127.0.0.1", 0), Keys)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    yield f"http://127.0.0.1:{server.server_address[1]}"
+    yield ServedKeys(f"http://127.0.0.1:{server.server_address[1]}", fetches)
     server.shutdown()
+    server.server_close()
+
+
+def same_key_at(entra: FakeEntra, authority: str) -> FakeEntra:
+    """A fake at another address that signs with the same key as ``entra``."""
+    other = FakeEntra(authority=authority)
+    other._key, other.key_id = entra._key, entra.key_id
+    return other
 
 
 def test_the_published_keys_are_fetched_and_used(
-    entra: FakeEntra, served_keys: str, monkeypatch: pytest.MonkeyPatch
+    entra: FakeEntra, served_keys: ServedKeys, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    for name in ("HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "ALL_PROXY"):
-        monkeypatch.delenv(name, raising=False)
-    served = FakeEntra(authority=served_keys)
-    # Same key, so the fake's tokens and the served keys match.
-    served._key, served.key_id = entra._key, entra.key_id
+    served = same_key_at(entra, served_keys.url)
     for name, value in served.env().items():
         monkeypatch.setenv(name, value)
 
@@ -349,6 +386,50 @@ def test_the_published_keys_are_fetched_and_used(
     assert verifier.verify(served.token(ALICE, roles=[Role.FINANCE])).roles == {Role.FINANCE}
     with pytest.raises(SignInRefused):
         verifier.verify(served.sign(served.claims(ALICE), key_id="rolled-key"))
+
+
+def test_forged_key_ids_do_not_make_argus_fetch_the_keys_each_time(
+    entra: FakeEntra, served_keys: ServedKeys
+) -> None:
+    served = same_key_at(entra, served_keys.url)
+    verifier = TokenVerifier(served.settings)
+
+    for n in range(20):
+        with pytest.raises(SignInRefused):
+            verifier.verify(served.sign(served.claims(ALICE), key_id=f"made-up-{n}"))
+
+    # The first unknown key ID fetches the keys, the next ones wait for the cooldown.
+    assert len(served_keys.fetches) == 1
+    # A real token still works from the keys already fetched.
+    assert verifier.verify(served.token(ALICE, roles=[Role.ADMIN])).roles == {Role.ADMIN}
+    assert len(served_keys.fetches) == 1
+
+
+def closed_port() -> int:
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port: int = probe.getsockname()[1]
+    return port
+
+
+def test_when_entra_keys_cannot_be_fetched_sign_in_is_unavailable_not_refused(
+    entra: FakeEntra, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for name in ("HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "ALL_PROXY"):
+        monkeypatch.delenv(name, raising=False)
+    down = same_key_at(entra, f"http://127.0.0.1:{closed_port()}")
+    verifier = TokenVerifier(down.settings)
+    token = down.token(ALICE, roles=[Role.FINANCE])
+
+    with pytest.raises(SignInUnavailable):
+        verifier.verify(token)
+
+    client = TestClient(create_app(no_database, sign_in=lambda: verifier))
+    response = client.get("/me", headers=bearer(token))
+    assert response.status_code == 503
+    assert response.json() == {"detail": "sign in is unavailable for a moment, try again"}
+    assert response.headers["retry-after"] == "30"
+    assert "www-authenticate" not in response.headers
 
 
 def test_without_settings_there_is_no_verifier(monkeypatch: pytest.MonkeyPatch) -> None:

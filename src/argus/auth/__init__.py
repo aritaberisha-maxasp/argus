@@ -12,6 +12,7 @@ from argus.auth.tokens import (
     EntraSettings,
     SignInNotSetUp,
     SignInRefused,
+    SignInUnavailable,
     TokenVerifier,
     verifier_from_env,
 )
@@ -25,6 +26,7 @@ __all__ = [
     "Role",
     "SignInNotSetUp",
     "SignInRefused",
+    "SignInUnavailable",
     "SignedInUser",
     "TokenVerifier",
     "current_user",
