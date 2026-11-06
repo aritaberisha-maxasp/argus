@@ -1,4 +1,4 @@
-"""Checking Microsoft Entra ID access tokens (NF-03, ADR 0007).
+"""Checking Microsoft Entra ID access tokens (NF-03, ADR 0008).
 
 Approvers, Benjamin and Arita sign in with their Microsoft 365 account. The page they use gets
 an access token for the ARGUS API from Entra and sends it with every request. ARGUS checks the

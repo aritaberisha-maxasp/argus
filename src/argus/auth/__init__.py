@@ -1,4 +1,4 @@
-"""Sign in with Microsoft Entra ID and role based access (NF-03, ADR 0007)."""
+"""Sign in with Microsoft Entra ID and role based access (NF-03, ADR 0008)."""
 
 from argus.auth.roles import (
     CaseApprovers,

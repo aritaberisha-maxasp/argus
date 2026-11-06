@@ -1,4 +1,4 @@
-"""Sign in for the ARGUS web app: FastAPI dependencies (NF-03, ADR 0007).
+"""Sign in for the ARGUS web app: FastAPI dependencies (NF-03, ADR 0008).
 
 Every route with data depends on ``current_user``. It answers
 - 503 when sign in is not set up, so a missing setting never opens the app, or when Entra's

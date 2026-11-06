@@ -1,6 +1,6 @@
 # Setting up sign in with Microsoft
 
-How ARGUS learns who is signed in and what they may see ([ADR 0007](../adr/0007-signing-in-to-argus.md), #23). This is a one time setup in Max ASP's Microsoft Entra ID. Someone with admin rights in the tenant does it. None of the values below is a secret.
+How ARGUS learns who is signed in and what they may see ([ADR 0008](../adr/0008-signing-in-to-argus.md), #23). This is a one time setup in Max ASP's Microsoft Entra ID. Someone with admin rights in the tenant does it. None of the values below is a secret.
 
 ## 1. Register the ARGUS API
 

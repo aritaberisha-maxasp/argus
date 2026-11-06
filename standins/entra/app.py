@@ -1,4 +1,4 @@
-"""A fake Microsoft Entra ID for development and CI (#23, ADR 0007).
+"""A fake Microsoft Entra ID for development and CI (#23, ADR 0008).
 
 It signs access tokens shaped like Entra v2 tokens for the ARGUS API, with its own RSA key,
 and publishes the public key the way Entra does. ARGUS checks these tokens with exactly the

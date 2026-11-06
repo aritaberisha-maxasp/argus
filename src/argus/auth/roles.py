@@ -1,4 +1,4 @@
-"""Who may see what in ARGUS (NF-03, ADR 0007).
+"""Who may see what in ARGUS (NF-03, ADR 0008).
 
 Three roles come from Entra groups: approvers decide on the invoices of their vendors,
 finance (Benjamin) sees and approves everything, admin (Arita) runs ARGUS. A person in none of

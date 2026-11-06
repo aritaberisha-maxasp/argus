@@ -1,4 +1,4 @@
-"""Sign in with Microsoft Entra ID and the three roles (#23, NF-03, ADR 0007).
+"""Sign in with Microsoft Entra ID and the three roles (#23, NF-03, ADR 0008).
 
 The fake identity provider in ``standins/entra`` signs the tokens. ARGUS checks them with the
 same code it uses in Azure.

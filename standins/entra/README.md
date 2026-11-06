@@ -1,6 +1,6 @@
 # Fake Microsoft Entra ID
 
-A fake sign in for development and CI, so ARGUS can be used and tested without a Microsoft account (#23, [ADR 0007](../../docs/adr/0007-signing-in-to-argus.md)).
+A fake sign in for development and CI, so ARGUS can be used and tested without a Microsoft account (#23, [ADR 0008](../../docs/adr/0008-signing-in-to-argus.md)).
 
 It signs access tokens shaped like Entra v2 tokens for the ARGUS API and publishes its public key at the same path Entra uses. ARGUS checks these tokens with the same code it uses in Azure. The only difference is `ARGUS_ENTRA_AUTHORITY`, which points here instead of `https://login.microsoftonline.com`. ARGUS accepts a plain http authority only on `localhost` or `127.0.0.1`, so the fake can never be trusted in Azure.
 
