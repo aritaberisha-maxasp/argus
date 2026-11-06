@@ -14,4 +14,5 @@ Things that must be done before ARGUS works on the real accounts mailbox, the re
 ## One time steps for Arita in Azure
 
 - [ ] The one time setup in [docs/operations/deploy.md](../operations/deploy.md), up to a first green deploy (#81).
+- [ ] Sign in with Microsoft: the ARGUS app registration, the three groups and the five settings in [docs/operations/sign-in.md](../operations/sign-in.md) (#23). Needed before anyone uses the approval page (#38).
 - [ ] The retention lock switch in [infra/README.md](../../infra/README.md), after the tax advisor confirms the period.
