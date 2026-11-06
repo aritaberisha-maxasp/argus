@@ -12,7 +12,8 @@ Azure sign in is needed. The script fails when:
 - the database keeps its own backups for less than 35 days, or no Backup vault keeps the
   monthly backups for the legal period (at least 10 years by default, set through the
   ``databaseBackupYears`` parameter), or the vault could be locked any other way than through
-  ``retentionLocked``, or soft delete is off (#82, ADR 0007, NF-01);
+  ``retentionLocked``, or is not immutable (Unlocked) before that lock, or soft delete is
+  off (#82, ADR 0007, NF-01);
 - a secret could end up in the code, a parameter default or a deployment output, or the app
   gets a secret any other way than from Key Vault (NF-06);
 - a model deployment, the allowed deployment types or the Azure Policy would let a Global
@@ -238,7 +239,12 @@ def backup_problems(main: dict[str, Any], parameters: dict[str, Any] | None) -> 
         name = vault.get("name", "?")
         security = vault.get("properties", {}).get("securitySettings", {})
         state = str(security.get("immutabilitySettings", {}).get("state", ""))
-        if f"parameters('{LOCK_PARAMETER}')" not in state:
+        # Immutable from the start: Unlocked until the lock, then Locked (ADR 0007).
+        if (
+            f"parameters('{LOCK_PARAMETER}')" not in state
+            or "'Locked'" not in state
+            or "'Unlocked'" not in state
+        ):
             problems.append(
                 f"backup vault {name} immutability must come from {LOCK_PARAMETER}, found {state!r}"
             )

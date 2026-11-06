@@ -89,17 +89,20 @@ def _hex(value: bytes | memoryview | None) -> str | None:
 
 def _compare_copy(connection: Connection, copy: AuditCopy, report: RestoreReport) -> None:
     report.copies_checked += 1
+    held = [seq for seq in (int(e["chain_seq"]) for e in copy.events) if seq <= report.last_seq]
+    # One query per copy, not per event: a year of copies against a remote server stays quick.
+    rows = connection.execute(
+        text("select chain_seq, hash from audit_event where chain_seq = any(:seqs)"),
+        {"seqs": held},
+    ).all()
+    stored: dict[int, str | None] = {row[0]: _hex(row[1]) for row in rows}
     for event in copy.events:
         seq = int(event["chain_seq"])
         if seq > report.last_seq:
             report.copy_events_after_backup += 1
-            continue
-        stored = connection.execute(
-            text("select hash from audit_event where chain_seq = :seq"), {"seq": seq}
-        ).scalar_one_or_none()
-        if stored is None:
+        elif seq not in stored:
             report.problems.append(f"{copy.name}: event {seq} is missing in the restore")
-        elif _hex(stored) != event["hash"]:
+        elif stored[seq] != event["hash"]:
             report.problems.append(f"{copy.name}: event {seq} has another hash in the restore")
         else:
             report.copy_events_matched += 1

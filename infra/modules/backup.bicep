@@ -71,6 +71,9 @@ resource vault 'Microsoft.DataProtection/backupVaults@2024-04-01' = {
   }
 }
 
+// Azure applies a changed policy (schedule, the 3 month rule, the years) to new backups only.
+// Existing backups keep the retention they were taken with. A change of the years gives the
+// policy a new name, so the instance moves to it and the old policy stays for reference.
 resource policy 'Microsoft.DataProtection/backupVaults/backupPolicies@2024-04-01' = {
   parent: vault
   name: 'argus-database-monthly-${retentionYears}y'

@@ -11,8 +11,9 @@ param retentionLocked = false
 param retentionDays = 4018
 
 // Long term backup of the database (#82, ADR 0007): the first weekly backup of each month is
-// kept this many years. 10 is the most Azure Backup allows. Once the vault is locked (it
-// follows retentionLocked), the period can be raised but never lowered.
+// kept this many years. 10 is the most Azure Backup allows. A change applies to new backups
+// only. Once the vault is locked (it follows retentionLocked), the period can be raised but
+// never lowered.
 param databaseBackupYears = 10
 
 // Switch to true in a PR of its own once Arita has given the backup vault's identity its two

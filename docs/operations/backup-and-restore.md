@@ -42,13 +42,37 @@ If the deploy fails with `UserErrorMissingRequiredPermissions`, one of the two r
 
 ## Check that backups run
 
-Portal, Backup vault, Backup jobs. Every Sunday should show one completed backup job. A failed job shows its reason there. Once a quarter, look at Backup instances, the server, Restore, and check the list of recovery points goes back as far as it should.
+Portal, Backup vault, Backup jobs. Every Sunday should show one completed backup job. A failed job shows its reason there. Until the alert on failed backup jobs is built (a follow up of #82), someone has to look here every Monday. Once a quarter, look at Backup instances, the server, Restore, and check the list of recovery points goes back as far as it should.
 
 ## Restore
 
-Always restore into a **new** server, never over the running one. Check the restore before anyone uses it. The new server holds the same personal data as the original, so keep it in `rg-argus` in Germany West Central, and delete it when it is no longer needed. Work in Azure Cloud Shell, not on a laptop, so no copy of the data lands on a personal device.
+Always restore into a **new** server, never over the running one. Check the restore before anyone uses it. The new server holds the same personal data as the original, so keep it in `rg-argus` in Germany West Central, and delete it when it is no longer needed.
+
+### Where you work: an EU Cloud Shell, files only in a temporary folder
+
+Work in Azure Cloud Shell, not on a laptop, so no copy of the data lands on a personal device. Route B and the check download a full dump and the nightly audit copies, so where Cloud Shell keeps files matters (NF-03):
+
+- **Use an ephemeral session.** Portal, Cloud Shell, Settings, Reset user settings, then start Bash with **No storage account required**. Such a session keeps nothing after it ends. Do not use a session with a file share: its `$HOME` lives in a storage account that can sit in any region, and `rm` does not reliably remove a file from the saved home image.
+- **Check the region** before you download anything. This must print an EU region, for example `westeurope` or `germanywestcentral`:
+
+  ```
+  echo "$ACC_LOCATION"
+  ```
+
+  If it prints a region outside the EU, stop and ask the team.
+- **Keep every file in one temporary folder outside `$HOME`**, removed when the shell exits, also when a step fails. Start every restore with:
+
+  ```
+  work=$(mktemp -d /tmp/argus-restore.XXXXXX)
+  trap 'rm -rf "$work"' EXIT
+  cd "$work"
+  ```
+
+  At the end, run `cd / && rm -rf "$work"` before you close the session.
 
 ### A. Any moment in the last 35 days
+
+This needs the original server to still exist. If it was deleted, use B.
 
 ```
 az postgres flexible-server restore --resource-group rg-argus \
@@ -56,16 +80,17 @@ az postgres flexible-server restore --resource-group rg-argus \
   --restore-time "<yyyy-mm-dd>T<hh:mm>:00+00:00"
 ```
 
-The new server has the same Entra admins and settings as the original. Continue with [Check the restore](#check-the-restore).
+The new server has the same Entra admins and settings as the original, and the ARGUS database keeps its name (the deployment output `databaseName`, usually `argus`). Continue with [Check the restore](#check-the-restore).
 
 ### B. From a long term backup
 
-1. **A storage account for the files.** Azure Backup gives the backup back as files in a storage container. Make a temporary one, in Germany West Central, that allows the copy from Microsoft's backup storage:
+1. **A storage account for the files.** Azure Backup gives the backup back as files in a storage container. Make a temporary one, in Germany West Central, that allows the copy from Microsoft's backup storage and only Entra sign in:
 
    ```
    az storage account create --resource-group rg-argus --name strestore<yyyymmdd> \
      --location germanywestcentral --sku Standard_LRS --min-tls-version TLS1_2 \
-     --allow-blob-public-access false --allow-cross-tenant-replication true
+     --allow-blob-public-access false --allow-shared-key-access false \
+     --allow-cross-tenant-replication true
    az storage container create --account-name strestore<yyyymmdd> --name restore --auth-mode login
    az role assignment create --assignee-object-id "$vault_principal" \
      --assignee-principal-type ServicePrincipal --role "Storage Blob Data Contributor" \
@@ -86,36 +111,44 @@ The new server has the same Entra admins and settings as the original. Continue 
    az postgres flexible-server microsoft-entra-admin create --resource-group rg-argus \
      --server-name psql-argus-restore-<yyyymmdd> --display-name "<your sign in name>" \
      --object-id $(az ad signed-in-user show --query id --output tsv) --type User
-   az postgres flexible-server firewall-rule create --resource-group rg-argus \
-     --name psql-argus-restore-<yyyymmdd> --rule-name cloud-shell \
-     --start-ip-address $(curl -s https://api.ipify.org) --end-ip-address $(curl -s https://api.ipify.org)
    ```
 
-4. **Load the backup.** ARGUS needs only its own role `argus_app`, so create that by hand instead of running all of `roles.sql`. Use `pg_restore` of PostgreSQL 16, the server's version: a newer one writes settings that 16 refuses (`pg_restore --version` shows it). Then load the ARGUS database:
+4. **Load the backup.** First do the sign in block at the top of [Check the restore](#check-the-restore). ARGUS needs only its own role `argus_app`, so create that by hand instead of running all of `roles.sql`. Use `pg_restore` of PostgreSQL 16, the server's version: a newer one writes settings that 16 refuses (`pg_restore --version` shows it). Then, in the temporary folder:
 
    ```
-   export PGHOST=psql-argus-restore-<yyyymmdd>.postgres.database.azure.com PGSSLMODE=require
-   export PGUSER="<your sign in name>"
-   export PGPASSWORD=$(az account get-access-token --resource-type oss-rdbms --query accessToken --output tsv)
    psql --dbname postgres -c "create role argus_app nologin" -c "create database argus_restored"
    az storage blob download --account-name strestore<yyyymmdd> --container-name restore \
-     --name <file of the argus database> --file argus.dump --auth-mode login
-   pg_restore --no-owner --exit-on-error --dbname argus_restored argus.dump
-   rm argus.dump
+     --name <file of the argus database> --file "$work/argus.dump" --auth-mode login
+   pg_restore --no-owner --exit-on-error --dbname argus_restored "$work/argus.dump"
+   rm -f "$work/argus.dump"
    ```
 
-   `pg_restore` loads the data first and the triggers after it, so the audit events come back exactly as they were and the audit log is append only again right after.
+   If `pg_restore` fails, the `trap` still removes the folder when the shell exits. `pg_restore` loads the data first and the triggers after it, so the audit events come back exactly as they were and the audit log is append only again right after.
 
 ### Check the restore
 
-Get the newest nightly audit copies from the document store, then run the check from a checkout of this repository in Cloud Shell (`pip install -e .` first):
+Sign in to the restored server from Cloud Shell. This is the same after A and B:
+
+```
+restored=psql-argus-restore-<yyyymmdd>
+ip=$(curl -s https://api.ipify.org)
+az postgres flexible-server firewall-rule create --resource-group rg-argus \
+  --name "$restored" --rule-name cloud-shell --start-ip-address "$ip" --end-ip-address "$ip"
+export PGHOST=$restored.postgres.database.azure.com PGSSLMODE=require
+export PGUSER="<your sign in name>"
+export PGPASSWORD=$(az account get-access-token --resource-type oss-rdbms --query accessToken --output tsv)
+```
+
+After A, `PGUSER` must be one of the Entra admins the original server had (Arita, or the name in `ARGUS_DATABASE_ADMIN_NAME`). The token lasts about an hour; run the last line again if a step says the password is wrong.
+
+Get the newest nightly audit copies into the temporary folder, then run the check from a checkout of this repository (`pip install -e .` first). The database is `argus_restored` after B and the original name (usually `argus`) after A:
 
 ```
 az storage blob download-batch --account-name <documents account> --source documents \
-  --pattern "audit-log/<yyyy-mm>-*.jsonl" --destination . --auth-mode login
+  --pattern "audit-log/<yyyy-mm>-*.jsonl" --destination "$work" --auth-mode login
 
-ARGUS_DATABASE_URL="postgresql+psycopg://$PGHOST:5432/argus_restored?sslmode=require" \
-  python tools/restore_check.py --audit-copy audit-log/<yyyy-mm-dd>.jsonl [--audit-copy ...]
+ARGUS_DATABASE_URL="postgresql+psycopg://$PGHOST:5432/<database>?sslmode=require" \
+  python tools/restore_check.py --audit-copy "$work"/audit-log/<yyyy-mm-dd>.jsonl [--audit-copy ...]
 ```
 
 It only reads, and prints only numbers, times and hashes, so its output can go into the record below. It passes when:
@@ -126,10 +159,11 @@ It only reads, and prints only numbers, times and hashes, so its output can go i
 
 Events in the copies that are newer than the backup are counted, not failed: that number is how much the restore lost since the backup was taken. Those events are still in the nightly copies.
 
-When done, delete the temporary server and storage account:
+When done, remove the temporary folder and delete the temporary server and storage account:
 
 ```
-az postgres flexible-server delete --resource-group rg-argus --name psql-argus-restore-<yyyymmdd> --yes
+cd / && rm -rf "$work"
+az postgres flexible-server delete --resource-group rg-argus --name "$restored" --yes
 az storage account delete --resource-group rg-argus --name strestore<yyyymmdd> --yes
 ```
 
@@ -138,11 +172,14 @@ az storage account delete --resource-group rg-argus --name strestore<yyyymmdd> -
 Pointing ARGUS at another server is not automated. The templates name the server `psql-argus-<suffix>`, and the deploy expects that name.
 
 - **The server still exists but its data is damaged:** restore as in A to a new name, check it, and ask the team for a PR that moves ARGUS over. Do not delete the damaged server: it is evidence, and its own backups still run.
-- **The server is gone:** remove the delete lock if it is still there, restore as in A (or B when the 35 days are gone too) under the old server name, check it, then run the deploy by hand (Actions, Deploy, Run workflow). The deploy maps the app identity again and runs any missing migrations.
+- **The server is gone:** route A no longer works, because it restores from the server itself. Azure can bring back a deleted server only within a few days through its "restore a dropped server" route, which the delete lock is there to make unnecessary. So the normal path is B, under the old server name, then a check, then the deploy by hand (Actions, Deploy, Run workflow). The deploy maps the app identity again and runs any missing migrations.
 
-## Changing the retention period
+**Before ARGUS runs again on a restored database, deal with the events the restore lost.** Those are the events the check counts as "newer than the backup". They exist only in the nightly copies, and the backup lost the cases and emails they belong to.
 
-`databaseBackupYears` in `infra/main.bicepparam`. The CI check in `tools/check_infra.py` refuses less than 10 years; lowering the period means changing that rule too, in the same PR, with the tax advisor's answer named in it. 10 is the most Azure Backup allows. While the vault is immutable, Azure refuses to shorten the retention of backups that already exist.
+1. Write into the restore record: the backup used, the lost chain numbers (from the last chain number in the restore to the last one in the newest copy) and the copy files that hold them.
+2. Keep ARGUS stopped (scale the app to zero, no deploy) until Arita decides how the lost window is handled.
+3. Expect the nightly audit check (#83) to report that range as missing, and as changed once new events reuse those chain numbers. That is correct: it shows the gap in the trail.
+4. Re importing the lost events, or letting the chain continue after the highest copied number, and sweeping the emails and documents of the lost window again, is not built yet. It needs its own story (see the PR for #82).
 
 ## Restore record
 

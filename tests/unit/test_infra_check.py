@@ -597,7 +597,15 @@ def test_a_backup_policy_with_a_fixed_period_fails(tmp_path: Path) -> None:
 
 
 @pytest.mark.req("NF-01")
-@pytest.mark.parametrize("state", ["Locked", "Disabled"])
+@pytest.mark.parametrize(
+    "state",
+    [
+        "Locked",
+        "Disabled",
+        "[if(parameters('retentionLocked'), 'Locked', 'Disabled')]",
+        "[if(parameters('retentionLocked'), 'Unlocked', 'Disabled')]",
+    ],
+)
 def test_a_vault_lock_written_straight_into_the_code_fails(tmp_path: Path, state: str) -> None:
     main = good_main()
     vault = backup_module(main)["resources"]["vault"]
