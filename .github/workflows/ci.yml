@@ -45,6 +45,13 @@ jobs:
       # Tesseract reads the scans in CI instead of Azure AI Document Intelligence (#29).
       - name: Install Tesseract
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-deu
+      # The restore tests (#82) dump and restore the test database. The runner's own pg_dump is
+      # newer than the PostgreSQL 16 service and writes settings 16 does not know, so use the
+      # tools of the same major version, as the restore runbook asks.
+      - name: Install the PostgreSQL 16 tools
+        run: |
+          sudo apt-get install -y --no-install-recommends postgresql-client-16
+          echo /usr/lib/postgresql/16/bin >> "$GITHUB_PATH"
       - name: Install
         run: pip install -e ".[dev]"
       - name: Lint

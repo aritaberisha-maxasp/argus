@@ -12,6 +12,7 @@ term backup would skip it otherwise.
 """
 
 import importlib.util
+import re
 import shutil
 import subprocess
 import uuid
@@ -52,11 +53,26 @@ def libpq_url(url: str, database: str | None = None) -> str:
     return parsed.render_as_string(hide_password=False)
 
 
-def tool(name: str) -> str:
+def tool(name: str, server_major: int) -> str:
+    """The PostgreSQL tool on the PATH. It must have the server's major version: a newer
+    pg_dump writes settings an older server refuses, which is a mistake to avoid in a real
+    restore as well."""
     found = shutil.which(name)
     if found is None:
-        pytest.fail(f"{name} is not on the PATH; the restore tests need the PostgreSQL 16 tools")
+        pytest.fail(f"{name} is not on the PATH; the restore tests need the PostgreSQL tools")
+    version = subprocess.run(  # noqa: S603  a fixed tool found on the PATH
+        [found, "--version"], check=True, capture_output=True, text=True
+    ).stdout
+    major = re.search(r"(\d+)(?:\.\d+)+", version)
+    if major is None or int(major.group(1)) != server_major:
+        pytest.fail(f"{found} is {version.strip()!r}, the server is PostgreSQL {server_major}")
     return found
+
+
+def server_major(engine: Engine) -> int:
+    with engine.connect() as connection:
+        number: str = connection.execute(text("show server_version_num")).scalar_one()
+    return int(number) // 10000
 
 
 def add_events(app: Engine, count: int) -> None:
@@ -70,9 +86,10 @@ def restored(owner: Engine, app: Engine, database_url: str, tmp_path: Path) -> I
     """A restore of the test database into a new database, as the runbook does it: dump in
     the custom format, create an empty database, ``pg_restore --no-owner``."""
     add_events(app, 3)
+    major = server_major(owner)
     dump = tmp_path / "argus.dump"
     subprocess.run(  # noqa: S603  the PostgreSQL tools with the test database's own URL
-        [tool("pg_dump"), "--format=custom", f"--file={dump}", libpq_url(database_url)],
+        [tool("pg_dump", major), "--format=custom", f"--file={dump}", libpq_url(database_url)],
         check=True,
     )
     name = f"argus_restore_{uuid.uuid4().hex[:8]}_test"
@@ -81,7 +98,7 @@ def restored(owner: Engine, app: Engine, database_url: str, tmp_path: Path) -> I
     try:
         subprocess.run(  # noqa: S603  the PostgreSQL tools with the test database's own URL
             [
-                tool("pg_restore"),
+                tool("pg_restore", major),
                 "--no-owner",
                 "--exit-on-error",
                 f"--dbname={libpq_url(database_url, name)}",

@@ -91,7 +91,7 @@ The new server has the same Entra admins and settings as the original. Continue 
      --start-ip-address $(curl -s https://api.ipify.org) --end-ip-address $(curl -s https://api.ipify.org)
    ```
 
-4. **Load the backup.** ARGUS needs only its own role `argus_app`, so create that by hand instead of running all of `roles.sql`. Then load the ARGUS database:
+4. **Load the backup.** ARGUS needs only its own role `argus_app`, so create that by hand instead of running all of `roles.sql`. Use `pg_restore` of PostgreSQL 16, the server's version: a newer one writes settings that 16 refuses (`pg_restore --version` shows it). Then load the ARGUS database:
 
    ```
    export PGHOST=psql-argus-restore-<yyyymmdd>.postgres.database.azure.com PGSSLMODE=require
