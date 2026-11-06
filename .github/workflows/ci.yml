@@ -271,11 +271,12 @@ jobs:
         run: test "$(docker run --rm argus:ci id -u)" != "0"
       - name: Run the migrations as the admin
         run: python tools/deploy.py migrate
-      - name: Give the app identity its database role
+      - name: Give the app identity its database role and keep the database in the backup
         run: |
           psql --dbname postgres --file standins/postgres/pgaadauth.sql
           python tools/deploy.py app-db-role \
             --identity-name "$APP_IDENTITY_NAME" --object-id "$APP_IDENTITY_OBJECT_ID"
+          python tools/deploy.py database-owner
       - name: Start the app like Azure does
         run: |
           docker run -d --name argus --network host \

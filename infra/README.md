@@ -16,6 +16,7 @@ Everything sits in ARGUS's own resource group in Germany West Central.
 | Key Vault (Azure roles only, purge protection) | `modules/keyvault.bicep` | Every secret. The app may read secrets, nothing else. |
 | Storage account for originals, geo redundant into Germany North | `modules/documents.bicep` | Original emails and attachments, unchangeable for 4018 days (NF-01). See "How long originals are kept" below. |
 | PostgreSQL Flexible Server 16, smallest burstable size, 35 days of backups | `modules/database.bicep` | Case data and audit log. Entra ID sign in only, no password exists. |
+| Backup vault, geo redundant into Germany North | `modules/backup.bicep` | Long term backups of the database: every Sunday, the first of each month kept `databaseBackupYears` (10) years (#82, ADR 0007). |
 | Azure OpenAI with an EU model deployment | `modules/ai.bicep` | Sorting emails (ADR 0006). |
 | Azure AI Document Intelligence | `modules/ai.bicep` | Reading PDFs and scans (ADR 0006). |
 | Container Apps environment and the web app | `modules/apps.bicep` | Runs ARGUS. The app signs in to the database as its own Entra role and works as `argus_app`. The scheduled jobs from ADR 0001 join this environment as each job story adds its command. |
@@ -57,10 +58,12 @@ These need rights the pipeline must never have. The full runbook with every comm
 2. Deploy the EU policy once, assign the built in policy that keeps Key Vault on Azure roles, and the policy that blocks new sign ins (federated credentials) for identities in `rg-argus`:
    `az deployment sub create --location germanywestcentral --template-file infra/policy/eu-only.bicep --parameters resourceGroupName=rg-argus`
 3. Create the app identity `id-argus-app`, then the deploy and preview identities with their GitHub trust. The deploy identity gets Contributor on `rg-argus`, plus "Role Based Access Control Administrator" limited to the two roles the templates hand out (AcrPull and Key Vault Secrets User) and to the app identity. It gets no right to read Key Vault secrets and no right to change policies. The preview identity may only read and ask for a what if.
-4. After the first deploy, put a delete lock on the storage account for originals and on the database server, so nobody can delete either one while the retention lock is still off. The deploy identity cannot create or remove locks, which is why this stays Arita's step. The account and server names are in the deployment outputs `documentsAccountName` and `databaseServerName`.
+4. After the first deploy, put a delete lock on the storage account for originals, the database server and the backup vault, so nobody can delete any of them while the retention lock is still off. The deploy identity cannot create or remove locks, which is why this stays Arita's step. The names are in the deployment outputs `documentsAccountName`, `databaseServerName` and `backupVaultName`.
    `az lock create --name argus-keep --lock-type CanNotDelete --resource-group rg-argus --resource-type Microsoft.Storage/storageAccounts --resource-name <documents account>`
    `az lock create --name argus-keep --lock-type CanNotDelete --resource-group rg-argus --resource-type Microsoft.DBforPostgreSQL/flexibleServers --resource-name <database server>`
+   `az lock create --name argus-keep --lock-type CanNotDelete --resource-group rg-argus --resource-type Microsoft.DataProtection/backupVaults --resource-name <backup vault>` (output `backupVaultName`, #82)
 5. After the first deploy, put the Microsoft Graph and Wise secrets into Key Vault.
+6. After the first deploy, give the backup vault's identity its two roles and switch `databaseBackupProtected` on, so the long term backup of the database starts. The commands are in [docs/operations/backup-and-restore.md](../docs/operations/backup-and-restore.md).
 
 ## How long originals are kept
 
@@ -77,5 +80,7 @@ Switch it on only when all of this is true:
 - The first deploy has run. Azure only accepts a new policy in the unlocked state.
 - Max ASP's tax advisor confirmed the period (ADR 0001, question 2).
 - ARGUS runs in production, not in a test setup.
+
+The same switch locks the database's Backup vault for good (ADR 0007): its backups can then never be deleted early, and soft delete can never be turned off.
 
 How: change `param retentionLocked = false` to `true` in `infra/main.bicepparam` in a PR of its own. Arita merges it, and the pipeline applies it. Agents never open this PR, and the pipeline never changes the value by itself. After that the line stays `true`; setting it back to `false` would make every later deploy fail.

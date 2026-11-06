@@ -40,6 +40,14 @@ param retentionDays int = 4018
 @description('Lock the document retention policy for good. Off by default. Only Arita switches it on (infra/README.md).')
 param retentionLocked bool = false
 
+@description('Years the monthly long term backup of the database is kept (#82, ADR 0007). 10 is the most Azure Backup allows and the default until the tax advisor confirms the period.')
+@minValue(1)
+@maxValue(10)
+param databaseBackupYears int = 10
+
+@description('Start the long term backup of the database. Switch on only after the backup vault identity has its two roles (docs/operations/backup-and-restore.md).')
+param databaseBackupProtected bool = false
+
 @description('Entra object ID of the database admin, the identity that runs the migrations (#81).')
 @minLength(36)
 @maxLength(36)
@@ -146,6 +154,20 @@ module database 'modules/database.bicep' = {
   }
 }
 
+module backup 'modules/backup.bicep' = {
+  name: 'backup'
+  params: {
+    location: location
+    name: 'bvault-${prefix}-${suffix}'
+    tags: tags
+    serverId: database.outputs.id
+    serverName: database.outputs.name
+    retentionYears: databaseBackupYears
+    retentionLocked: retentionLocked
+    protectDatabase: databaseBackupProtected
+  }
+}
+
 module ai 'modules/ai.bicep' = {
   name: 'ai'
   params: {
@@ -203,4 +225,6 @@ output databaseName string = database.outputs.databaseName
 output registryName string = registry.outputs.name
 output appName string = apps.outputs.appName
 output documentsAccountName string = documents.outputs.name
+output backupVaultName string = backup.outputs.name
+output backupVaultPrincipalId string = backup.outputs.principalId
 output appUrl string = apps.outputs.appUrl

@@ -162,7 +162,8 @@ jobs:
             --start-ip-address "$address" --end-ip-address "$address" --output none
 
       # Signs in as the database admin (the deploy identity) with an Entra token, no password.
-      # Then maps the app identity to its own database role, a member of argus_app.
+      # Then maps the app identity to its own database role, a member of argus_app, and makes
+      # sure the database is not owned by azure_pg_admin, which the long term backup skips (#82).
       # If anything here fails, the run stops and the running version stays as it is.
       # tools/deploy.py keeps the database's error text out of this log, because it can
       # hold the failing row and the log is stored outside the EU (NF-03).
@@ -180,6 +181,7 @@ jobs:
           python tools/deploy.py migrate
           python tools/deploy.py app-db-role \
             --identity-name "$APP_IDENTITY_NAME" --object-id "$APP_IDENTITY_OBJECT_ID"
+          python tools/deploy.py database-owner
 
       # A rule that cannot be removed fails the run before the new image goes out.
       - name: Close the database to this runner again
