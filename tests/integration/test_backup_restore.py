@@ -8,7 +8,8 @@ check notices a restore that lost or changed events, and that ``tools/deploy.py
 database-owner`` hands a database owned by ``azure_pg_admin`` to the admin, because the long
 term backup would skip it otherwise.
 
-``pg_dump`` and ``pg_restore`` of PostgreSQL 16 must be on the PATH; CI has them.
+``pg_dump`` and ``pg_restore`` of the server's major version must be on the PATH. CI puts
+small wrappers there that run them from the ``postgres:16`` image.
 """
 
 import importlib.util
@@ -88,24 +89,28 @@ def restored(owner: Engine, app: Engine, database_url: str, tmp_path: Path) -> I
     add_events(app, 3)
     major = server_major(owner)
     dump = tmp_path / "argus.dump"
-    subprocess.run(  # noqa: S603  the PostgreSQL tools with the test database's own URL
-        [tool("pg_dump", major), "--format=custom", f"--file={dump}", libpq_url(database_url)],
-        check=True,
-    )
+    # Through stdout and stdin, so the tools may also run in a container (CI does that).
+    with dump.open("wb") as out:
+        subprocess.run(  # noqa: S603  the PostgreSQL tools with the test database's own URL
+            [tool("pg_dump", major), "--format=custom", libpq_url(database_url)],
+            check=True,
+            stdout=out,
+        )
     name = f"argus_restore_{uuid.uuid4().hex[:8]}_test"
     with owner.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
         connection.execute(text(f'create database "{name}"'))
     try:
-        subprocess.run(  # noqa: S603  the PostgreSQL tools with the test database's own URL
-            [
-                tool("pg_restore", major),
-                "--no-owner",
-                "--exit-on-error",
-                f"--dbname={libpq_url(database_url, name)}",
-                str(dump),
-            ],
-            check=True,
-        )
+        with dump.open("rb") as source:
+            subprocess.run(  # noqa: S603  the PostgreSQL tools with the test database's own URL
+                [
+                    tool("pg_restore", major),
+                    "--no-owner",
+                    "--exit-on-error",
+                    f"--dbname={libpq_url(database_url, name)}",
+                ],
+                check=True,
+                stdin=source,
+            )
         yield make_url(database_url).set(database=name).render_as_string(hide_password=False)
     finally:
         with owner.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:

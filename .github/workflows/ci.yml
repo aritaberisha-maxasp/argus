@@ -46,12 +46,18 @@ jobs:
       - name: Install Tesseract
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-deu
       # The restore tests (#82) dump and restore the test database. The runner's own pg_dump is
-      # newer than the PostgreSQL 16 service and writes settings 16 does not know, so use the
-      # tools of the same major version, as the restore runbook asks.
-      - name: Install the PostgreSQL 16 tools
+      # newer than the PostgreSQL 16 service and writes settings 16 does not know, so the tests
+      # use pg_dump and pg_restore from the same postgres:16 image as the service, as the
+      # restore runbook asks for the server's own version.
+      - name: Use the PostgreSQL 16 tools
         run: |
-          sudo apt-get install -y --no-install-recommends postgresql-client-16
-          echo /usr/lib/postgresql/16/bin >> "$GITHUB_PATH"
+          mkdir -p "$RUNNER_TEMP/pg16"
+          for tool in pg_dump pg_restore; do
+            printf "#!/bin/sh\nexec docker run --rm -i --network host postgres:16 %s \"\$@\"\n" "$tool" \
+              > "$RUNNER_TEMP/pg16/$tool"
+            chmod +x "$RUNNER_TEMP/pg16/$tool"
+          done
+          echo "$RUNNER_TEMP/pg16" >> "$GITHUB_PATH"
       - name: Install
         run: pip install -e ".[dev]"
       - name: Lint
