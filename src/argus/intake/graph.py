@@ -21,7 +21,7 @@ from collections.abc import Callable, Generator, Iterator
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Protocol
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote, unquote, urlsplit
 
 import httpx
 from pydantic import SecretStr
@@ -41,9 +41,22 @@ MAX_RETRY_AFTER = 120.0
 # Graph message IDs are base64url like strings. Anything else in a path is refused.
 _MESSAGE_ID = r"[A-Za-z0-9_\-=]+"
 
+# The forms of "the Inbox messages of one mailbox" that Graph writes into a paging link, after
+# percent decoding and in lower case: users/<mailbox> or users('<mailbox>'), then
+# mailFolders/inbox or mailFolders('inbox'). The mailbox part is compared with ours afterwards.
+_INBOX_PAGE_PATH = re.compile(
+    r"users(?:/(?P<plain>[^/()']+)|\('(?P<quoted>[^/()']+)'\))"
+    r"/mailfolders(?:/inbox|\('inbox'\))/messages"
+)
+
 
 class GraphCallRefused(PermissionError):
     """ARGUS refused to send a Graph request: not on the allowlist, or the token is too wide."""
+
+
+class GraphPagingRefused(GraphCallRefused):
+    """Graph gave a paging link that does not point at the Inbox of our mailbox. The sweep stops
+    loudly instead of quietly reading only the first page (#90)."""
 
 
 class GraphApiError(RuntimeError):
@@ -327,8 +340,42 @@ class GraphClient:
                     internet_message_id=item.get("internetMessageId"),
                     received_at=_parse_time(item.get("receivedDateTime")),
                 )
-            # The next link is absolute and carries its own query; the guard checks its host.
-            url, params = page.get("@odata.nextLink", ""), None
+            # The next link is absolute and carries its own query (the skip or skip token).
+            link = page.get("@odata.nextLink")
+            url, params = (self._next_page(link) if link else ""), None
+
+    def _next_page(self, link: Any) -> str:
+        """The URL for the next page of the Inbox, built from Graph's ``@odata.nextLink``.
+
+        Real Graph may write the mailbox as ``users('...')`` or percent encode the ``@``, and
+        the Inbox as ``mailFolders('Inbox')``. Those all mean our Inbox, so the next page is
+        asked for on our own allowlisted path with Graph's query. Any other link (another host,
+        a mailbox GUID, another mailbox or folder) is refused with a clear error, so a sweep
+        never silently stops after the first page (#90)."""
+        if not isinstance(link, str):
+            raise GraphPagingRefused("refused Graph paging link: it is not text")
+        url = httpx.URL(link)
+        base = self._http.base_url
+        if (url.scheme, url.host, url.port) != (base.scheme, base.host, base.port):
+            raise GraphPagingRefused(
+                f"refused Graph paging link to another host: {url.host or '(none)'}"
+            )
+        path = url.raw_path.decode("ascii").partition("?")[0]
+        prefix = base.raw_path.decode("ascii").rstrip("/") + "/"
+        found = (
+            _INBOX_PAGE_PATH.fullmatch(unquote(path[len(prefix) :]).lower())
+            if path.startswith(prefix)
+            else None
+        )
+        if found is None or (found["plain"] or found["quoted"]) != self.mailbox.lower():
+            log.error("Refused Graph paging link %s, the sweep stops after this page", path)
+            raise GraphPagingRefused(
+                f"refused Graph paging link {path}: it does not name the Inbox of the mailbox"
+                " as ARGUS knows it, so the sweep stops here instead of skipping emails"
+                " (see docs/runbooks/go-live.md)"
+            )
+        query = url.query.decode("ascii")
+        return f"{self._user}/mailFolders/inbox/messages" + (f"?{query}" if query else "")
 
     def get_raw(self, message_id: str) -> bytes:
         """The email exactly as received, as an .eml file with every attachment in it."""

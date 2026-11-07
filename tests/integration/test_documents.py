@@ -9,6 +9,7 @@ import hashlib
 from email import message_from_bytes, policy
 from email.message import EmailMessage
 from pathlib import Path
+from typing import Any
 
 import pytest
 from azure.storage.blob import BlobClient, BlobServiceClient
@@ -39,10 +40,12 @@ from argus.documents.store import (
     FingerprintMismatch,
     location_of,
 )
+from argus.intake.graph import InboxMessage
+from argus.intake.records import mark_stored, see_email
 
 EMAILS = Path(__file__).resolve().parents[1] / "fixtures" / "emails"
 INTAKE = Actor.system("intake")
-_email_ids = iter(range(5_000_001, 6_000_000))
+_graph_ids = iter(range(5_000_001, 6_000_000))
 
 
 def fixture(name: str) -> bytes:
@@ -200,13 +203,23 @@ def test_a_location_needs_a_real_fingerprint() -> None:
 # --- AC: the fingerprint is recorded on the case and in the audit log ---
 
 
+def email_record(app: Engine) -> int:
+    """A new email record at step seen. Every document belongs to one (#90)."""
+    with unit_of_work(app, INTAKE) as db:
+        record, _ = see_email(db, InboxMessage(f"AAk-documents-{next(_graph_ids)}", None, None))
+    return record.id
+
+
 def stored_and_recorded(
     app: Engine, documents: AzureDocumentStore, name: str
 ) -> tuple[int, list[int]]:
-    email_id = next(_email_ids)
+    """Store an email and record it the way the sweep does: the email record moves to stored
+    with the raw file's fingerprint, and its files are recorded in the same transaction."""
     stored = store_email(documents, fixture(name))
     with unit_of_work(app, INTAKE) as db:
-        return email_id, record_email_documents(db, email_id, stored)
+        record, _ = see_email(db, InboxMessage(f"AAk-documents-{next(_graph_ids)}", None, None))
+        assert mark_stored(db, record.id, stored.raw.sha256, stored.raw.location)
+        return record.id, record_email_documents(db, record.id, stored)
 
 
 @pytest.mark.req("NF-01")
@@ -277,9 +290,14 @@ def test_recording_the_same_email_again_adds_nothing(
     assert len(ids) == 4
     with app.connect() as db:
         count: int = db.execute(
-            text("select count(*) from audit_event where email_id = :e"), {"e": email_id}
+            text(
+                "select count(*) from audit_event where email_id = :e"
+                " and event_type in ('email_seen', 'email_stored', 'document_stored')"
+            ),
+            {"e": email_id},
         ).scalar_one()
-    assert count == 4
+    # Other tests write events with made up email IDs, so only these types are counted.
+    assert count == 2 + 4  # email_seen and email_stored, then one document_stored per file
 
 
 @pytest.mark.req("NF-01")
@@ -406,11 +424,79 @@ def test_the_application_cannot_write_a_document_event_itself(app: Engine, event
 
 @pytest.mark.req("NF-01")
 def test_a_record_without_an_actor_is_refused(app: Engine) -> None:
+    email_id = email_record(app)
     with pytest.raises(DBAPIError, match=r"argus\.actor is not set"), app.begin() as db:
         db.execute(
             text(
                 "insert into stored_document (email_id, kind, sha256, location, size_bytes,"
-                " content_type) values (1, 'email', repeat('c', 64),"
+                " content_type) values (:e, 'email', repeat('c', 64),"
                 " 'sha256/' || repeat('c', 64), 1, 'message/rfc822')"
-            )
+            ),
+            {"e": email_id},
         )
+
+
+# --- #90: every document belongs to an email record, and the raw file matches it ---
+
+
+def insert_document(db: Any, email_id: int, kind: str, sha256: str) -> None:
+    db.execute(
+        text(
+            "insert into stored_document (email_id, kind, sha256, location, size_bytes,"
+            " content_type) values (:e, :kind, :sha, 'sha256/' || :sha, 1, 'message/rfc822')"
+        ),
+        {"e": email_id, "kind": kind, "sha": sha256},
+    )
+
+
+def mark_raw(db: Any, email_id: int, sha256: str) -> None:
+    assert mark_stored(db, email_id, sha256, f"sha256/{sha256}")
+
+
+@pytest.mark.req("NF-01")
+@pytest.mark.parametrize("kind", ["email", "attachment"])
+def test_a_document_needs_an_email_record(app: Engine, kind: str) -> None:
+    with (
+        pytest.raises(CaseRuleBroken, match="foreign key"),
+        unit_of_work(app, INTAKE) as db,
+    ):
+        insert_document(db, 999_999_999, kind, "d" * 64)
+
+
+@pytest.mark.req("NF-01")
+def test_a_stored_email_needs_its_raw_file(app: Engine) -> None:
+    email_id = email_record(app)
+    with (
+        pytest.raises(CaseRuleBroken, match="raw file is not recorded"),
+        unit_of_work(app, INTAKE) as db,
+    ):
+        mark_raw(db, email_id, "e" * 64)
+
+
+@pytest.mark.req("NF-01")
+def test_the_raw_file_must_have_the_fingerprint_the_email_record_has(app: Engine) -> None:
+    email_id = email_record(app)
+    with pytest.raises(CaseRuleBroken), unit_of_work(app, INTAKE) as db:
+        mark_raw(db, email_id, "e" * 64)
+        insert_document(db, email_id, "email", "f" * 64)
+
+
+@pytest.mark.req("NF-01")
+def test_a_raw_file_needs_an_email_record_that_is_stored(app: Engine) -> None:
+    email_id = email_record(app)
+    with (
+        pytest.raises(CaseRuleBroken, match="does not match the stored copy"),
+        unit_of_work(app, INTAKE) as db,
+    ):
+        insert_document(db, email_id, "email", "e" * 64)
+
+
+@pytest.mark.req("NF-01")
+def test_the_checks_run_at_the_end_so_either_order_works(app: Engine) -> None:
+    first, second = email_record(app), email_record(app)
+    with unit_of_work(app, INTAKE) as db:
+        mark_raw(db, first, "1" * 64)
+        insert_document(db, first, "email", "1" * 64)
+        insert_document(db, second, "email", "2" * 64)
+        mark_raw(db, second, "2" * 64)
+        insert_document(db, second, "attachment", "3" * 64)

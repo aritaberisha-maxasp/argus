@@ -18,11 +18,18 @@ from argus.intake.graph import (
     GraphApiError,
     GraphCallRefused,
     GraphClient,
+    GraphPagingRefused,
     check_token,
     token_permissions,
 )
 from standins.graph.app import DELETED_ITEMS_ID, FIXTURES, MAILBOX, create_app, fake_token
-from tests.unit.intake.graph_helpers import TOKEN, StaticTokens, client_for, standin_transport
+from tests.unit.intake.graph_helpers import (
+    BASE_URL,
+    TOKEN,
+    StaticTokens,
+    client_for,
+    standin_transport,
+)
 
 
 @pytest.fixture
@@ -288,3 +295,89 @@ def test_ids_cannot_change_the_path_of_a_move_or_delete(app: FastAPI, bad_id: st
             with pytest.raises(GraphCallRefused):
                 call()
     assert app.state.mailbox.prefer_headers == []
+
+
+FAKE_PAGE_PATH = f"/v1.0/users/{MAILBOX}/mailFolders/inbox/messages"
+
+
+def reshaping_transport(app: FastAPI, shape: str) -> httpx.MockTransport:
+    """The fake Graph, but each paging link it writes is rewritten to ``shape`` (scheme, host
+    and path), the way real Graph might write it. The query (the skip) is kept (#90)."""
+    inner = standin_transport(app)
+
+    def forward(request: httpx.Request) -> httpx.Response:
+        answer = inner.handle_request(request)
+        body = answer.json() if answer.headers.get("content-type") == "application/json" else {}
+        link = body.get("@odata.nextLink") if isinstance(body, dict) else None
+        if not link:
+            return answer
+        _, _, query = link.partition("?")
+        body["@odata.nextLink"] = f"{shape}?{query}"
+        return httpx.Response(answer.status_code, json=body)
+
+    return httpx.MockTransport(forward)
+
+
+def reshaped_client(app: FastAPI, shape: str) -> GraphClient:
+    return GraphClient(StaticTokens(), MAILBOX, BASE_URL, transport=reshaping_transport(app, shape))
+
+
+@pytest.mark.req("IN-01")
+@pytest.mark.parametrize(
+    "path",
+    [
+        FAKE_PAGE_PATH,
+        f"/v1.0/users('{MAILBOX}')/mailFolders('Inbox')/messages",
+        f"/v1.0/users('{MAILBOX.replace('@', '%40')}')/mailFolders('inbox')/messages",
+        f"/v1.0/users/{MAILBOX.replace('@', '%40')}/mailFolders/Inbox/messages",
+        f"/v1.0/Users/{MAILBOX.upper()}/MailFolders/inbox/messages",
+    ],
+    ids=["as-the-fake", "quoted", "quoted-encoded", "encoded", "other-case"],
+)
+def test_a_paging_link_for_our_inbox_in_another_form_reads_every_page(
+    app: FastAPI, monkeypatch: pytest.MonkeyPatch, path: str
+) -> None:
+    monkeypatch.setattr("argus.intake.graph.PAGE_SIZE", 7)
+    with reshaped_client(app, f"https://graph.example{path}") as graph:
+        messages = list(graph.list_inbox())
+    assert len({m.id for m in messages}) == 50
+    assert len(app.state.mailbox.prefer_headers) == 8
+
+
+@pytest.mark.req("IN-01", "NF-06")
+@pytest.mark.parametrize(
+    "link",
+    [
+        "https://graph.example/v1.0/users/0f6b9c1e-2a7d-4c55-9a43-5d2e8b7c1f00"
+        "/mailFolders/inbox/messages",
+        "https://graph.example/v1.0/users('0f6b9c1e-2a7d-4c55-9a43-5d2e8b7c1f00')"
+        "/mailFolders('AAMkAGInbox0000')/messages",
+        "https://graph.example/v1.0/users/someone@maxasp.example/mailFolders/inbox/messages",
+        f"https://graph.example/v1.0/users/{MAILBOX}/mailFolders/sentitems/messages",
+        f"https://graph.example/beta/users/{MAILBOX}/mailFolders/inbox/messages",
+        f"https://elsewhere.example/v1.0/users/{MAILBOX}/mailFolders/inbox/messages",
+        f"http://graph.example/v1.0/users/{MAILBOX}/mailFolders/inbox/messages",
+        f"/v1.0/users/{MAILBOX}/mailFolders/inbox/messages",
+    ],
+    ids=[
+        "mailbox-guid",
+        "guid-and-folder-id",
+        "other-mailbox",
+        "other-folder",
+        "other-version",
+        "other-host",
+        "plain-http",
+        "relative",
+    ],
+)
+def test_a_paging_link_of_an_unknown_shape_stops_the_listing_with_a_clear_refusal(
+    app: FastAPI, monkeypatch: pytest.MonkeyPatch, link: str
+) -> None:
+    monkeypatch.setattr("argus.intake.graph.PAGE_SIZE", 7)
+    with reshaped_client(app, link) as graph:
+        listing = graph.list_inbox()
+        first_page = [next(listing) for _ in range(7)]
+        with pytest.raises(GraphPagingRefused, match="paging link"):
+            next(listing)
+    assert len(first_page) == 7
+    assert len(app.state.mailbox.prefer_headers) == 1, "the odd link never reached Graph"

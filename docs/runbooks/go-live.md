@@ -8,7 +8,7 @@ Things that must be done before ARGUS works on the real accounts mailbox, the re
 
 ## Checks the team runs
 
-- [ ] Mailbox sweep follow ups against the real mailbox (#90).
+- [ ] **Graph paging link on the sandbox mailbox (#90).** Graph lists the Inbox 50 emails at a time. The tests use the link shape of our fake Graph and a few shapes real Graph is known to write, but only the real service shows which one it uses. Once the sandbox mailbox is connected (#65), the team puts at least 60 synthetic test emails in its Inbox and runs one sweep. Pass: the log line `Mailbox sweep: N in Inbox` shows the same number as the Inbox in Outlook, and there is no `refused Graph paging link` error. If that error shows up, it names the link's path: a developer adds that shape to `argus.intake.graph` with a test, and this check runs again before ARGUS reads the real accounts mailbox.
 - [ ] Two weeks of shadow mode before ARGUS routes anything (#72).
 
 ## One time steps for Arita in Azure

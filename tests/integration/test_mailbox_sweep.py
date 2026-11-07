@@ -32,7 +32,7 @@ from argus.cases.store import (
 from argus.documents.email import EML_CONTENT_TYPE, StoredEmail, attachments_of
 from argus.documents.store import MemoryDocumentStore
 from argus.intake.graph import GraphClient, InboxMessage
-from argus.intake.records import EmailStep, get_email, see_email
+from argus.intake.records import EmailStep, get_email, mark_stored, see_email
 from argus.intake.sweep import (
     SWEEP_ACTOR,
     DocumentArchive,
@@ -316,6 +316,23 @@ def test_no_later_step_can_happen_before_the_email_is_stored(app: Engine, later:
 
 @pytest.mark.req("NF-01")
 @pytest.mark.usefixtures("clean")
+@pytest.mark.parametrize(
+    "location",
+    ["elsewhere/" + "a" * 64, "sha256/" + "b" * 64, "a" * 64],
+    ids=["other-prefix", "other-fingerprint", "no-prefix"],
+)
+def test_the_raw_location_is_named_by_the_fingerprint(app: Engine, location: str) -> None:
+    with unit_of_work(app, SWEEP_ACTOR) as db:
+        record, _ = see_email(db, InboxMessage("AAk-location", None, None))
+    with (
+        pytest.raises(CaseRuleBroken, match="mailbox_email_raw_location"),
+        unit_of_work(app, SWEEP_ACTOR) as db,
+    ):
+        mark_stored(db, record.id, "a" * 64, location)
+
+
+@pytest.mark.req("NF-01")
+@pytest.mark.usefixtures("clean")
 def test_stored_needs_the_fingerprint(app: Engine) -> None:
     with unit_of_work(app, SWEEP_ACTOR) as db:
         record, _ = see_email(db, InboxMessage("AAk-nofp", None, None))
@@ -332,6 +349,7 @@ def test_stored_needs_the_fingerprint(app: Engine) -> None:
     [
         ("raw_sha256 = repeat('0', 64)", CaseRuleBroken),
         ("raw_location = 'sha256/other'", CaseRuleBroken),
+        ("raw_location = 'elsewhere/' || raw_sha256", CaseRuleBroken),
         ("step = 'seen', raw_sha256 = null, raw_location = null", CaseRuleBroken),
         ("graph_message_id = 'AAk-other'", NotAllowed),
         ("received_at = now()", NotAllowed),
@@ -359,12 +377,21 @@ def test_the_app_cannot_delete_an_email_record(app: Engine, graph: GraphClient) 
 
 @pytest.mark.req("NF-01")
 @pytest.mark.usefixtures("clean")
-@pytest.mark.parametrize("statement", ["delete from mailbox_email", "truncate mailbox_email"])
+@pytest.mark.parametrize(
+    ("statement", "refusal"),
+    [
+        ("delete from mailbox_email", "cannot be deleted"),
+        # The stored documents reference the records (#90), so PostgreSQL refuses a truncate
+        # before the table's own guard runs. With cascade, a guard of the tables refuses it.
+        ("truncate mailbox_email", "referenced in a foreign key constraint"),
+        ("truncate mailbox_email cascade", "cannot be deleted|append only"),
+    ],
+)
 def test_not_even_the_owner_can_remove_an_email_record(
-    owner: Engine, app: Engine, graph: GraphClient, statement: str
+    owner: Engine, app: Engine, graph: GraphClient, statement: str, refusal: str
 ) -> None:
     sweep(app, graph, MemoryArchive())
-    with pytest.raises(DBAPIError, match="cannot be deleted"), owner.begin() as connection:
+    with pytest.raises(DBAPIError, match=refusal), owner.begin() as connection:
         connection.execute(text(statement))
     assert len(records(app)) == FIXTURE_COUNT
 
