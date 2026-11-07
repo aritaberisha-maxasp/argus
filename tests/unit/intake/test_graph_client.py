@@ -358,6 +358,9 @@ def test_a_paging_link_for_our_inbox_in_another_form_reads_every_page(
         f"https://elsewhere.example/v1.0/users/{MAILBOX}/mailFolders/inbox/messages",
         f"http://graph.example/v1.0/users/{MAILBOX}/mailFolders/inbox/messages",
         f"/v1.0/users/{MAILBOX}/mailFolders/inbox/messages",
+        # The whole path must match, not just a part of it.
+        f"https://graph.example/v1.0/x/users/{MAILBOX}/mailFolders/inbox/messages",
+        f"https://graph.example/v1.0/users/{MAILBOX}/mailFolders/inbox/messages/delta",
     ],
     ids=[
         "mailbox-guid",
@@ -368,6 +371,8 @@ def test_a_paging_link_for_our_inbox_in_another_form_reads_every_page(
         "other-host",
         "plain-http",
         "relative",
+        "extra-segment-before",
+        "extra-segment-after",
     ],
 )
 def test_a_paging_link_of_an_unknown_shape_stops_the_listing_with_a_clear_refusal(
