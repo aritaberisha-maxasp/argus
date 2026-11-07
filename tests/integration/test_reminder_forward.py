@@ -50,6 +50,9 @@ from standins.graph.app import MAILBOX, Mailbox, create_app
 from tests.unit.intake.graph_helpers import BASE_URL, TOKEN, StaticTokens, standin_transport
 from tests.unit.sorting_helpers import EMAILS, decision_for, read_fixture_email
 
+# The live mode behaviour of ARGUS (#72): shadow mode is the default, so these tests switch it.
+pytestmark = pytest.mark.usefixtures("live")
+
 # Synthetic, like every address in the fixtures. The real one is a setting (IN-05).
 FORWARD_TO = "benjamin@maxasp.example"
 REMINDERS = ["E25", "E26", "E27", "E28", "E29", "E30", "E31"]

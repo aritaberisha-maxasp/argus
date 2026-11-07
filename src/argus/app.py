@@ -4,9 +4,10 @@ import logging
 import os
 from collections.abc import Callable
 from pathlib import Path
+from typing import Annotated
 
 from alembic.script import ScriptDirectory
-from fastapi import FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import Engine, text
@@ -18,14 +19,18 @@ from argus.auth import (
     CurrentUser,
     NoApproversYet,
     Role,
+    SignedInUser,
     TokenVerifier,
     install_sign_in,
     may_view_case,
+    require_role,
     verifier_from_env,
 )
 from argus.cases.model import CaseKind, CaseStatus
 from argus.cases.store import get_case
 from argus.db import engine_from_env
+from argus.intake.mode import IntakeMode, intake_mode, switch_intake_mode
+from argus.intake.shadow import ShadowReport, shadow_report
 
 log = logging.getLogger(__name__)
 
@@ -63,6 +68,27 @@ class CaseView(BaseModel):
     document_number: str | None
     gross_cents: int | None
     currency: str | None
+
+
+class ModeView(BaseModel):
+    """Whether ARGUS only proposes routes (shadow) or acts on the mailbox (live) (#72)."""
+
+    mode: IntakeMode
+
+
+class ModeChange(BaseModel):
+    mode: IntakeMode
+
+
+class ModeChanged(BaseModel):
+    mode: IntakeMode
+    changed: bool  # False when ARGUS already ran in that mode; nothing was logged then
+
+
+# Only the admin (Arita) may switch to live mode, and back (#72, ADR 0008).
+Admin = Annotated[SignedInUser, Depends(require_role(Role.ADMIN))]
+# The shadow report shows which emails ARGUS got wrong, so only finance and admin see it.
+FinanceOrAdmin = Annotated[SignedInUser, Depends(require_role(Role.FINANCE, Role.ADMIN))]
 
 
 # Routes anyone may call. They carry no business data. Every other route needs sign in, and a
@@ -144,6 +170,28 @@ def create_app(
             gross_cents=case.gross_cents,
             currency=case.currency,
         )
+
+    @app.get("/intake/mode")
+    def read_mode(user: CurrentUser) -> ModeView:
+        """Whether ARGUS runs in shadow or live mode."""
+        with engine().connect() as connection:
+            return ModeView(mode=intake_mode(connection))
+
+    @app.put("/intake/mode")
+    def change_mode(change: ModeChange, user: Admin) -> ModeChanged:
+        """Switch between shadow and live mode. Only the admin may; the database writes the
+        switch into the audit log with their Entra object ID (#72)."""
+        changed = switch_intake_mode(engine(), user.actor, change.mode)
+        if changed:
+            log.warning("user %s switched ARGUS to %s mode", user.object_id, change.mode)
+        return ModeChanged(mode=change.mode, changed=changed)
+
+    @app.get("/intake/shadow-report")
+    def read_shadow_report(user: FinanceOrAdmin) -> ShadowReport:
+        """What ARGUS proposed in shadow mode against what the person did, per category, and
+        every invoice ARGUS would have sent to Other (#72)."""
+        with engine().connect() as connection:
+            return shadow_report(connection)
 
     return app
 

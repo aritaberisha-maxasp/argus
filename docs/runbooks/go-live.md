@@ -6,10 +6,15 @@ Things that must be done before ARGUS works on the real accounts mailbox, the re
 
 - [ ] **Partner email domain list.** Max ASP sends one list of vendors and customers with their DATEV account number and the email domain they send from, for example `muster-buerobedarf.de`. ARGUS loads it once. Afterwards the exception queue tells a person when an invoice comes from a new domain, so it can be added. Without the list every partner counts as an unknown sender, which is safe but sends more invoices to manual checks. Decided by Arita on #70 (4 Nov 2026). Arita asks Max ASP for it.
 
+- [ ] **Mail folder list for the shadow run.** The folders the person who sorts the accounts Inbox files emails into today, and what each one holds (incoming invoices, outgoing invoices, payment reminders, other). ARGUS uses it to see what the person did with each email during the two weeks (#72). Folder names may only use letters and spaces for now. Arita asks Max ASP for it.
+
 ## Checks the team runs
 
 - [ ] Mailbox sweep follow ups against the real mailbox (#90).
-- [ ] Two weeks of shadow mode before ARGUS routes anything (#72).
+- [ ] Two weeks of shadow mode before ARGUS routes anything (#72). ARGUS starts in shadow mode on its own. See [docs/design/shadow-mode.md](../design/shadow-mode.md).
+  - [ ] The folder list below is set as `ARGUS_SHADOW_FOLDERS` before the two weeks start.
+  - [ ] After two weeks Arita opens the shadow report (`GET /intake/shadow-report`). The list of invoices ARGUS would have sent to Other must be empty. If it is not, the thresholds (`ARGUS_SORTING_THRESHOLD_*`) are raised and the run goes on.
+  - [ ] Arita switches to live mode (`PUT /intake/mode` with `{"mode": "live"}`). Only the admin role can, and the switch lands in the audit log.
 
 ## One time steps for Arita in Azure
 

@@ -39,6 +39,9 @@ from tests.unit.intake.graph_helpers import TOKEN
 from tests.unit.sorting_helpers import MODEL_ANSWERS, OWN_VAT_IDS, fixture_config
 from tests.unit.test_invoice_split import email_with_pdf, merged_pdf
 
+# The live mode behaviour of ARGUS (#72): shadow mode is the default, so these tests switch it.
+pytestmark = pytest.mark.usefixtures("live")
+
 TWO_IN_ONE_PDF = "<split.two-invoices-one-pdf@fixtures.argus.example>"
 E14_ID = "<E14.drei-rechnungen-eine-mail@fixtures.argus.example>"
 

@@ -108,7 +108,8 @@ def allowed_paths(
     base_path: str, mailbox: str, forward_to: str | None = None
 ) -> tuple[tuple[str, re.Pattern[str]], ...]:
     """The only Graph calls ARGUS makes, all on the one mailbox: list the Inbox, read an email,
-    find or create the ARGUS folders, move an email into one and delete an email (#26).
+    find or create the ARGUS folders, move an email into one and delete an email (#26), and
+    read the ID of the Inbox, so the shadow run can tell an email a person moved (#72).
 
     Forwarding a payment reminder (#27) is only allowed when a forward address is set: save a
     forward as a draft and send a draft. Reading a message, which shows whether it is still a
@@ -120,6 +121,7 @@ def allowed_paths(
         ("GET", re.compile(f"{user}/messages/{_MESSAGE_ID}")),
         ("GET", re.compile(f"{user}/mailFolders(/{_MESSAGE_ID}/childFolders)?")),
         ("GET", re.compile(f"{user}/mailFolders/deleteditems")),
+        ("GET", re.compile(f"{user}/mailFolders/inbox")),
         ("POST", re.compile(f"{user}/mailFolders(/{_MESSAGE_ID}/childFolders)?")),
         ("POST", re.compile(f"{user}/messages/{_MESSAGE_ID}/move")),
         ("DELETE", re.compile(f"{user}/messages/{_MESSAGE_ID}")),
@@ -234,6 +236,7 @@ class GraphClient:
         url = httpx.URL(base_url.rstrip("/") + "/")
         self._user = f"users/{quote(mailbox, safe='@')}"
         self._deleted_items: str | None = None
+        self._inbox: str | None = None
         self._sleep = sleep
         self._http = httpx.Client(
             base_url=url,
@@ -429,6 +432,13 @@ class GraphClient:
             raise GraphApiError(
                 "POST", f"{self._user}/messages/{message_id}/move", 200, "IdChangedOnMove"
             )
+
+    def inbox(self) -> str:
+        """The ID of the well known folder Inbox, read once (#72)."""
+        if self._inbox is None:
+            folder = self._get(f"{self._user}/mailFolders/inbox", {"$select": "id"})
+            self._inbox = str(folder.json()["id"])
+        return self._inbox
 
     def deleted_items(self) -> str:
         """The ID of the well known folder Deleted Items, read once."""

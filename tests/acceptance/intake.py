@@ -29,6 +29,7 @@ from argus.intake.email_text import EmailReader
 from argus.intake.filing import FOLDER_FOR
 from argus.intake.graph import GraphClient
 from argus.intake.invoices import Invoicing
+from argus.intake.mode import IntakeMode, switch_intake_mode
 from argus.intake.records import classification_of
 from argus.intake.sweep import DocumentArchive, Sorting, SweepResult, sweep
 from argus.reading.pages import Analysis, DocumentNotReadable, Page
@@ -108,6 +109,10 @@ def _message_id(raw: bytes) -> str:
     return str(email.message_from_bytes(raw, policy=policy.default).get("Message-ID", "")).strip()
 
 
+# A made up Entra object ID for the admin who switches to live mode (#72).
+ADMIN = Actor.user("44444444-4444-4444-8444-444444444444")
+
+
 def _wipe_emails(owner: Engine) -> None:
     """Start from no email records. Records cannot be deleted, so the owner turns the guards off
     for this cleanup only, as the ``clean`` fixture of the integration tests does."""
@@ -129,7 +134,16 @@ def _folder_of(fake: FastAPI) -> dict[str, str]:
 
 
 def run_intake(owner: Engine, app: Engine, documents: DocumentStore) -> IntakeRun:
+    """Both sweeps run in live mode, as after the shadow run (#72). Back to shadow after."""
     _wipe_emails(owner)
+    switch_intake_mode(owner, ADMIN, IntakeMode.LIVE)
+    try:
+        return _run_intake(app, documents)
+    finally:
+        switch_intake_mode(owner, ADMIN, IntakeMode.SHADOW)
+
+
+def _run_intake(app: Engine, documents: DocumentStore) -> IntakeRun:
     fake = create_app(token=TOKEN)
     graph = GraphClient(
         StaticTokens(),
