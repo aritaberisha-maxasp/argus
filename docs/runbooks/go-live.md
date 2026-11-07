@@ -14,7 +14,7 @@ Things that must be done before ARGUS works on the real accounts mailbox, the re
 - [ ] Two weeks of shadow mode before ARGUS routes anything (#72). ARGUS starts in shadow mode on its own. See [docs/design/shadow-mode.md](../design/shadow-mode.md).
   - [ ] The folder list below is set as `ARGUS_SHADOW_FOLDERS` before the two weeks start.
   - [ ] After two weeks Arita opens the shadow report (`GET /intake/shadow-report`). The list of invoices ARGUS would have sent to Other must be empty. If it is not, the thresholds (`ARGUS_SORTING_THRESHOLD_*`) are raised and the run goes on.
-  - [ ] Arita switches to live mode (`PUT /intake/mode` with `{"mode": "live"}`). Only the admin role can, and the switch lands in the audit log.
+  - [ ] Arita switches to live mode (`PUT /intake/mode` with `{"mode": "live", "reason": "<which report, what it showed>"}`). Only the admin role can, and the switch lands in the audit log.
 
 ## One time steps for Arita in Azure
 

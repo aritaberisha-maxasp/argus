@@ -149,6 +149,13 @@ def test_a_valid_token_gives_the_person_and_their_roles(entra: FakeEntra) -> Non
     assert str(user.actor) == f"user:{ALICE}"
 
 
+def test_the_sign_in_address_is_kept_when_entra_gives_one(entra: FakeEntra) -> None:
+    # Kept with a person's decisions, such as switching to live mode (ADR 0008, #72).
+    token = entra.token(ALICE, roles=[Role.APPROVER], sign_in_address="alice@maxasp.example")
+
+    assert entra.verifier().verify(token).sign_in_address == "alice@maxasp.example"
+
+
 def other_key_token(entra: FakeEntra, claims: dict[str, Any]) -> str:
     """Signed with a key that is not the fake's, but naming the fake's key ID."""
     stranger = rsa.generate_private_key(public_exponent=65537, key_size=2048)

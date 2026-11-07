@@ -29,7 +29,7 @@ from argus.intake.email_text import EmailReader
 from argus.intake.filing import FOLDER_FOR
 from argus.intake.graph import GraphClient
 from argus.intake.invoices import Invoicing
-from argus.intake.mode import IntakeMode, switch_intake_mode
+from argus.intake.mode import IntakeMode, SwitchedBy, switch_intake_mode
 from argus.intake.records import classification_of
 from argus.intake.sweep import DocumentArchive, Sorting, SweepResult, sweep
 from argus.reading.pages import Analysis, DocumentNotReadable, Page
@@ -110,7 +110,11 @@ def _message_id(raw: bytes) -> str:
 
 
 # A made up Entra object ID for the admin who switches to live mode (#72).
-ADMIN = Actor.user("44444444-4444-4444-8444-444444444444")
+ADMIN = SwitchedBy(
+    Actor.user("44444444-4444-4444-8444-444444444444"),
+    name="Test Admin",
+    reason="acceptance run in live mode",
+)
 
 
 def _wipe_emails(owner: Engine) -> None:

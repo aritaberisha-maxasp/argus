@@ -21,7 +21,13 @@ from argus.auth import Role
 from argus.cases.model import Actor
 from argus.cases.store import CaseRuleBroken, NotAllowed, record_event, unit_of_work
 from argus.intake.filing import Folders, database_clock, remove_due
-from argus.intake.mode import IntakeMode, intake_mode, is_live, switch_intake_mode
+from argus.intake.mode import (
+    IntakeMode,
+    SwitchedBy,
+    intake_mode,
+    is_live,
+    switch_intake_mode,
+)
 from argus.intake.records import EmailStep, mark_classified
 from argus.intake.shadow import (
     DELETED_ITEMS,
@@ -35,7 +41,7 @@ from argus.intake.sweep import SWEEP_ACTOR, DocumentArchive, Sorting, sweep
 from argus.sorting import Category, Route
 from standins.entra.app import FakeEntra
 from standins.graph.app import DELETED_ITEMS_ID, Folder
-from tests.integration.conftest import TEST_ADMIN, set_mode
+from tests.integration.conftest import TEST_ADMIN, TEST_SWITCH, set_mode
 from tests.integration.test_email_sorting import (
     INVOICE,
     OTHER,
@@ -65,6 +71,7 @@ FOLDER_LIST = PersonFolders(
 
 FINANCE = "33333333-3333-4333-8333-333333333333"  # made up
 APPROVER = "11111111-1111-4111-8111-111111111111"  # made up
+ADDRESS = "admin@maxasp.example"  # made up
 
 
 @pytest.fixture
@@ -142,10 +149,10 @@ def test_shadow_mode_is_the_default(owner: Engine) -> None:
 def test_the_mode_can_be_switched_both_ways(app: Engine) -> None:
     assert not is_live(app)
 
-    assert switch_intake_mode(app, TEST_ADMIN, IntakeMode.LIVE) is True
+    assert switch_intake_mode(app, TEST_SWITCH, IntakeMode.LIVE) is True
     assert is_live(app)
-    assert switch_intake_mode(app, TEST_ADMIN, IntakeMode.LIVE) is False  # already live
-    assert switch_intake_mode(app, TEST_ADMIN, IntakeMode.SHADOW) is True
+    assert switch_intake_mode(app, TEST_SWITCH, IntakeMode.LIVE) is False  # already live
+    assert switch_intake_mode(app, TEST_SWITCH, IntakeMode.SHADOW) is True
     with app.connect() as connection:
         assert intake_mode(connection) is IntakeMode.SHADOW
 
@@ -301,7 +308,7 @@ def test_the_database_takes_a_proposal_once_and_only_in_shadow_mode(
 @pytest.mark.usefixtures("shadow_mode")
 def test_a_job_can_never_switch_argus_to_live_mode(app: Engine) -> None:
     with pytest.raises(PermissionError):
-        switch_intake_mode(app, SWEEP_ACTOR, IntakeMode.LIVE)
+        switch_intake_mode(app, replace(TEST_SWITCH, actor=SWEEP_ACTOR), IntakeMode.LIVE)
     with (
         pytest.raises(CaseRuleBroken, match="only a person"),
         unit_of_work(app, Actor.system("mailbox-sweep")) as db,
@@ -315,22 +322,38 @@ def test_a_job_can_never_switch_argus_to_live_mode(app: Engine) -> None:
 def test_each_switch_is_in_the_audit_log_with_the_person(app: Engine) -> None:
     since = last_seq(app)
 
-    switch_intake_mode(app, TEST_ADMIN, IntakeMode.LIVE)
-    switch_intake_mode(app, TEST_ADMIN, IntakeMode.LIVE)  # no change, nothing logged
-    switch_intake_mode(app, TEST_ADMIN, IntakeMode.SHADOW)
+    switch_intake_mode(app, TEST_SWITCH, IntakeMode.LIVE)
+    switch_intake_mode(app, TEST_SWITCH, IntakeMode.LIVE)  # no change, nothing logged
+    switch_intake_mode(app, TEST_SWITCH, IntakeMode.SHADOW)
 
+    who = {"name": TEST_SWITCH.name, "reason": TEST_SWITCH.reason}
+    admin = {"actor_type": "user", "actor": TEST_ADMIN.name}
     assert mode_events(app, since) == [
-        {
-            "details": {"from": "shadow", "to": "live"},
-            "actor_type": "user",
-            "actor": TEST_ADMIN.name,
-        },
-        {
-            "details": {"from": "live", "to": "shadow"},
-            "actor_type": "user",
-            "actor": TEST_ADMIN.name,
-        },
+        {"details": {"from": "shadow", "to": "live", **who}, **admin},
+        {"details": {"from": "live", "to": "shadow", **who}, **admin},
     ]
+
+
+@pytest.mark.req("NF-01")
+@pytest.mark.usefixtures("shadow_mode")
+def test_a_switch_needs_the_persons_name_and_a_reason(app: Engine) -> None:
+    for name, reason in (("", "report checked"), ("Test Admin", ""), ("Test Admin", "  ")):
+        with pytest.raises(CaseRuleBroken, match="name and a reason"):
+            switch_intake_mode(app, SwitchedBy(TEST_ADMIN, name, reason), IntakeMode.LIVE)
+    # Setting only the mode, without who and why in the same transaction, is refused too, so
+    # a switch never reuses an earlier one's name or reason.
+    switch_intake_mode(app, TEST_SWITCH, IntakeMode.LIVE)
+    with (
+        pytest.raises(CaseRuleBroken, match="name and a reason"),
+        unit_of_work(app, TEST_ADMIN) as db,
+    ):
+        db.execute(text("update intake_mode set mode = 'shadow'"))
+    assert is_live(app)
+    with app.connect() as connection:
+        row = connection.execute(text("select changed_by_name, reason from intake_mode")).one()
+    assert tuple(row) == (TEST_SWITCH.name, TEST_SWITCH.reason)
+    with pytest.raises(NotAllowed), unit_of_work(app, TEST_ADMIN) as db:
+        db.execute(text("update intake_mode set reason = 'changed afterwards'"))
 
 
 @pytest.mark.req("NF-01")
@@ -361,9 +384,12 @@ def test_only_the_admin_can_switch_in_the_app(app: Engine) -> None:
     client = TestClient(create_app(lambda: app, sign_in=entra.verifier))
     since = last_seq(app)
 
-    def put(who: str, role: Role, mode: str) -> httpx.Response:
+    def put(who: str, role: Role, mode: str, reason: str = "report checked") -> httpx.Response:
+        token = entra.token(who, roles=[role], name="Arita Test", sign_in_address=ADDRESS)
         response: httpx.Response = client.put(
-            "/intake/mode", json={"mode": mode}, headers=token_for(entra, who, role)
+            "/intake/mode",
+            json={"mode": mode, "reason": reason},
+            headers={"Authorization": f"Bearer {token}"},
         )
         return response
 
@@ -379,7 +405,18 @@ def test_only_the_admin_can_switch_in_the_app(app: Engine) -> None:
     assert read.json() == {"mode": "live"}
     assert put(TEST_ADMIN.name, Role.ADMIN, "shadow").json() == {"mode": "shadow", "changed": True}
     assert put(TEST_ADMIN.name, Role.ADMIN, "half").status_code == 422
-    assert [e["actor"] for e in mode_events(app, since)] == [TEST_ADMIN.name] * 2
+    assert put(TEST_ADMIN.name, Role.ADMIN, "live", reason="").status_code == 422
+    assert put(TEST_ADMIN.name, Role.ADMIN, "live", reason="   ").status_code == 422
+    assert not is_live(app)
+    to_live, to_shadow = mode_events(app, since)
+    assert to_live["actor"] == to_shadow["actor"] == TEST_ADMIN.name
+    assert to_live["details"] == {
+        "from": "shadow",
+        "to": "live",
+        "name": "Arita Test",
+        "sign_in_address": ADDRESS,
+        "reason": "report checked",
+    }
 
 
 # AC: a report compares ARGUS's proposals with what the person did, per category, and lists

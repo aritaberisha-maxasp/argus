@@ -9,8 +9,15 @@ holds these rules:
 
 - Only a person can change the mode, never a job: the change needs a ``user:`` actor. The app
   lets only the admin role (Arita) do it (ADR 0008). The rows cannot be added or removed.
+- Every change names the person as they were at that moment (name, and sign in address when
+  Entra gives one) and a reason, next to the object ID that the actor carries. They come from
+  the same transaction (``SET LOCAL argus.switch_name``, ``argus.switch_address``,
+  ``argus.switch_reason``), so a switch never reuses an earlier one's. ADR 0008 asks
+  for that on every decision a person makes, because the object ID names nobody once the
+  Entra account is gone. The row keeps the last switch; the audit log keeps them all.
 - Every change is written into the audit log as ``intake_mode_changed`` with the mode before
-  and after. Only the trigger writes it; the app cannot write that event itself.
+  and after, the name, the address and the reason. Only the trigger writes it; the app cannot
+  write that event itself.
 - In shadow mode no email can reach the step ``classified``. That step is where cases and
   exceptions are opened (#30, #71), so ARGUS starts nothing for an email while it only proposes.
   The steps after it are not refused here: they are recorded after Graph did something, and the
@@ -51,7 +58,10 @@ UPGRADE = r"""
 create table intake_mode (
   id boolean primary key default true check (id),
   mode text not null default 'shadow' check (mode in ('shadow','live')),
-  changed_at timestamptz not null default clock_timestamp()
+  changed_at timestamptz not null default clock_timestamp(),
+  changed_by_name text check (length(btrim(changed_by_name)) between 1 and 200),
+  changed_by_address text check (length(btrim(changed_by_address)) between 3 and 320),
+  reason text check (length(btrim(reason)) between 3 and 500)
 );
 insert into intake_mode default values;
 
@@ -66,6 +76,14 @@ begin
   if (current_actor())[1] <> 'user' then
     raise exception 'only a person can switch between shadow and live mode';
   end if;
+  -- Who and why come from this transaction only (SET LOCAL), so a switch can never reuse the
+  -- name or reason of an earlier one.
+  new.changed_by_name := nullif(btrim(current_setting('argus.switch_name', true)), '');
+  new.changed_by_address := nullif(btrim(current_setting('argus.switch_address', true)), '');
+  new.reason := nullif(btrim(current_setting('argus.switch_reason', true)), '');
+  if new.changed_by_name is null or new.reason is null then
+    raise exception 'a switch between shadow and live mode needs the person''s name and a reason';
+  end if;
   new.id := old.id;
   new.changed_at := clock_timestamp();
   return new;
@@ -79,7 +97,10 @@ security definer
 set search_path = pg_catalog, public, pg_temp as $$
 begin
   insert into audit_event (event_type, details)
-  values ('intake_mode_changed', jsonb_build_object('from', old.mode, 'to', new.mode));
+  values ('intake_mode_changed',
+          jsonb_build_object('from', old.mode, 'to', new.mode, 'name', new.changed_by_name,
+                             'reason', new.reason)
+          || jsonb_strip_nulls(jsonb_build_object('sign_in_address', new.changed_by_address)));
   return null;
 end $$;
 create trigger intake_mode_audit after update on intake_mode

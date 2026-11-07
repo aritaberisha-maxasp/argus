@@ -5,13 +5,14 @@ not classify, route, move, forward or delete anything. A person still sorts the 
 mode ARGUS does all of that itself.
 
 Only a person can switch, never a job: the database refuses the change without a ``user:``
-actor and writes ``intake_mode_changed`` into the audit log. The web app lets only the admin
-role (Arita) do it.
+actor and writes ``intake_mode_changed`` into the audit log, with the person's name and their
+reason. The web app lets only the admin role (Arita) do it.
 
 Every step that acts on the mailbox asks :func:`is_live` right before it calls Graph, not only
 at the start of a sweep, so switching back to shadow mode stops ARGUS within one email.
 """
 
+from dataclasses import dataclass
 from enum import StrEnum
 
 from sqlalchemy import Connection, Engine, text
@@ -37,12 +38,33 @@ def is_live(engine: Engine) -> bool:
         return intake_mode(connection) is IntakeMode.LIVE
 
 
-def switch_intake_mode(engine: Engine, actor: Actor, mode: IntakeMode) -> bool:
-    """Switch to ``mode`` as ``actor``. Returns False when ARGUS already ran in that mode, in
-    which case nothing changes and nothing is logged. The database refuses a job as actor."""
-    if actor.kind != "user":
+@dataclass(frozen=True)
+class SwitchedBy:
+    """Who switched and why, as they were at that moment (ADR 0008): the object ID alone names
+    nobody once the Entra account is gone."""
+
+    actor: Actor  # user:<Entra object ID>
+    name: str
+    reason: str
+    sign_in_address: str | None = None
+
+
+def switch_intake_mode(engine: Engine, by: SwitchedBy, mode: IntakeMode) -> bool:
+    """Switch to ``mode``. Returns False when ARGUS already ran in that mode, in which case
+    nothing changes and nothing is logged. The database refuses a job as actor, and a switch
+    without a name or a reason, and writes all of it into ``intake_mode_changed``."""
+    if by.actor.kind != "user":
         raise PermissionError("only a person can switch between shadow and live mode")
-    with unit_of_work(engine, actor) as db:
+    with unit_of_work(engine, by.actor) as db:
+        for setting, value in (
+            ("argus.switch_name", by.name),
+            ("argus.switch_address", by.sign_in_address or ""),
+            ("argus.switch_reason", by.reason),
+        ):
+            db.execute(
+                text("select set_config(:setting, :value, true)"),
+                {"setting": setting, "value": value},
+            )
         changed = db.execute(
             text("update intake_mode set mode = :mode where mode <> :mode returning mode"),
             {"mode": mode.value},

@@ -9,7 +9,7 @@ from typing import Annotated
 from alembic.script import ScriptDirectory
 from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import Engine, text
 from sqlalchemy.exc import NoResultFound
 
@@ -29,7 +29,7 @@ from argus.auth import (
 from argus.cases.model import CaseKind, CaseStatus
 from argus.cases.store import get_case
 from argus.db import engine_from_env
-from argus.intake.mode import IntakeMode, intake_mode, switch_intake_mode
+from argus.intake.mode import IntakeMode, SwitchedBy, intake_mode, switch_intake_mode
 from argus.intake.shadow import ShadowReport, shadow_report
 
 log = logging.getLogger(__name__)
@@ -78,6 +78,8 @@ class ModeView(BaseModel):
 
 class ModeChange(BaseModel):
     mode: IntakeMode
+    # Why, for example "shadow report of 21 Nov, no invoice to Other". Kept in the audit log.
+    reason: str = Field(min_length=3, max_length=500, pattern=r"\S")
 
 
 class ModeChanged(BaseModel):
@@ -179,11 +181,19 @@ def create_app(
 
     @app.put("/intake/mode")
     def change_mode(change: ModeChange, user: Admin) -> ModeChanged:
-        """Switch between shadow and live mode. Only the admin may; the database writes the
-        switch into the audit log with their Entra object ID (#72)."""
-        changed = switch_intake_mode(engine(), user.actor, change.mode)
+        """Switch between shadow and live mode. Only the admin may, and must give a reason. The
+        database writes the switch into the audit log with their Entra object ID, their name
+        and sign in address as they are now, and the reason (#72, ADR 0008)."""
+        by = SwitchedBy(
+            actor=user.actor,
+            name=user.name,
+            reason=change.reason.strip(),
+            sign_in_address=user.sign_in_address,
+        )
+        changed = switch_intake_mode(engine(), by, change.mode)
         if changed:
-            log.warning("user %s switched ARGUS to %s mode", user.object_id, change.mode)
+            # Who and why are in the audit log; the app log only says that it happened.
+            log.warning("ARGUS was switched to %s mode", change.mode)
         return ModeChanged(mode=change.mode, changed=changed)
 
     @app.get("/intake/shadow-report")

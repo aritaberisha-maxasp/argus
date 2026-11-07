@@ -22,7 +22,7 @@ The mode lives in the database (table `intake_mode`), not in an environment vari
 
 Only the admin role (Arita, ADR 0008) can switch, through `PUT /intake/mode`. Everyone with an ARGUS role can read the mode at `GET /intake/mode`.
 
-The database adds two rules of its own: only a person can change the mode, never a job, and every change is written into the audit log as `intake_mode_changed` with the mode before and after and the person's Entra object ID. The app cannot write that event itself.
+The switch needs a short reason, for example "shadow report of 21 Nov, no invoice to Other". The database adds rules of its own: only a person can change the mode, never a job, and every change is written into the audit log as `intake_mode_changed` with the mode before and after, the person's Entra object ID, their name and sign in address as they were at that moment, and the reason (ADR 0008: the object ID alone names nobody once the account is gone). The name and reason must come with the switch itself, so a switch never reuses an earlier one's. The app cannot write that event itself.
 
 In shadow mode the database also refuses to classify an email. That step is where cases and exceptions are opened, so nothing downstream starts while ARGUS only proposes.
 
