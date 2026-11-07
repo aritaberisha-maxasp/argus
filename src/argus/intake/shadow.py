@@ -9,10 +9,15 @@ in now and records what that means, using Max ASP's folder list (:class:`PersonF
 folder for incoming invoices, one for outgoing invoices, one for payment reminders and so on.
 An email in Deleted Items, or gone from the mailbox, counts as Other. A folder that is not on
 the list is recorded as such, without a category, so the report shows it instead of guessing.
+Its Graph ID is kept (never its name), so when the list is set late or fixed, the next sweep
+gives those emails their category from the same folder.
 
 The report compares the two per category and lists every email the person treated as an
-invoice that ARGUS would have sent to Other. That list must be empty before Arita switches to
-live mode; the thresholds (:class:`argus.sorting.config.Thresholds`) are set from it.
+invoice that ARGUS would have sent to Other, and every email in a folder not on the list that
+ARGUS would have sent to Other, because that one may be an invoice too. Both lists must be
+empty before Arita switches to live mode; the thresholds
+(:class:`argus.sorting.config.Thresholds`) are set from them. The report warns when no folder
+list is set, so an empty list never reads as an all clear by mistake.
 
 The proposal and the person's folder are written once each; the database checks it and writes
 ``email_proposed`` and ``email_sorted_by_person`` into the audit log (migration 0012). Graph is
@@ -33,7 +38,7 @@ from sqlalchemy import Connection, Engine, text
 from argus.cases.model import Actor
 from argus.cases.store import unit_of_work
 from argus.intake.filing import Folders
-from argus.intake.graph import GraphClient
+from argus.intake.graph import FOLDER_NAME, GraphClient
 from argus.intake.mode import IntakeMode, intake_mode
 from argus.intake.records import EmailRecord, EmailStep
 from argus.sorting.models import ROUTE_FOR, Category, Route, SortingDecision
@@ -77,6 +82,11 @@ class PersonFolders:
         for path, category in parsed.items():
             if not isinstance(path, str) or not path.strip("/ "):
                 raise ValueError(f"{FOLDERS_ENV} has an empty folder path")
+            # Refused at start up, so one bad name never makes each sweep fail later.
+            if not all(FOLDER_NAME.fullmatch(name) for name in path.strip("/").split("/")):
+                raise ValueError(
+                    f"{FOLDERS_ENV}: {path!r} may only use letters and spaces in folder names"
+                )
             try:
                 folders[path.strip("/")] = Category(category)
             except ValueError:
@@ -145,19 +155,70 @@ def awaiting_person(connection: Connection) -> list[EmailRecord]:
 
 
 def mark_sorted_by_person(
-    connection: Connection, email_id: int, folder: str, category: Category | None
+    connection: Connection,
+    email_id: int,
+    folder: str,
+    category: Category | None,
+    folder_id: str | None,
 ) -> bool:
-    """Record where the person put the email and what it means. The database logs
-    ``email_sorted_by_person``. Returns False when it was already recorded."""
+    """Record where the person put the email, the folder's Graph ID and what it means. The
+    database logs ``email_sorted_by_person``. Returns False when it was already recorded."""
     result = connection.execute(
         text(
             """
-            update mailbox_email set person_folder = :folder, person_category = :category
+            update mailbox_email
+            set person_folder = :folder, person_category = :category, person_folder_id = :fid
             where id = :id and person_folder is null and proposal is not null
             returning id
             """
         ),
-        {"id": email_id, "folder": folder, "category": category.value if category else None},
+        {
+            "id": email_id,
+            "folder": folder,
+            "category": category.value if category else None,
+            "fid": folder_id,
+        },
+    )
+    return result.first() is not None
+
+
+def not_listed(connection: Connection) -> list[tuple[int, str]]:
+    """The emails recorded in a folder not on the list, with that folder's Graph ID."""
+    rows = connection.execute(
+        text(
+            """
+            select id, person_folder_id from mailbox_email
+            where person_folder = :folder and person_category is null
+              and person_folder_id is not null
+            order by id
+            """
+        ),
+        {"folder": NOT_LISTED},
+    )
+    return [(row.id, row.person_folder_id) for row in rows]
+
+
+def mark_mapped_later(
+    connection: Connection, email_id: int, folder_id: str, folder: str, category: Category
+) -> bool:
+    """Give an email recorded as "not on the list" the category of its folder, now that the
+    folder is on the list. Only once, and only for the same folder (migration 0012)."""
+    result = connection.execute(
+        text(
+            """
+            update mailbox_email set person_folder = :folder, person_category = :category
+            where id = :id and person_folder = :not_listed and person_category is null
+              and person_folder_id = :fid
+            returning id
+            """
+        ),
+        {
+            "id": email_id,
+            "folder": folder,
+            "category": category.value,
+            "not_listed": NOT_LISTED,
+            "fid": folder_id,
+        },
     )
     return result.first() is not None
 
@@ -165,6 +226,7 @@ def mark_sorted_by_person(
 @dataclass
 class ObservationResult:
     sorted_by_person: int = 0
+    mapped_later: int = 0  # emails "not on the list" whose folder is on the list now
     failed: int = 0
 
 
@@ -179,11 +241,28 @@ def observe_person(
     folder lookups, never a move or a new folder."""
     with engine.connect() as connection:
         pending = [r for r in awaiting_person(connection) if r.graph_message_id not in in_inbox]
+        unlisted = not_listed(connection)
     result = ObservationResult()
-    if not pending:
+    if not pending and not unlisted:
         return result
-    known = person_folders.resolve(Folders(graph))
-    inbox, deleted = graph.inbox(), graph.deleted_items()
+    try:
+        known = person_folders.resolve(Folders(graph))
+        inbox, deleted = graph.inbox(), graph.deleted_items()
+    except Exception:
+        # Graph throttled or down: counted as failed, the next sweep tries again.
+        log.exception("Shadow run: folder lookup failed, next sweep tries again")
+        result.failed += 1
+        return result
+    for email_id, folder_id in unlisted:
+        if folder_id not in known:
+            continue
+        path, listed = known[folder_id]
+        try:
+            with unit_of_work(engine, SHADOW_ACTOR) as db:
+                result.mapped_later += mark_mapped_later(db, email_id, folder_id, path, listed)
+        except Exception:
+            log.exception("Shadow run: email record %s not mapped, next sweep", email_id)
+            result.failed += 1
     for record in pending:
         try:
             where = graph.folder_of(record.graph_message_id)
@@ -200,7 +279,9 @@ def observe_person(
             else:
                 folder, category = NOT_LISTED, None
             with unit_of_work(engine, SHADOW_ACTOR) as db:
-                result.sorted_by_person += mark_sorted_by_person(db, record.id, folder, category)
+                result.sorted_by_person += mark_sorted_by_person(
+                    db, record.id, folder, category, where
+                )
         except Exception:
             # The record ID only: no sender, subject or content in the log (NF-03).
             log.exception("Shadow run: folder of email record %s not read, next sweep", record.id)
@@ -225,13 +306,14 @@ class CategoryRow:
 
 @dataclass(frozen=True)
 class MissedInvoice:
-    """An email the person treated as an invoice that ARGUS would have sent to Other (IN-06)."""
+    """An email ARGUS would have sent to Other that the person treated as an invoice (IN-06),
+    or filed in a folder not on the list, so it may be one."""
 
     email_id: int
     internet_message_id: str | None
     received_at: datetime | None
     person_folder: str
-    person_category: str
+    person_category: str | None  # None for a folder not on the list
     model_category: str | None
     model_confidence: float | None
     check_category: str | None
@@ -245,11 +327,17 @@ class ShadowReport:
     waiting: int  # proposed, not sorted by the person yet
     categories: list[CategoryRow]
     invoices_to_other: list[MissedInvoice]
+    # Emails in a folder not on the list that ARGUS would have sent to Other. Must be empty
+    # too: such an email may be an invoice.
+    not_listed_to_other: list[MissedInvoice]
+    folder_list: list[str]  # the folder paths on the list when the report ran
+    warnings: list[str]  # why the two lists above may be empty for the wrong reason
 
 
-def shadow_report(connection: Connection) -> ShadowReport:
+def shadow_report(connection: Connection, person_folders: PersonFolders) -> ShadowReport:
     """Compare ARGUS's proposals with what the person did, per category, and list every
-    invoice ARGUS would have sent to Other."""
+    invoice ARGUS would have sent to Other, and every email in a folder not on the list that
+    it would have sent to Other."""
     rows = connection.execute(
         text(
             """
@@ -261,6 +349,7 @@ def shadow_report(connection: Connection) -> ShadowReport:
     proposed = 0
     by_row: dict[str, Counter[str]] = {}
     missed: list[MissedInvoice] = []
+    unlisted_missed: list[MissedInvoice] = []
     for row in rows:
         proposed += 1
         if row["person_folder"] is None:
@@ -269,8 +358,9 @@ def shadow_report(connection: Connection) -> ShadowReport:
         route = str(proposal["route"])
         key = row["person_category"] or NOT_LISTED_ROW
         by_row.setdefault(key, Counter())[route] += 1
-        if row["person_category"] in INVOICES and route == Route.DELETION_FOLDER:
-            missed.append(
+        to_other = route == Route.DELETION_FOLDER
+        if to_other and (row["person_category"] in INVOICES or row["person_category"] is None):
+            (missed if row["person_category"] else unlisted_missed).append(
                 MissedInvoice(
                     email_id=row["id"],
                     internet_message_id=row["internet_message_id"],
@@ -285,6 +375,17 @@ def shadow_report(connection: Connection) -> ShadowReport:
     order = [c.value for c in Category] + [NOT_LISTED_ROW]
     categories = [_row(key, by_row[key]) for key in order if key in by_row]
     sorted_by_person = sum(row.emails for row in categories)
+    warnings: list[str] = []
+    if not person_folders.folders:
+        warnings.append(
+            f"No folder list is set ({FOLDERS_ENV}), so ARGUS cannot tell which emails the"
+            " person treated as invoices. The lists of emails sent to Other prove nothing yet."
+        )
+    if NOT_LISTED_ROW in by_row:
+        warnings.append(
+            f"{sum(by_row[NOT_LISTED_ROW].values())} emails are in folders not on the list."
+            " Add those folders to the list; the next sweep then gives them their category."
+        )
     return ShadowReport(
         mode=intake_mode(connection),
         proposed=proposed,
@@ -292,6 +393,9 @@ def shadow_report(connection: Connection) -> ShadowReport:
         waiting=proposed - sorted_by_person,
         categories=categories,
         invoices_to_other=missed,
+        not_listed_to_other=unlisted_missed,
+        folder_list=sorted(person_folders.folders),
+        warnings=warnings,
     )
 
 

@@ -496,7 +496,10 @@ def _check_id(value: str) -> None:
         raise GraphCallRefused("refused Graph call: not a Graph ID")
 
 
+# A folder name goes into a $filter, so only plain names are allowed.
+FOLDER_NAME = re.compile(r"[A-Za-z][A-Za-z ]{0,63}")
+
+
 def _check_folder_name(name: str) -> None:
-    # The name goes into a $filter, so only plain names are allowed.
-    if not re.fullmatch(r"[A-Za-z][A-Za-z ]{0,63}", name):
+    if not FOLDER_NAME.fullmatch(name):
         raise GraphCallRefused("refused Graph call: not a plain folder name")

@@ -21,6 +21,10 @@ from argus.cases.model import Actor
 from argus.cases.store import unit_of_work
 
 
+class StoppedByShadowMode(RuntimeError):
+    """ARGUS was switched to shadow mode while it was about to act on the mailbox."""
+
+
 class IntakeMode(StrEnum):
     SHADOW = "shadow"  # propose only, a person sorts the Inbox
     LIVE = "live"  # ARGUS sorts, routes, files and removes on its own

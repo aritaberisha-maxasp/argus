@@ -35,7 +35,9 @@ Once an email with a proposal has left the Inbox, the sweep asks Graph which fol
 ```
 
 - An email in Deleted Items, or gone from the mailbox, counts as Other.
-- An email in a folder that is not on the list is recorded as "A folder not on the list", without a category. The report shows it in its own row instead of guessing.
+- An email in a folder that is not on the list is recorded as "A folder not on the list", without a category. The report shows it in its own row instead of guessing. ARGUS keeps the folder's Graph ID, never its name, so when the list is set late or fixed, the next sweep gives those emails their category from the same folder. That is the only later change the database allows, and the audit log shows it with `mapped_later`.
+- Paths start at the top of the mailbox. A subfolder of the Inbox is written with the Inbox's own name, for example `Posteingang/Rechnungen` in a German mailbox.
+- A name with anything but letters and spaces is refused when ARGUS starts, so a bad list never makes each sweep fail. A Graph error while looking up the folders counts as one failure, and the next sweep tries again.
 - Both the proposal (`email_proposed`) and the person's folder (`email_sorted_by_person`) are written once and go into the audit log.
 
 Max ASP has to send the folder list. It is an item in the [go live runbook](../runbooks/go-live.md). Folder names can only use letters and spaces for now, the same rule as for the ARGUS folders.
@@ -46,7 +48,11 @@ Max ASP has to send the folder list. It is an item in the [go live runbook](../r
 
 - how many emails got a proposal, how many the person has sorted and how many are still waiting;
 - per category the person chose: how many emails, how often ARGUS proposed the same route, how often it would have asked a person (manual review) and how often it proposed something else, with the count per route;
-- every email the person treated as an invoice that ARGUS would have sent to Other, with the model's category and confidence and our checks' category. This list must be empty before Arita switches to live mode.
+- every email the person treated as an invoice that ARGUS would have sent to Other, with the model's category and confidence and our checks' category;
+- every email in a folder not on the list that ARGUS would have sent to Other, because it may be an invoice too;
+- the folder list it used, and warnings when the folder list is missing or emails sit in folders not on it.
+
+Both lists and the warnings must be empty before Arita switches to live mode. A report without a folder list never looks clean: it says so.
 
 ## After the switch
 

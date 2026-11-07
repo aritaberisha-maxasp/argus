@@ -32,7 +32,10 @@ On ``mailbox_email`` the shadow run adds:
 - ``person_folder`` and ``person_category``: where the email went after a person took it out
   of the Inbox, and what that folder means. Set once, only for an email with a proposal. The
   database writes ``email_sorted_by_person``. A folder that is not in the folder list has no
-  category.
+  category. ``person_folder_id`` keeps the Graph ID of the folder, never its name (NF-03), so
+  when the folder list is set late or fixed, an email recorded as "not on the list" gets its
+  category once, from the same folder. That is the only later change allowed, and it is logged
+  again with ``mapped_later``.
 
 Both new events start with ``email_``, which 0004 already refuses from the app.
 
@@ -134,19 +137,23 @@ alter table mailbox_email
                                       'forward_reminder','deletion_folder','manual_review'))),
   add column proposed_at timestamptz,
   add column person_folder text check (length(person_folder) between 1 and 200),
+  add column person_folder_id text
+    check (person_folder_id ~ '^[A-Za-z0-9_=-]+$' and length(person_folder_id) <= 512),
   add column person_category text
     check (person_category in ('incoming_invoice','outgoing_invoice','payment_reminder','other')),
   add column person_seen_at timestamptz,
   add check ((proposal is null) = (proposed_at is null)),
   add check ((person_folder is null) = (person_seen_at is null)),
   add check (person_category is null or person_folder is not null),
-  add check (person_folder is null or proposal is not null);
+  add check (person_folder is null or proposal is not null),
+  add check (person_folder_id is null or person_folder is not null);
 
 create function mailbox_email_shadow_guard() returns trigger language plpgsql
 set search_path = pg_catalog, public, pg_temp as $$
 begin
   if tg_op = 'INSERT' then
-    if num_nonnulls(new.proposal, new.person_folder, new.person_category) > 0 then
+    if num_nonnulls(new.proposal, new.person_folder, new.person_category,
+                    new.person_folder_id) > 0 then
       raise exception 'a new email record has no proposal yet';
     end if;
     new.proposed_at := null;
@@ -170,9 +177,12 @@ begin
   else
     new.proposed_at := old.proposed_at;
   end if;
-  if (new.person_folder, new.person_category)
-     is distinct from (old.person_folder, old.person_category) then
-    if old.person_folder is not null then
+  if (new.person_folder, new.person_category, new.person_folder_id)
+     is distinct from (old.person_folder, old.person_category, old.person_folder_id) then
+    if old.person_folder is not null
+       and not (old.person_folder = 'A folder not on the list' and old.person_category is null
+                and new.person_category is not null and old.person_folder_id is not null
+                and new.person_folder_id is not distinct from old.person_folder_id) then
       raise exception 'what the person did with email % is recorded once', old.id;
     end if;
     new.person_seen_at := clock_timestamp();
@@ -194,10 +204,13 @@ begin
     insert into audit_event (email_id, event_type, details)
     values (new.id, 'email_proposed', new.proposal);
   end if;
-  if new.person_folder is distinct from old.person_folder then
+  if (new.person_folder, new.person_category)
+     is distinct from (old.person_folder, old.person_category) then
     insert into audit_event (email_id, event_type, details)
     values (new.id, 'email_sorted_by_person',
-            jsonb_build_object('folder', new.person_folder, 'category', new.person_category));
+            jsonb_build_object('folder', new.person_folder, 'category', new.person_category)
+            || case when old.person_folder is not null
+                    then jsonb_build_object('mapped_later', true) else '{}'::jsonb end);
   end if;
   return null;
 end $$;
@@ -206,7 +219,8 @@ create trigger mailbox_email_shadow_audit after update on mailbox_email
 
 grant select on intake_mode to argus_app;
 grant update (mode) on intake_mode to argus_app;
-grant update (proposal, person_folder, person_category) on mailbox_email to argus_app;
+grant update (proposal, person_folder, person_category, person_folder_id) on mailbox_email
+  to argus_app;
 """
 
 DOWNGRADE = r"""
@@ -216,7 +230,8 @@ do $$ begin
     raise exception 'shadow mode was used; its audit trail is kept for ten years (NF-01)';
   end if;
 end $$;
-revoke update (proposal, person_folder, person_category) on mailbox_email from argus_app;
+revoke update (proposal, person_folder, person_category, person_folder_id) on mailbox_email
+  from argus_app;
 drop trigger mailbox_email_shadow_audit on mailbox_email;
 drop function mailbox_email_shadow_audit();
 drop trigger mailbox_email_shadow_guard on mailbox_email;
@@ -224,6 +239,7 @@ drop function mailbox_email_shadow_guard();
 alter table mailbox_email
   drop column person_seen_at,
   drop column person_category,
+  drop column person_folder_id,
   drop column person_folder,
   drop column proposed_at,
   drop column proposal;

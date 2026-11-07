@@ -21,6 +21,7 @@ from argus.auth import Role
 from argus.cases.model import Actor
 from argus.cases.store import CaseRuleBroken, NotAllowed, record_event, unit_of_work
 from argus.intake.filing import Folders, database_clock, remove_due
+from argus.intake.graph import GraphApiError
 from argus.intake.mode import (
     IntakeMode,
     SwitchedBy,
@@ -447,7 +448,7 @@ def test_the_report_compares_proposals_with_what_the_person_did(app: Engine) -> 
     assert sorted_event["details"] == {"folder": REMINDERS, "category": "payment_reminder"}
     assert mailbox_of(fake).moves == []  # the moves were the person's, not ARGUS's
     with app.connect() as connection:
-        report = shadow_report(connection)
+        report = shadow_report(connection, FOLDER_LIST)
     assert (report.mode, report.proposed, report.sorted_by_person, report.waiting) == (
         IntakeMode.SHADOW,
         4,
@@ -465,6 +466,9 @@ def test_the_report_compares_proposals_with_what_the_person_did(app: Engine) -> 
     assert missed.email_id == ids[OTHER].id
     assert (missed.person_folder, missed.person_category) == (INCOMING, "incoming_invoice")
     assert missed.model_category == "other"
+    assert report.not_listed_to_other == []
+    assert report.warnings == []
+    assert report.folder_list == [REMINDERS, INCOMING]
 
 
 @pytest.mark.usefixtures("clean", "shadow_mode")
@@ -486,10 +490,85 @@ def test_a_folder_not_on_the_list_and_a_deleted_email_are_recorded_as_such(
     [gone] = events(app, other.id, "email_sorted_by_person")
     assert gone["details"] == {"folder": GONE, "category": "other"}
     with app.connect() as connection:
-        report = shadow_report(connection)
+        report = shadow_report(connection, FOLDER_LIST)
     assert [row.category for row in report.categories] == ["other", "not_listed"]
     assert report.invoices_to_other == []
+    assert report.not_listed_to_other == []  # ARGUS proposed invoice processing for it
+    assert report.warnings == [
+        "1 emails are in folders not on the list. Add those folders to the list; the next"
+        " sweep then gives them their category."
+    ]
     assert DELETED_ITEMS == "Deleted Items"
+
+
+@pytest.mark.usefixtures("clean", "shadow_mode")
+def test_a_folder_list_set_late_still_shows_the_missed_invoice(app: Engine) -> None:
+    fake = fake_graph_with(OTHER)
+    documents, no_list, graph = run(fake, CountingModel())
+    sweep(app, graph, DocumentArchive(documents), no_list)
+    other = record_of(app, graph, OTHER)
+    person_moves(fake, other.graph_message_id, INCOMING)
+
+    sweep(app, graph, DocumentArchive(documents), no_list)  # no folder list yet
+    with app.connect() as connection:
+        before = shadow_report(connection, PersonFolders())
+    late = sweep(app, graph, DocumentArchive(documents), _with_folders(no_list))
+    with app.connect() as connection:
+        after = shadow_report(connection, FOLDER_LIST)
+
+    # Without the list the report cannot say it was an invoice, but it does not look clean.
+    assert before.invoices_to_other == []
+    [maybe] = before.not_listed_to_other
+    assert (maybe.email_id, maybe.person_folder, maybe.person_category) == (
+        other.id,
+        NOT_LISTED,
+        None,
+    )
+    assert before.warnings[0].startswith("No folder list is set")
+    # With the list, the next sweep gives it its category from the same folder.
+    assert late.sorted_by_person == 1
+    [missed] = after.invoices_to_other
+    assert (missed.email_id, missed.person_category) == (other.id, "incoming_invoice")
+    assert after.not_listed_to_other == [] and after.warnings == []
+    first, mapped = events(app, other.id, "email_sorted_by_person")
+    assert first["details"] == {"folder": NOT_LISTED, "category": None}
+    assert mapped["details"] == {
+        "folder": INCOMING,
+        "category": "incoming_invoice",
+        "mapped_later": True,
+    }
+    # Only that one later change is allowed, and only for the same folder.
+    for statement in (
+        "update mailbox_email set person_category = 'other' where id = :id",
+        "update mailbox_email set person_folder_id = 'AAMkAGOther' where id = :id",
+    ):
+        with (
+            pytest.raises(CaseRuleBroken, match="recorded once"),
+            unit_of_work(app, SWEEP_ACTOR) as db,
+        ):
+            db.execute(text(statement), {"id": other.id})
+
+
+@pytest.mark.usefixtures("clean", "shadow_mode")
+def test_a_failed_folder_lookup_counts_as_failed_and_the_sweep_goes_on(
+    app: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = fake_graph_with(INVOICE)
+    documents, sorting, graph = run(fake, CountingModel())
+    sorting = _with_folders(sorting)
+    sweep(app, graph, DocumentArchive(documents), sorting)
+    person_moves(fake, record_of(app, graph, INVOICE).graph_message_id, INCOMING)
+
+    def throttled() -> str:
+        raise GraphApiError("GET", "mailFolders/inbox", 429, "TooManyRequests")
+
+    monkeypatch.setattr(graph, "inbox", throttled)
+    failed = sweep(app, graph, DocumentArchive(documents), sorting)
+    monkeypatch.undo()
+    retried = sweep(app, graph, DocumentArchive(documents), sorting)
+
+    assert (failed.ran, failed.failed, failed.sorted_by_person) == (True, 1, 0)
+    assert (retried.failed, retried.sorted_by_person) == (0, 1)
 
 
 @pytest.mark.req("NF-03")
@@ -514,6 +593,9 @@ def test_only_finance_and_admin_see_the_report(app: Engine) -> None:
         "waiting",
         "categories",
         "invoices_to_other",
+        "not_listed_to_other",
+        "folder_list",
+        "warnings",
     }
     assert get(TEST_ADMIN.name, Role.ADMIN).status_code == 200
 
@@ -531,6 +613,14 @@ def test_the_folder_list_is_read_from_the_environment() -> None:
     )
     assert folders.folders == {"Rechnungen/Eingang": Category.INCOMING_INVOICE}
     assert PersonFolders.from_environment({}).folders == {}
-    for bad in ("[]", "not json", '{"Ablage": "invoice"}', '{"": "other"}'):
+    for bad in (
+        "[]",
+        "not json",
+        '{"Ablage": "invoice"}',
+        '{"": "other"}',
+        '{"Rechnungen 2026": "incoming_invoice"}',
+        '{"Rechnungen/Eingänge": "incoming_invoice"}',
+        '{"Rechnungen//Eingang": "incoming_invoice"}',
+    ):
         with pytest.raises(ValueError, match="ARGUS_SHADOW_FOLDERS"):
             PersonFolders.from_environment({"ARGUS_SHADOW_FOLDERS": bad})

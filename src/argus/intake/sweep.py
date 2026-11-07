@@ -345,10 +345,8 @@ def sweep(
             result.filed, result.failed = filing.filed, result.failed + filing.failed
         elif sorting is not None:
             seen = observe_person(engine, graph, sorting.person_folders, in_inbox)
-            result.sorted_by_person, result.failed = (
-                seen.sorted_by_person,
-                result.failed + seen.failed,
-            )
+            result.sorted_by_person = seen.sorted_by_person + seen.mapped_later
+            result.failed += seen.failed
         log.info(
             "Mailbox sweep: %d in Inbox, %d new, %d stored, %d classified, %d routed, %d filed,"
             " %d proposed, %d sorted by a person, %d failed",

@@ -30,7 +30,7 @@ from argus.cases.model import CaseKind, CaseStatus
 from argus.cases.store import get_case
 from argus.db import engine_from_env
 from argus.intake.mode import IntakeMode, SwitchedBy, intake_mode, switch_intake_mode
-from argus.intake.shadow import ShadowReport, shadow_report
+from argus.intake.shadow import PersonFolders, ShadowReport, shadow_report
 
 log = logging.getLogger(__name__)
 
@@ -199,9 +199,10 @@ def create_app(
     @app.get("/intake/shadow-report")
     def read_shadow_report(user: FinanceOrAdmin) -> ShadowReport:
         """What ARGUS proposed in shadow mode against what the person did, per category, and
-        every invoice ARGUS would have sent to Other (#72)."""
+        every invoice ARGUS would have sent to Other (#72). Warns when the folder list is
+        missing or incomplete, so an empty list never reads as an all clear by mistake."""
         with engine().connect() as connection:
-            return shadow_report(connection)
+            return shadow_report(connection, PersonFolders.from_environment())
 
     return app
 
