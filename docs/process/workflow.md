@@ -6,7 +6,7 @@ Sprints are one week, Monday to Sunday.
 
 - **Sunday night, sprint review and planning proposal.** The PO posts one thread in the project with what got done, what carries over, the acceptance test results from QA, and a ranked list of proposed issues for the next sprint. Each proposed issue shows its requirement IDs, a size (S, M or L) and what it depends on.
 - **Monday morning, planning.** Arita reorders, drops or adds issues by replying in that thread. Nothing starts until Arita approves the list. The PO then adds the approved issues to that sprint's milestone and labels them `status:ready`.
-- **Every morning, daily digest.** The coordinator posts one message: what got done overnight, what is in progress, what is blocked, and what needs Arita today.
+- **Every morning, daily digest.** The coordinator posts one message: what got done overnight, what is in progress, what is blocked, and what needs Arita today. While PRs wait for Arita, the digest starts with one numbered merge list: the PRs in the order to merge them, and for each step whether an agent must push something before the next merge. The team aims for a list that needs no pushes in between.
 - **Sunday, retro.** The team holds its own retro at the end of each sprint, without Arita. Each role says what went well, what did not and what to change, and the team agrees on at most five action items, each with an owner role. The record goes in [docs/retros/](../retros/), lessons go into project memory, the PO puts the action items into the planning proposal, and any change to these docs comes to Arita as a PR.
 - **When the sprint runs dry.** If no issue in the current sprint is ready, the night shift may refine the next top ranked backlog stories: QA writes test cases, the architect adds technical notes and the PO checks the Definition of Ready. No code and no branches for them until Arita approves the sprint. The night shift does this on its own, without waiting to be asked.
 
@@ -36,7 +36,9 @@ If something blocks the issue, add the `blocked` label and say on the issue what
 - **The verdict is a PR comment.** GitHub does not let our sessions approve a PR, so Arita decided on 2026-10-16 that a comment counts as the approval. It starts with `Verdict: approved` or `Verdict: changes requested` and names the commit it covers. A push after the verdict needs a short re-check on the new commit.
 - **Every PR gets a verdict before it is called ready**, including a quick backlog reorder.
 - **Document only PRs** (spikes, ADRs, backlog, process docs) need a reviewer verdict but no QA evidence. The PR says "Docs only, no QA evidence needed" so the reason is visible. Small chores such as a rename get a short review too.
-- **ADR numbers are claimed up front.** Before picking a number, check main and every open PR, and put the number in the PR title. When several threads start ADRs at the same time, the coordinator hands out the numbers.
+- **The verdict comes before the label.** `ready-for-arita` goes on a PR only after its verdict comments are on the PR. This holds for docs PRs and for PRs made during the day at Arita's request: if no review thread is running, the coordinator starts one before the label goes on.
+- **ADR and migration numbers come with the brief.** The coordinator puts the next free ADR number and the next free migration number in every thread brief, whether the story looks like it needs them or not. Unused numbers are simply skipped. Put the ADR number in the PR title.
+- **Parallel migrations are chained from the start.** A new migration's `down_revision` points at the highest migration in main or in any open PR. If that one is in an open PR, say `Merge after #<n>` for that PR. Then the merge order is fixed when the PRs open, and nothing needs re-pointing after a merge.
 
 ## Board columns
 
