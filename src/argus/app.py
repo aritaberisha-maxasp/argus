@@ -26,6 +26,9 @@ from argus.auth import (
 from argus.cases.model import CaseKind, CaseStatus
 from argus.cases.store import get_case
 from argus.db import engine_from_env
+from argus.documents.store import AzureDocumentStore, DocumentStore
+from argus.queue_page.web import PAGE_PATHS, install_queue_page
+from argus.secrets import EnvironmentSecretStore
 
 log = logging.getLogger(__name__)
 
@@ -65,9 +68,11 @@ class CaseView(BaseModel):
     currency: str | None
 
 
-# Routes anyone may call. They carry no business data. Every other route needs sign in, and a
-# test walks all routes to make sure (#23).
-PUBLIC_PATHS = frozenset({"/health", "/health/database"})
+# Routes anyone may call. They carry no business data: the health checks, and the exception
+# queue page with its script and style, which is the same fixed file for everyone and fetches
+# its data with the person's token (#126). Every other route needs sign in, and a test walks
+# all routes to make sure (#23).
+PUBLIC_PATHS = frozenset({"/health", "/health/database"}) | PAGE_PATHS
 
 
 def migrations_head() -> str | None:
@@ -75,11 +80,17 @@ def migrations_head() -> str | None:
     return ScriptDirectory(str(MIGRATIONS)).get_current_head()
 
 
+def documents_from_env() -> DocumentStore:
+    """The document store of #20. Its connection string comes from Key Vault in Azure."""
+    return AzureDocumentStore.from_secrets(EnvironmentSecretStore())
+
+
 def create_app(
     engine_factory: Callable[[], Engine] = engine_from_env,
     *,
     sign_in: Callable[[], TokenVerifier | None] = verifier_from_env,
     case_approvers: CaseApprovers | None = None,
+    documents_factory: Callable[[], DocumentStore] = documents_from_env,
 ) -> FastAPI:
     # No generated API pages: they would be routes without sign in.
     app = FastAPI(
@@ -88,11 +99,19 @@ def create_app(
     install_sign_in(app, sign_in())
     approvers = case_approvers or NoApproversYet()
     engines: list[Engine] = []
+    stores: list[DocumentStore] = []
 
     def engine() -> Engine:
         if not engines:
             engines.append(engine_factory())
         return engines[0]
+
+    def documents() -> DocumentStore:
+        if not stores:
+            stores.append(documents_factory())
+        return stores[0]
+
+    install_queue_page(app, engine, documents)
 
     @app.get("/health")
     def health() -> Health:

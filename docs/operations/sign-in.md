@@ -12,7 +12,7 @@ In the Entra admin center, App registrations, New registration:
 - Token configuration: add the groups claim, **Groups assigned to the application**, as Group ID, for access tokens. This keeps the token small; with all groups, someone in many groups would get no role at all.
 - No client secret and no certificate. ARGUS only checks tokens and never asks Entra for one with this registration.
 
-The approval page (#38) adds a single page app platform with its redirect address when it is built.
+- Authentication: add the platform **Single-page application** with the redirect address `https://<argus address>/queue`. The exception queue page (#126) signs people in through it, with PKCE and without a secret. The approval page (#38) adds its own address here when it is built.
 
 ## 2. Create three groups and assign them
 
@@ -38,7 +38,7 @@ Until all five are set, ARGUS answers 503 on every route with data and logs whic
 
 ## Check it
 
-Sign in through the approval page once it exists (#38), or ask Entra for a token with the Azure CLI and call `/me`. For the CLI to get a token, add it under Expose an API as an authorized client application (Microsoft's Azure CLI app ID `04b07795-8ddb-461a-bbee-02f9e1bf7b46`); remove it again afterwards if you like.
+Open `https://<argus address>/queue` as Benjamin or Arita: it asks for the Microsoft sign in and then lists the open exceptions. Or ask Entra for a token with the Azure CLI and call `/me`. For the CLI to get a token, add it under Expose an API as an authorized client application (Microsoft's Azure CLI app ID `04b07795-8ddb-461a-bbee-02f9e1bf7b46`); remove it again afterwards if you like.
 
 ```bash
 TOKEN=$(az account get-access-token --scope "api://<application id>/access_as_user" --query accessToken -o tsv)
