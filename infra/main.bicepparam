@@ -10,6 +10,16 @@ param retentionLocked = false
 // year end with leap days (ADR 0001). Can be raised later, never lowered once locked.
 param retentionDays = 4018
 
+// Long term backup of the database (#82, ADR 0007): the first weekly backup of each month is
+// kept this many years. 10 is the most Azure Backup allows. A change applies to new backups
+// only. Once the vault is locked (it follows retentionLocked), the period can be raised but
+// never lowered.
+param databaseBackupYears = 10
+
+// Switch to true in a PR of its own once Arita has given the backup vault's identity its two
+// roles (docs/operations/backup-and-restore.md, step 2). Before that, the deploy would fail.
+param databaseBackupProtected = false
+
 // The identity that runs the migrations (#81). Not secret; the pipeline passes the real
 // values as GitHub variables. The fallback lets CI build this file without Azure.
 param databaseAdminObjectId = readEnvironmentVariable('ARGUS_DATABASE_ADMIN_OBJECT_ID', '00000000-0000-0000-0000-000000000000')
