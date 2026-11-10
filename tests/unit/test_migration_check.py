@@ -178,3 +178,40 @@ def test_the_command_passes_on_the_repository(
     monkeypatch.chdir(REPO)
     assert load_check().main(["check_migrations.py"]) == 0
     assert "form one chain, head " in capsys.readouterr().out
+
+
+@pytest.mark.req("NF-01")
+@pytest.mark.parametrize("argument", ["migrations", "./migrations"])
+def test_the_command_names_the_files_with_a_relative_folder(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    argument: str,
+) -> None:
+    folder(
+        tmp_path,
+        {
+            "0001_a.py": migration("0001", None),
+            "0002_b.py": migration("0002", "0001"),
+            "0003_c.py": migration("0003", "0001"),
+        },
+    )
+    monkeypatch.chdir(tmp_path)
+    assert load_check().main(["check_migrations.py", argument]) == 1
+    output = capsys.readouterr().out
+    assert "Both versions/0002_b.py and versions/0003_c.py point at 0001" in output
+
+
+@pytest.mark.req("NF-01")
+def test_the_command_names_the_files_with_no_argument(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # The way CI runs it: from the repository root, with the default folder.
+    copy = tmp_path / "src" / "argus" / "db" / "migrations"
+    shutil.copytree(MIGRATIONS, copy, ignore=shutil.ignore_patterns("__pycache__"))
+    (copy / "versions" / "0010_late.py").write_text(migration("0010", "0008"), encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    assert load_check().main(["check_migrations.py"]) == 1
+    output = capsys.readouterr().out
+    assert "Migration clash: The chain has 2 heads:" in output
+    assert "versions/0010_late.py" in output and "point at 0008" in output

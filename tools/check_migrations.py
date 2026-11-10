@@ -81,6 +81,9 @@ def chain_problems(folder: Path) -> list[str]:
 
 def problems(folder: Path) -> list[str]:
     """Every reason the migrations in this folder are not one straight line."""
+    # Alembic gives each script's path as an absolute one, so the folder must be absolute too
+    # to name the files relative to it (QA on PR 128).
+    folder = folder.resolve()
     return duplicate_numbers(folder) + chain_problems(folder)
 
 
