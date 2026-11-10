@@ -535,8 +535,14 @@ def create_app(
     return app
 
 
+# Set to ``true`` to start with an empty Inbox instead of the 50 fixture emails. The demo in
+# Azure starts empty and ``python -m argus.demo seed`` puts the demo emails in (#124).
+START_EMPTY_ENV = "GRAPH_STANDIN_START_EMPTY"
+
+
 def __getattr__(name: str) -> FastAPI:
     # ``uvicorn standins.graph.app:app`` builds the app on first use, from the environment.
     if name == "app":
-        return create_app()
+        empty = os.environ.get(START_EMPTY_ENV, "").strip().lower() == "true"
+        return create_app(emails=[] if empty else None)
     raise AttributeError(name)

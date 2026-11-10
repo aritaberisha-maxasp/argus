@@ -1,4 +1,5 @@
-# The fake DATEV for development and CI (ADR 0002). Never deploy this to Azure.
+# The fake DATEV for development and CI (ADR 0002). Never deploy this image to Azure: the demo
+# in Azure runs the fake DATEV from docker/demo/Dockerfile instead (#124, ADR 0009).
 # Build from the repository root:
 #   docker build -f docker/fake-datev/Dockerfile -t argus-fake-datev .
 FROM python:3.12-slim

@@ -110,6 +110,41 @@ def good_main() -> dict[str, Any]:
             }
         ],
     }
+    # Each stand in reachable only inside the Container Apps environment (#124).
+    standins = {
+        "parameters": {"location": {"type": "string"}},
+        "resources": {
+            "apps": {
+                "copy": {"name": "apps", "count": 3},
+                "type": "Microsoft.App/containerApps",
+                "name": "[variables('standins')[copyIndex()].name]",
+                "location": "[parameters('location')]",
+                "properties": {
+                    "configuration": {
+                        "ingress": {"external": False, "allowInsecure": True},
+                        "secrets": [],
+                    }
+                },
+            },
+            "seedJob": {
+                "type": "Microsoft.App/jobs",
+                "name": "caj-argus-demo-seed",
+                "location": "[parameters('location')]",
+                "properties": {
+                    "configuration": {
+                        "triggerType": "Manual",
+                        "secrets": [
+                            {
+                                "name": "argus-graph-standin-token",
+                                "keyVaultUrl": "[format('{0}secrets/x', parameters('kv'))]",
+                                "identity": "[parameters('identityId')]",
+                            }
+                        ],
+                    }
+                },
+            },
+        },
+    }
     database = {
         "parameters": {"location": {"type": "string"}},
         "resources": {
@@ -193,6 +228,8 @@ def good_main() -> dict[str, Any]:
                 "minValue": 1,
                 "maxValue": 10,
             },
+            "demo": {"type": "bool", "defaultValue": False},
+            "demoImage": {"type": "string", "defaultValue": ""},
         },
         "resources": {
             "identity": {
@@ -205,6 +242,10 @@ def good_main() -> dict[str, Any]:
             "backup": module("backup", "[parameters('location')]", backup),
             "ai": module("ai", "[parameters('aiLocation')]", ai),
             "apps": module("apps", "[parameters('location')]", apps),
+            "standins": {
+                **module("standins", "[parameters('location')]", standins),
+                "condition": "[and(parameters('demo'), not(empty(parameters('demoImage'))))]",
+            },
         },
         "outputs": {
             "appUrl": {"type": "string", "value": "[reference('apps').outputs.appUrl.value]"}
@@ -257,6 +298,8 @@ def good_parameters() -> dict[str, Any]:
             "retentionDays": {"value": 4018},
             "databaseBackupYears": {"value": 10},
             "modelDeployments": {"value": [{"name": "argus-sorting", "sku": "DataZoneStandard"}]},
+            "demo": {"value": True},
+            "manualSecrets": {"value": []},
         }
     }
 
@@ -620,3 +663,74 @@ def test_a_vault_without_soft_delete_fails(tmp_path: Path, state: str) -> None:
     vault = backup_module(main)["resources"]["vault"]
     vault["properties"]["securitySettings"]["softDeleteSettings"]["state"] = state
     assert any("soft delete off" in p for p in run(tmp_path, main))
+
+
+def standin_resources(main: dict[str, Any]) -> dict[str, Any]:
+    resources: dict[str, Any] = main["resources"]["standins"]["properties"]["template"]["resources"]
+    return resources
+
+
+@pytest.mark.req("NF-04")
+def test_demo_mode_on_by_default_in_the_template_fails(tmp_path: Path) -> None:
+    main = good_main()
+    main["parameters"]["demo"]["defaultValue"] = True
+    assert run(tmp_path, main) == ["demo must default to false in the template"]
+
+
+@pytest.mark.req("NF-04")
+def test_a_stand_in_the_internet_can_reach_fails(tmp_path: Path) -> None:
+    main = good_main()
+    standin_resources(main)["apps"]["properties"]["configuration"]["ingress"]["external"] = True
+    assert run(tmp_path, main) == ["module standins has an app that the internet can reach"]
+
+
+@pytest.mark.req("NF-04")
+def test_a_stand_in_without_a_word_on_ingress_fails(tmp_path: Path) -> None:
+    main = good_main()
+    del standin_resources(main)["apps"]["properties"]["configuration"]["ingress"]["external"]
+    assert run(tmp_path, main) == []  # Azure's default for ingress is internal
+    standin_resources(main)["apps"]["properties"]["configuration"]["ingress"]["external"] = (
+        "[parameters('public')]"
+    )
+    assert run(tmp_path, main) == ["module standins has an app that the internet can reach"]
+
+
+@pytest.mark.req("NF-04")
+def test_stand_ins_deployed_without_demo_mode_fail(tmp_path: Path) -> None:
+    main = good_main()
+    main["resources"]["standins"]["condition"] = "[not(empty(parameters('demoImage')))]"
+    assert run(tmp_path, main) == ["the stand ins must only be deployed in demo mode"]
+
+
+@pytest.mark.req("NF-06")
+def test_a_job_secret_that_is_not_read_from_key_vault_fails(tmp_path: Path) -> None:
+    main = good_main()
+    secret = standin_resources(main)["seedJob"]["properties"]["configuration"]["secrets"][0]
+    del secret["keyVaultUrl"]
+    secret["value"] = "[parameters('token')]"
+    assert run(tmp_path, main) == [
+        "app caj-argus-demo-seed gets a secret that is not a Key Vault reference"
+    ]
+
+
+@pytest.mark.req("NF-04", "NF-06")
+def test_demo_mode_with_real_secrets_in_the_parameters_fails(tmp_path: Path) -> None:
+    parameters = good_parameters()
+    parameters["parameters"]["manualSecrets"]["value"] = [
+        {"secretName": "wise-api-token", "envName": "WISE_API_TOKEN"}
+    ]
+    problems = run(tmp_path, good_main(), parameters=parameters)
+    assert len(problems) == 1
+    assert "switches demo mode on and also hands real secrets" in problems[0]
+    parameters["parameters"]["demo"]["value"] = False
+    assert run(tmp_path, good_main(), parameters=parameters) == []
+
+
+def test_a_template_without_stand_ins_or_demo_switch_fails(tmp_path: Path) -> None:
+    main = good_main()
+    del main["resources"]["standins"]
+    del main["parameters"]["demo"]
+    assert run(tmp_path, main) == [
+        "main template has no demo parameter",
+        "no standins module found",
+    ]

@@ -1,0 +1,53 @@
+# Demo runbook
+
+How Arita shows ARGUS in Azure with the stand ins: a fake accounts mailbox, a fake DATEV and a Wise stand in (#124). The design is in [ADR 0009](../adr/0009-demo-mode-with-stand-ins.md).
+
+Everything in the demo is synthetic. ARGUS cannot reach the real mailbox, DATEV or Wise while demo mode is on: it refuses to start if a real address or secret is set. The Wise stand in cannot fund or release a payment, just like the real Wise for ARGUS.
+
+## Once, before the first demo
+
+1. **The one time Azure setup.** Follow [docs/operations/deploy.md](../operations/deploy.md) up to a first green run of the Deploy workflow. Nothing shows up in Azure before that.
+2. **Check demo mode is on.** In [infra/main.bicepparam](../../infra/main.bicepparam) the line `param demo = true` switches it on. It is on today. A merge to `main` deploys ARGUS, the stand ins and the seed job.
+3. **Check the stand ins are there.** In the Azure portal, resource group `rg-argus`, you should see the container apps `ca-argus-standin-graph`, `ca-argus-standin-datev` and `ca-argus-standin-wise`, and the job `caj-argus-demo-seed`. They have no public address, on purpose.
+
+## Before each demo
+
+Start the demo from a clean state:
+
+1. GitHub, **Actions**, workflow **Demo**, **Run workflow**.
+2. Branch `main`, action **reset and seed**, then **Run workflow**.
+3. Wait for the green tick, about 3 to 5 minutes.
+
+The run empties the demo database, the demo document store and the stand ins, then puts the ten demo emails into the fake mailbox.
+
+## During the demo
+
+The fake mailbox holds ten emails, one for each thing ARGUS can show:
+
+| Email | What it shows |
+|---|---|
+| E01 | Incoming invoice as a PDF |
+| E07 | Incoming invoice as a paper scan |
+| E08 | Incoming XRechnung |
+| E09 | Incoming ZUGFeRD invoice |
+| E17 | Outgoing invoice of Max ASP |
+| E25 | Payment reminder |
+| E15 | The invoice of E01 sent a second time |
+| E49 | Invoice that fails the §14 UStG check: addressed to another company |
+| E43 | Doubtful sender: SPF, DKIM and DMARC fail |
+| E32 | Marketing mail from a known supplier |
+
+ARGUS picks the emails up on its own once the sweep runs in Azure (#125), and the exception queue page shows what needs a person (#126). Until those two are merged, the demo shows the stand ins and the seeded mailbox only.
+
+To show it again from the start, run the Demo workflow with **reset and seed** again. To add the demo emails once more without emptying anything, run it with **seed**. Seeding twice does no harm: the mailbox keeps one copy of each email.
+
+## If something goes wrong
+
+- **"Check that Azure is set up" failed.** The one time setup is not finished. See step 1 above.
+- **"Check that ARGUS runs in demo mode" failed.** Either demo mode is off in `main.bicepparam`, or the deploy has not run since it was switched on. Merge a change or run the Deploy workflow by hand.
+- **"Empty the demo database" failed.** The log says why. "must end in _demo" means the app is not on the demo database, so nothing was changed.
+- **"Put the demo emails into the fake mailbox" failed.** The seed job's own log is in the Azure portal: job `caj-argus-demo-seed`, Execution history, Console logs.
+
+## After the demos: going live
+
+Switching demo mode off is part of the [go live runbook](go-live.md). In short: `param demo = false` in `main.bicepparam`, the real addresses and secrets in, then delete the stand ins, the seed job, the demo database and the demo storage account by hand, since the pipeline never deletes anything.

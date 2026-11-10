@@ -34,4 +34,8 @@ Point the Graph client at `http://localhost:8081/v1.0` with `standin=True`, the 
 - `DELETE /_standin/drafts/{id}` deletes a draft, as a person could.
 - `POST /_standin/drafts/{id}/send` sends a draft the way a person would, outside ARGUS.
 - `GET /_standin/records` shows how many emails are in the Inbox, how often each was read, the folders, how many emails were deleted, how many drafts were saved, and every forward that was sent with its recipients and attachment fingerprints.
-- `POST /_standin/reset` goes back to the fixture emails.
+- `POST /_standin/reset` goes back to the fixture emails, or to an empty Inbox when the stand in was started with `GRAPH_STANDIN_START_EMPTY=true`.
+
+## In the demo
+
+For the demo in Azure (#124, ADR 0009) the stand in runs from the `argus-demo` image (`docker/demo/Dockerfile`) with `GRAPH_STANDIN_START_EMPTY=true`, and `python -m argus.demo seed` puts the demo emails in. See [the demo runbook](../../docs/runbooks/demo.md).

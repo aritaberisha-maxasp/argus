@@ -7,10 +7,14 @@
 #
 # Order, so a failed migration leaves the running version alone:
 #   0. skip unless this commit is the tip of main
-#   1. build the image          4. run the migrations as the database admin
-#   2. apply the infrastructure  5. deploy the new image
+#   1. build the images         4. run the migrations as the database admin
+#   2. apply the infrastructure  5. deploy the new image (and the new stand ins in demo mode)
 #      with the running image    6. smoke test /health and /health/database
-#   3. push the image
+#   3. push the images
+#
+# In demo mode (#124, ADR 0009) the same run also deploys the stand ins from the argus-demo
+# image, and the database it migrates is the demo database. The Demo workflow (demo.yml) seeds
+# and resets the demo.
 #
 # The one time setup and the GitHub variables are in docs/operations/deploy.md.
 name: Deploy
@@ -105,6 +109,10 @@ jobs:
       - name: Build the app image
         run: docker build --build-arg ARGUS_BUILD="$COMMIT" --tag "argus:$COMMIT" .
 
+      # The stand ins for the demo (#124). Built every time, deployed only in demo mode.
+      - name: Build the demo image
+        run: docker build --file docker/demo/Dockerfile --tag "argus-demo:$COMMIT" .
+
       - name: Sign in to Azure with OpenID Connect
         uses: azure/login@v2
         with:
@@ -127,16 +135,19 @@ jobs:
           ARGUS_APP_PORT: ${{ steps.current.outputs.port }}
         run: tools/azure/apply_infra.sh "argus-infra-$GITHUB_RUN_ID" >> "$GITHUB_OUTPUT"
 
-      - name: Push the app image
+      - name: Push the images
         id: image
         env:
           REGISTRY: ${{ steps.infra.outputs.registryLoginServer }}
           REGISTRY_NAME: ${{ steps.infra.outputs.registryName }}
         run: |
           az acr login --name "$REGISTRY_NAME"
-          docker tag "argus:$COMMIT" "$REGISTRY/argus:$COMMIT"
-          docker push "$REGISTRY/argus:$COMMIT"
+          for name in argus argus-demo; do
+            docker tag "$name:$COMMIT" "$REGISTRY/$name:$COMMIT"
+            docker push "$REGISTRY/$name:$COMMIT"
+          done
           echo "image=$REGISTRY/argus:$COMMIT" >> "$GITHUB_OUTPUT"
+          echo "demo_image=$REGISTRY/argus-demo:$COMMIT" >> "$GITHUB_OUTPUT"
 
       # The database only lets in Azure services. This runner gets a rule for its own address
       # for the length of the migrations, and the step after them takes it away again. Rules
@@ -194,11 +205,14 @@ jobs:
           az postgres flexible-server firewall-rule delete \
             --resource-group "$RESOURCE_GROUP" --name "$SERVER" --rule-name "$RULE" --yes
 
+      # In demo mode the stand ins get the new demo image here too. With demo off the templates
+      # leave them out.
       - name: Deploy the new version
         id: release
         env:
           ARGUS_APP_IMAGE: ${{ steps.image.outputs.image }}
           ARGUS_APP_PORT: ${{ env.ARGUS_PORT }}
+          ARGUS_DEMO_IMAGE: ${{ steps.image.outputs.demo_image }}
         run: tools/azure/apply_infra.sh "argus-release-$GITHUB_RUN_ID" >> "$GITHUB_OUTPUT"
 
       - name: Smoke test

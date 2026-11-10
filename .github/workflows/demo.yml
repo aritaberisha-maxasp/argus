@@ -1,0 +1,156 @@
+# Seeds and resets the ARGUS demo in Azure (#124, ADR 0009). Run it by hand from the Actions
+# tab: "Demo", then "Run workflow" on main, and pick what to do. docs/runbooks/demo.md has the
+# steps for Arita.
+#
+#   seed            puts the demo emails into the fake mailbox
+#   reset           empties the demo database, the demo document store and the stand ins
+#   reset and seed  both, so the demo starts from the beginning
+#
+# It refuses unless the running app is in demo mode, and python -m argus.demo checks once more
+# that the database name ends in _demo and the document store is the demo one. Like the deploy
+# it signs in with OpenID Connect and reads no secret from GitHub. It never touches the real
+# database, the locked document store or a payment (NF-04).
+name: Demo
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: What to do
+        type: choice
+        options:
+          - seed
+          - reset
+          - reset and seed
+        default: reset and seed
+
+permissions:
+  contents: read
+
+# Never at the same time as a deploy.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  APP_NAME: ca-argus-web
+  SEED_JOB: caj-argus-demo-seed
+
+jobs:
+  demo:
+    name: Demo (${{ inputs.action }})
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      RESOURCE_GROUP: ${{ vars.ARGUS_RESOURCE_GROUP }}
+      ACTION: ${{ inputs.action }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: pip install -e .
+
+      - name: Check that Azure is set up
+        env:
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          ARGUS_RESOURCE_GROUP: ${{ vars.ARGUS_RESOURCE_GROUP }}
+          ARGUS_DATABASE_ADMIN_OBJECT_ID: ${{ vars.ARGUS_DATABASE_ADMIN_OBJECT_ID }}
+          ARGUS_DATABASE_ADMIN_NAME: ${{ vars.ARGUS_DATABASE_ADMIN_NAME }}
+        run: |
+          python tools/deploy.py check-config --mode deploy > config.txt
+          cat config.txt
+          if grep -q "not set up" config.txt; then
+            echo "::error::Azure is not set up for ARGUS yet, so there is no demo to run. See docs/operations/deploy.md."
+            exit 1
+          fi
+
+      - name: Sign in to Azure with OpenID Connect
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Check that ARGUS runs in demo mode
+        id: target
+        run: |
+          tools/azure/demo_target.sh > target.txt
+          cat target.txt
+          cat target.txt >> "$GITHUB_OUTPUT"
+          if ! grep -qx "demo=true" target.txt; then
+            echo "::error::The running ARGUS is not in demo mode, so this workflow does nothing. Switch demo on in infra/main.bicepparam first."
+            exit 1
+          fi
+          if [[ "$ACTION" != "seed" ]] && ! grep -q "^standins=." target.txt; then
+            echo "::error::No stand ins found. Has the deploy run since demo mode was switched on?"
+            exit 1
+          fi
+
+      # Same as the deploy: a firewall rule for this runner only while the reset runs.
+      - name: Let this runner reach the database
+        id: firewall
+        if: inputs.action != 'seed'
+        env:
+          SERVER: ${{ steps.target.outputs.database_server }}
+        run: |
+          rule="github-demo-$GITHUB_RUN_ID"
+          echo "rule=$rule" >> "$GITHUB_OUTPUT"
+          address=$(curl --silent --show-error --fail https://api.ipify.org)
+          az postgres flexible-server firewall-rule create \
+            --resource-group "$RESOURCE_GROUP" --name "$SERVER" --rule-name "$rule" \
+            --start-ip-address "$address" --end-ip-address "$address" --output none
+
+      # Signs in as the database admin with an Entra token, like the migrations. The reset drops
+      # and rebuilds the demo database only; it refuses any name that does not end in _demo.
+      - name: Empty the demo database and the demo document store
+        if: inputs.action != 'seed'
+        env:
+          ARGUS_DATABASE_URL: postgresql+psycopg://${{ steps.target.outputs.database_host }}:5432/${{ steps.target.outputs.database_name }}?sslmode=require
+          PGUSER: ${{ vars.ARGUS_DATABASE_ADMIN_NAME }}
+          ACCOUNT: ${{ steps.target.outputs.documents_account }}
+        run: |
+          PGPASSWORD=$(az account get-access-token --resource-type oss-rdbms --query accessToken --output tsv)
+          echo "::add-mask::$PGPASSWORD"
+          export PGPASSWORD
+          ARGUS_DOCUMENTS_CONNECTION_STRING=$(az storage account show-connection-string \
+            --resource-group "$RESOURCE_GROUP" --name "$ACCOUNT" --query connectionString --output tsv)
+          echo "::add-mask::$ARGUS_DOCUMENTS_CONNECTION_STRING"
+          export ARGUS_DOCUMENTS_CONNECTION_STRING
+          ARGUS_DEMO=true python -m argus.demo reset
+          identity=$(az identity list --resource-group "$RESOURCE_GROUP" \
+            --query "[?name=='id-argus-app'] | [0].[name, principalId]" --output tsv)
+          python tools/deploy.py app-db-role \
+            --identity-name "$(cut -f1 <<<"$identity")" --object-id "$(cut -f2 <<<"$identity")"
+
+      - name: Close the database to this runner again
+        if: always() && steps.firewall.outputs.rule != ''
+        env:
+          SERVER: ${{ steps.target.outputs.database_server }}
+          RULE: ${{ steps.firewall.outputs.rule }}
+        run: |
+          az postgres flexible-server firewall-rule delete \
+            --resource-group "$RESOURCE_GROUP" --name "$SERVER" --rule-name "$RULE" --yes
+
+      # The stand ins keep their data in memory, so a restart empties them. ARGUS restarts too,
+      # so it opens fresh connections to the rebuilt database.
+      - name: Restart the stand ins and ARGUS
+        if: inputs.action != 'seed'
+        env:
+          STANDINS: ${{ steps.target.outputs.standins }}
+        run: |
+          read -r -a apps <<<"$STANDINS"
+          tools/azure/restart_apps.sh "${apps[@]}" "$APP_NAME"
+          # Give the fake mailbox a moment to come back before seeding.
+          sleep 30
+
+      - name: Put the demo emails into the fake mailbox
+        if: inputs.action != 'reset'
+        run: tools/azure/run_job.sh "$SEED_JOB"

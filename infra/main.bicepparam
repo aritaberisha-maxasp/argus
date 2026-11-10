@@ -37,7 +37,18 @@ param modelDeployments = [
   }
 ]
 
-// Add WISE_API_TOKEN and the Graph secrets here once Arita has put them in Key Vault.
+// Demo mode (#124, ADR 0009): ARGUS runs against the fake mailbox, the fake DATEV and the Wise
+// stand in, with a database and a document store of its own. On for now, because the demo for
+// Max ASP comes first. Switching it to false is a go live step (docs/runbooks/go-live.md),
+// together with the real addresses and secrets. ARGUS refuses to start with both.
+param demo = true
+
+// The pipeline passes the argus-demo image when it deploys a new version (#124). Without it the
+// running stand ins stay as they are.
+param demoImage = readEnvironmentVariable('ARGUS_DEMO_IMAGE', '')
+
+// Add WISE_API_TOKEN and the Graph secrets here once Arita has put them in Key Vault. Only
+// with demo = false: tools/check_infra.py and ARGUS itself refuse real secrets in demo mode.
 param manualSecrets = []
 
 // The deploy pipeline (#81) sets these: first the running image, then the new one after the

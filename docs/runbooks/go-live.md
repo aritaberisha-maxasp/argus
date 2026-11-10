@@ -13,6 +13,8 @@ Things that must be done before ARGUS works on the real accounts mailbox, the re
 
 ## One time steps for Arita in Azure
 
+- [ ] **Switch demo mode off** (#124, [ADR 0009](../adr/0009-demo-mode-with-stand-ins.md)). One PR that sets `param demo = false` in `infra/main.bicepparam` and adds the real Microsoft 365, DATEV and Wise addresses and secrets. ARGUS refuses to start if it gets both. After the deploy, delete by hand what the pipeline leaves behind: the container apps `ca-argus-standin-graph`, `ca-argus-standin-datev`, `ca-argus-standin-wise`, the job `caj-argus-demo-seed`, the database `argus_demo` and the storage account tagged `role=demo`. Steps in [docs/runbooks/demo.md](demo.md).
+
 - [ ] The one time setup in [docs/operations/deploy.md](../operations/deploy.md), up to a first green deploy (#81).
 - [ ] Start the long term database backup: two roles for the backup vault, then `databaseBackupProtected = true` ([docs/operations/backup-and-restore.md](../operations/backup-and-restore.md), #82).
 - [ ] One real restore of a long term backup, checked with `tools/restore_check.py` and written into the restore record of that runbook (#82).

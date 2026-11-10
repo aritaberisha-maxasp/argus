@@ -17,7 +17,10 @@ Azure sign in is needed. The script fails when:
 - a secret could end up in the code, a parameter default or a deployment output, or the app
   gets a secret any other way than from Key Vault (NF-06);
 - a model deployment, the allowed deployment types or the Azure Policy would let a Global
-  deployment type through (ADR 0006).
+  deployment type through (ADR 0006);
+- demo mode is on by default in the template, a stand in can be reached from the internet, the
+  stand ins could run without demo mode, or the parameters file puts real secrets next to demo
+  mode (#124, ADR 0009).
 
 Run from the repository root: ``python tools/check_infra.py build/infra``
 """
@@ -59,6 +62,12 @@ DATABASE_SERVER = "Microsoft.DBforPostgreSQL/flexibleServers"
 BACKUP_VAULT = "Microsoft.DataProtection/backupVaults"
 BACKUP_POLICY = "Microsoft.DataProtection/backupVaults/backupPolicies"
 BACKUP_YEARS_PARAMETER = "databaseBackupYears"
+DEMO_PARAMETER = "demo"
+CONTAINER_APP = "Microsoft.App/containerApps"
+CONTAINER_JOB = "Microsoft.App/jobs"
+# The one module whose app may be reached from the internet: the ARGUS web app (ADR 0001).
+PUBLIC_APP_MODULE = "apps"
+STANDINS_MODULE = "standins"
 # 10 years for the long term backups until the tax advisor confirms the period (ADR 0007).
 MIN_BACKUP_YEARS = 10
 
@@ -292,12 +301,56 @@ def secret_problems(main: dict[str, Any], parameters: dict[str, Any] | None) -> 
             value = resource.get("properties", {}).get("value", "")
             if not (isinstance(value, str) and value.startswith("[")):
                 problems.append(f"Key Vault secret {name} has a value written in the code")
-        if resource.get("type") == "Microsoft.App/containerApps":
+        if resource.get("type") in (CONTAINER_APP, CONTAINER_JOB):
             configuration = resource.get("properties", {}).get("configuration", {})
             app_secrets = configuration.get("secrets", [])
             for secret in app_secrets if isinstance(app_secrets, list) else [app_secrets]:
                 if "value" in secret or "keyVaultUrl" not in secret or "identity" not in secret:
                     problems.append(f"app {name} gets a secret that is not a Key Vault reference")
+    return problems
+
+
+def modules(template: dict[str, Any]) -> Iterator[tuple[str, dict[str, Any], dict[str, Any]]]:
+    """Each module of the main template: its name, its deployment resource and its template."""
+    found = template.get("resources", [])
+    items = found.values() if isinstance(found, dict) else found
+    for resource in items:
+        nested = resource.get("properties", {}).get("template")
+        if resource.get("type") == "Microsoft.Resources/deployments" and isinstance(nested, dict):
+            yield str(resource.get("name", "?")), resource, nested
+
+
+def demo_problems(main: dict[str, Any], parameters: dict[str, Any] | None) -> list[str]:
+    """The stand ins are for the demo only and never reachable from the internet (#124)."""
+    problems = []
+    demo = main.get("parameters", {}).get(DEMO_PARAMETER)
+    if demo is None:
+        problems.append(f"main template has no {DEMO_PARAMETER} parameter")
+    elif demo.get("defaultValue", False) is not False:
+        problems.append(f"{DEMO_PARAMETER} must default to false in the template")
+    standins_found = False
+    for name, deployment, template in modules(main):
+        for resource in resources(template):
+            if resource.get("type") != CONTAINER_APP:
+                continue
+            ingress = resource.get("properties", {}).get("configuration", {}).get("ingress", {})
+            if name != PUBLIC_APP_MODULE and ingress.get("external", False) is not False:
+                problems.append(f"module {name} has an app that the internet can reach")
+        if name == STANDINS_MODULE:
+            standins_found = True
+            if f"parameters('{DEMO_PARAMETER}')" not in str(deployment.get("condition", "")):
+                problems.append("the stand ins must only be deployed in demo mode")
+    if not standins_found:
+        problems.append(f"no {STANDINS_MODULE} module found")
+    if parameters is not None:
+        given = parameters.get("parameters", {})
+        if given.get(DEMO_PARAMETER, {}).get("value") is True and given.get(
+            "manualSecrets", {}
+        ).get("value"):
+            problems.append(
+                "the parameters file switches demo mode on and also hands real secrets to "
+                "ARGUS (manualSecrets); ARGUS would refuse to start"
+            )
     return problems
 
 
@@ -374,6 +427,7 @@ def check(folder: Path) -> list[str]:
         *backup_problems(main, parameters),
         *secret_problems(main, parameters),
         *deployment_type_problems(main, policy, parameters),
+        *demo_problems(main, parameters),
     ]
 
 
@@ -386,7 +440,7 @@ def main(argv: list[str]) -> int:
         print(f"Infrastructure problem: {problem}")
     if problems:
         return 1
-    print("Infrastructure code keeps to the rules of #65 and #82 (NF-01, NF-03, NF-06).")
+    print("Infrastructure code keeps to the rules of #65, #82 and #124 (NF-01, NF-03, NF-06).")
     return 0
 
 

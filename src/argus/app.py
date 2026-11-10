@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from sqlalchemy import Engine, text
 
 from argus import __version__
+from argus.connections import connections_from_env
 from argus.db import engine_from_env
 
 log = logging.getLogger(__name__)
@@ -41,6 +42,9 @@ def migrations_head() -> str | None:
 
 
 def create_app(engine_factory: Callable[[], Engine] = engine_from_env) -> FastAPI:
+    # Refuse to start when demo mode and the real Microsoft 365, DATEV or Wise settings mix
+    # (#124, ADR 0009). The error names the settings, never their values.
+    connections_from_env()
     app = FastAPI(title="ARGUS", version=__version__)
     engines: list[Engine] = []
 
