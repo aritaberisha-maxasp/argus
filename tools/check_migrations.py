@@ -30,6 +30,12 @@ HOW_TO_FIX = (
     "Point your new migration's down_revision at the highest migration in main or in any open "
     "PR, give it the next free number, and write 'Merge after #<n>' in the PR description."
 )
+MISSING_PARENT = "is not present"
+HOW_TO_FIX_MISSING_PARENT = (
+    "A migration points at one this branch does not have. If that one is in an open PR, build "
+    "your branch on that PR's branch and write 'Merge after #<n>' in the PR description, or wait "
+    "until that PR merges and update your branch from main."
+)
 
 
 def _file(script: Script, folder: Path) -> str:
@@ -72,10 +78,12 @@ def chain_problems(folder: Path) -> list[str]:
     for script in sorted(revisions, key=lambda s: s.revision):
         children = sorted(_file(scripts.get_revision(child), folder) for child in script.nextrev)
         if len(children) > 1:
-            problems.append(
-                f"Both {' and '.join(children)} point at {script.revision} "
-                f"({_file(script, folder)})"
+            who = (
+                f"Both {children[0]} and {children[1]}"
+                if len(children) == 2
+                else f"{', '.join(children[:-1])} and {children[-1]} all"
             )
+            problems.append(f"{who} point at {script.revision} ({_file(script, folder)})")
     return problems
 
 
@@ -87,13 +95,23 @@ def problems(folder: Path) -> list[str]:
     return duplicate_numbers(folder) + chain_problems(folder)
 
 
+def how_to_fix(found: list[str]) -> str:
+    """The advice for these problems. A missing parent needs its own (reviewer on PR 128)."""
+    if any(MISSING_PARENT in problem for problem in found):
+        return HOW_TO_FIX_MISSING_PARENT
+    return HOW_TO_FIX
+
+
 def main(argv: list[str]) -> int:
     folder = Path(argv[1]) if len(argv) > 1 else DEFAULT_FOLDER
+    if not (folder / "versions").is_dir():
+        print(f"No migrations folder at {folder} (it needs a versions folder inside).")
+        return 1
     found = problems(folder)
     for problem in found:
         print(f"Migration clash: {problem}")
     if found:
-        print(HOW_TO_FIX)
+        print(how_to_fix(found))
         return 1
     head = ScriptDirectory(str(folder)).get_current_head()
     print(f"The migrations in {folder} form one chain, head {head}.")

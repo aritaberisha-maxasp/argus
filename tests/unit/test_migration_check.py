@@ -215,3 +215,45 @@ def test_the_command_names_the_files_with_no_argument(
     output = capsys.readouterr().out
     assert "Migration clash: The chain has 2 heads:" in output
     assert "versions/0010_late.py" in output and "point at 0008" in output
+
+
+@pytest.mark.req("NF-01")
+def test_a_parent_from_another_branch_gets_its_own_advice(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Pointing 0012 at 0011 from an open PR while the branch is based on main.
+    path = copy_of_main(tmp_path)
+    (path / "versions" / "0012_next.py").write_text(migration("0012", "0011"), encoding="utf-8")
+    check = load_check()
+    assert check.main(["check_migrations.py", str(path)]) == 1
+    output = capsys.readouterr().out
+    assert "0011" in output and "is not present" in output
+    assert check.HOW_TO_FIX_MISSING_PARENT in output
+    assert check.HOW_TO_FIX not in output
+
+
+@pytest.mark.req("NF-01")
+def test_three_migrations_on_one_parent_are_named_in_one_line(tmp_path: Path) -> None:
+    path = folder(
+        tmp_path,
+        {
+            "0001_a.py": migration("0001", None),
+            "0002_b.py": migration("0002", "0001"),
+            "0003_c.py": migration("0003", "0001"),
+            "0004_d.py": migration("0004", "0001"),
+        },
+    )
+    assert load_check().problems(path)[1] == (
+        "versions/0002_b.py, versions/0003_c.py and versions/0004_d.py all point at 0001 "
+        "(versions/0001_a.py)"
+    )
+
+
+@pytest.mark.req("NF-01")
+def test_a_wrong_folder_is_not_called_a_clash(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert load_check().main(["check_migrations.py", str(tmp_path / "nowhere")]) == 1
+    output = capsys.readouterr().out
+    assert output.startswith("No migrations folder at ")
+    assert "clash" not in output
