@@ -47,6 +47,28 @@ param demo = true
 // running stand ins stay as they are.
 param demoImage = readEnvironmentVariable('ARGUS_DEMO_IMAGE', '')
 
+// The mailbox sweep every 5 minutes and the daily removal (#125). On, because the demo mailbox
+// is connected while demo = true. At go live it stays on once the real mailbox settings and the
+// intakeSettings below are in (docs/runbooks/go-live.md). The jobs never run with the
+// placeholder image of the very first deploy.
+param intakeJobs = true
+
+// Who Max ASP is, for the sorting and the invoice reading (#125). Not secret, but company data,
+// so the values come from GitHub variables (docs/operations/deploy.md), not from this file.
+// Not used while demo = true, which has synthetic values. The jobs refuse to start live while
+// ownDomain, invoicingAgent or ownVatIds is empty.
+param intakeSettings = {
+  ownDomain: readEnvironmentVariable('ARGUS_OWN_DOMAIN', '')
+  invoicingAgent: readEnvironmentVariable('ARGUS_INVOICING_AGENT', '')
+  ownVatIds: readEnvironmentVariable('ARGUS_OWN_VAT_IDS', '')
+  vendorDomains: readEnvironmentVariable('ARGUS_VENDOR_DOMAINS', '')
+  customerDomains: readEnvironmentVariable('ARGUS_CUSTOMER_DOMAINS', '')
+}
+
+// Where operations alerts go, for example a failed sweep (#125). Arita's address lives in the
+// GitHub variable ARGUS_ALERT_EMAIL, never in the repo.
+param alertEmail = readEnvironmentVariable('ARGUS_ALERT_EMAIL', '')
+
 // Add WISE_API_TOKEN and the Graph secrets here once Arita has put them in Key Vault. Only
 // with demo = false: tools/check_infra.py and ARGUS itself refuse real secrets in demo mode.
 param manualSecrets = []

@@ -63,6 +63,14 @@ jobs:
       RESOURCE_GROUP: ${{ vars.ARGUS_RESOURCE_GROUP }}
       ARGUS_DATABASE_ADMIN_OBJECT_ID: ${{ vars.ARGUS_DATABASE_ADMIN_OBJECT_ID }}
       ARGUS_DATABASE_ADMIN_NAME: ${{ vars.ARGUS_DATABASE_ADMIN_NAME }}
+      ARGUS_OWN_DOMAIN: ${{ vars.ARGUS_OWN_DOMAIN }}
+      ARGUS_INVOICING_AGENT: ${{ vars.ARGUS_INVOICING_AGENT }}
+      ARGUS_OWN_VAT_IDS: ${{ vars.ARGUS_OWN_VAT_IDS }}
+      ARGUS_VENDOR_DOMAINS: ${{ vars.ARGUS_VENDOR_DOMAINS }}
+      ARGUS_CUSTOMER_DOMAINS: ${{ vars.ARGUS_CUSTOMER_DOMAINS }}
+      # ARGUS_ALERT_EMAIL is left out on purpose: the preview prints every changed value into
+      # the run summary, and the address belongs to a person. The preview may therefore show
+      # the alert email receiver as removed; the deploy keeps it (#125).
     steps:
       - uses: actions/checkout@v4
 
