@@ -16,7 +16,34 @@ Requirement coverage is in [coverage.md](coverage.md). Open business questions a
 
 Sizes: S is about one night, M is two or three nights. Nothing is L.
 
-## Proposed Sprint 1 (26 Oct to 1 Nov 2026)
+## Sprint 3 (9 to 15 Nov 2026, approved by Arita on 10 Nov)
+
+**Sprint goal:** ARGUS runs live in Azure with the stand ins and a fake mailbox, so Arita can show Benjamin everything built so far in a demo, and only the real mailbox, DATEV and Wise are left to plug in.
+
+Arita approved the planning list on 10 Nov and asked to put the live demo first. The demo stories #124 to #126 were added on top; #61 and #56 moved from core to stretch to make room. DATEV stays on hold in Sprint 3. From Sprint 4 the approval and booking path may build on the assumed DATEV answers D1 to D9 (ADR 0002 provisional), as Arita said on #2.
+
+| Rank | Issue | Story | Requirement IDs | Size | Depends on | Stretch |
+|---|---|---|---|---|---|---|
+| 1 | [#123](https://github.com/aritaberisha-maxasp/argus/issues/123) | Stop a PR in CI when its migration clashes with another one | NF-01 | S | nothing |  |
+| 2 | [#124](https://github.com/aritaberisha-maxasp/argus/issues/124) | Run ARGUS in Azure with the stand ins and a fake mailbox for the demo | IN-01, NF-04, NF-06 | M | #81 done |  |
+| 3 | [#125](https://github.com/aritaberisha-maxasp/argus/issues/125) | Pick up new emails on its own in Azure every few minutes | IN-01, NF-01 | S | #81 done, #103 |  |
+| 4 | [#126](https://github.com/aritaberisha-maxasp/argus/issues/126) | Show Benjamin the exception queue on a page after sign in | EX-01, EX-02 | S | #23 |  |
+| 5 | [#62](https://github.com/aritaberisha-maxasp/argus/issues/62) | Show the status of every invoice at any time | NF-05, NF-03, EX-01 | M | #23, #21 |  |
+| 6 | [#63](https://github.com/aritaberisha-maxasp/argus/issues/63) | Show the full trail of a case from receipt to payment | NF-01, AP-08 | S | #62 |  |
+| 7 | [#112](https://github.com/aritaberisha-maxasp/argus/issues/112) | Let Benjamin correct number, amount or currency of a flagged invoice | EX-01, IN-10, PR-01 | M | #31, #23, #126 |  |
+| 8 | [#103](https://github.com/aritaberisha-maxasp/argus/issues/103) | Run the nightly audit copy as a scheduled job in Azure | NF-01, NF-05 | S | #81 done, #83 done |  |
+| 9 | [#115](https://github.com/aritaberisha-maxasp/argus/issues/115) | Tell Arita when a weekly database backup fails | NF-01, NF-03 | S | #82 |  |
+| 10 | [#61](https://github.com/aritaberisha-maxasp/argus/issues/61) | Send Benjamin a daily digest of open exceptions | EX-03 | S | #21 done | yes |
+| 11 | [#56](https://github.com/aritaberisha-maxasp/argus/issues/56) | Import the monthly Wise statement safely, once, with balances that add up | BA-01, BA-07, BA-08, NF-01 | M | #19, #20, #21 done | yes |
+| 12 | [#64](https://github.com/aritaberisha-maxasp/argus/issues/64) | Measure how many invoices go through without manual work | NF-07 | S | #62 | yes |
+| 13 | [#116](https://github.com/aritaberisha-maxasp/argus/issues/116) | Bring lost audit events back from the nightly copies after a restore | NF-01, NF-05 | M | #82, #103 | yes |
+| 14 | [#34](https://github.com/aritaberisha-maxasp/argus/issues/34) | Keep the approver, deputy and direct debit flag for each vendor | AP-01, AP-06, PY-13, VM-02 | M | #23, #33 done | yes |
+
+Carry over: the Sprint 2 stories that wait only for Arita's merge (#82, #23, #31, #71, #106, #90, #72) and the DATEV spike #2. Next in line, refinement only: #117, #118, #84.
+
+Numbers for this sprint: next free ADR is 0009; new migrations start at 0013 and are chained to the highest one in main or any open PR.
+
+## Sprint 1 (26 Oct to 1 Nov 2026, done)
 
 **Sprint goal:** every email arriving at the accounts mailbox is picked up once, stored unaltered and recorded with its audit trail. The Wise client and the DATEV stand in are ready so payments and bookings can build on them.
 
@@ -43,6 +70,8 @@ Sprint 1 has seven shifts (five weeknights, Saturday and Sunday) and at most thr
 - #4 (Wise spike) and #5 (document spike) are done: PR #14 and PR #55 are merged, so ranks 6 and 8 can start.
 
 ## Full backlog
+
+This table is the order from October. Stories filed since then (#106, #112, #115 to #118, #123 to #126) are ranked in the Sprint 3 section above or not planned yet.
 
 | Rank | Issue | Story | Area | Size | Depends on | Provisional |
 |---|---|---|---|---|---|---|
