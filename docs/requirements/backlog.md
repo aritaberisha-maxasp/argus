@@ -26,7 +26,7 @@ Arita approved the planning list on 10 Nov and asked to put the live demo first.
 |---|---|---|---|---|---|---|
 | 1 | [#123](https://github.com/aritaberisha-maxasp/argus/issues/123) | Stop a PR in CI when its migration clashes with another one | NF-01 | S | nothing |  |
 | 2 | [#124](https://github.com/aritaberisha-maxasp/argus/issues/124) | Run ARGUS in Azure with the stand ins and a fake mailbox for the demo | IN-01, NF-04, NF-06 | M | #81 done |  |
-| 3 | [#125](https://github.com/aritaberisha-maxasp/argus/issues/125) | Pick up new emails on its own in Azure every few minutes | IN-01, NF-01 | S | #81 done, #103 |  |
+| 3 | [#125](https://github.com/aritaberisha-maxasp/argus/issues/125) | Pick up new emails on its own in Azure every few minutes | IN-01, NF-01 | S | #81 done; #103 is the same pattern, either can go first |  |
 | 4 | [#126](https://github.com/aritaberisha-maxasp/argus/issues/126) | Show Benjamin the exception queue on a page after sign in | EX-01, EX-02 | S | #23 |  |
 | 5 | [#62](https://github.com/aritaberisha-maxasp/argus/issues/62) | Show the status of every invoice at any time | NF-05, NF-03, EX-01 | M | #23, #21 |  |
 | 6 | [#63](https://github.com/aritaberisha-maxasp/argus/issues/63) | Show the full trail of a case from receipt to payment | NF-01, AP-08 | S | #62 |  |
@@ -39,7 +39,7 @@ Arita approved the planning list on 10 Nov and asked to put the live demo first.
 | 13 | [#116](https://github.com/aritaberisha-maxasp/argus/issues/116) | Bring lost audit events back from the nightly copies after a restore | NF-01, NF-05 | M | #82, #103 | yes |
 | 14 | [#34](https://github.com/aritaberisha-maxasp/argus/issues/34) | Keep the approver, deputy and direct debit flag for each vendor | AP-01, AP-06, PY-13, VM-02 | M | #23, #33 done | yes |
 
-Carry over: the Sprint 2 stories that wait only for Arita's merge (#82, #23, #31, #71, #106, #90, #72) and the DATEV spike #2. Next in line, refinement only: #117, #118, #84.
+Carry over: the Sprint 2 stories that wait only for Arita's merge (#23, #31, #71, #106, #90, #72) and the DATEV spike #2. Next in line, refinement only: #117, #118, #84.
 
 Numbers for this sprint: next free ADR is 0009; new migrations start at 0013 and are chained to the highest one in main or any open PR.
 
