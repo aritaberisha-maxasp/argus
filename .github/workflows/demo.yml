@@ -116,6 +116,8 @@ jobs:
           ARGUS_DATABASE_URL: postgresql+psycopg://${{ steps.target.outputs.database_host }}:5432/${{ steps.target.outputs.database_name }}?sslmode=require
           PGUSER: ${{ vars.ARGUS_DATABASE_ADMIN_NAME }}
           ACCOUNT: ${{ steps.target.outputs.documents_account }}
+          # The live app's own setting, so python -m argus.demo repeats the check above.
+          ARGUS_DEMO: ${{ steps.target.outputs.demo }}
         run: |
           PGPASSWORD=$(az account get-access-token --resource-type oss-rdbms --query accessToken --output tsv)
           echo "::add-mask::$PGPASSWORD"
@@ -124,7 +126,7 @@ jobs:
             --resource-group "$RESOURCE_GROUP" --name "$ACCOUNT" --query connectionString --output tsv)
           echo "::add-mask::$ARGUS_DOCUMENTS_CONNECTION_STRING"
           export ARGUS_DOCUMENTS_CONNECTION_STRING
-          ARGUS_DEMO=true python -m argus.demo reset
+          python -m argus.demo reset
           identity=$(az identity list --resource-group "$RESOURCE_GROUP" \
             --query "[?name=='id-argus-app'] | [0].[name, principalId]" --output tsv)
           python tools/deploy.py app-db-role \

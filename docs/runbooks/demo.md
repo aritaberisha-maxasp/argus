@@ -52,4 +52,9 @@ To show it again from the start, run the Demo workflow with **reset and seed** a
 
 ## After the demos: going live
 
-Switching demo mode off is part of the [go live runbook](go-live.md). In short: `param demo = false` in `main.bicepparam`, the real addresses and secrets in, then delete the stand ins, the seed job, the demo database and the demo storage account by hand, since the pipeline never deletes anything.
+Switching demo mode off is part of the [go live runbook](go-live.md). The order matters, since the stand ins run as the app identity, which can read every secret in Key Vault:
+
+1. Delete the three stand in apps and the seed job, before any real secret goes into Key Vault:
+   `az containerapp delete --resource-group rg-argus --name <name> --yes` for `ca-argus-standin-graph`, `ca-argus-standin-datev`, `ca-argus-standin-wise`, and `az containerapp job delete --resource-group rg-argus --name caj-argus-demo-seed --yes`.
+2. A PR with `param demo = false` in `main.bicepparam`. After its deploy, delete the database `argus_demo`, the storage account tagged `role=demo` and the Key Vault secrets `argus-demo-documents-connection-string`, `argus-graph-standin-token` and `argus-wise-standin-token`. The pipeline never deletes anything, so this is by hand.
+3. Then the real secrets and addresses, as the go live runbook says.

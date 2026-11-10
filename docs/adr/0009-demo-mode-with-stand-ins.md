@@ -41,6 +41,7 @@ Option 3.
 - The deploy builds and pushes one more image on every merge, about a minute more per run.
 - While demo mode is on, the deploy migrates and smoke tests `argus_demo`, not `argus`. The real database is migrated at the first deploy after demo mode is switched off.
 - Three small always on container apps and a storage account cost a few euros a month while the demo runs. They stay until someone deletes them: switching demo mode off does not remove them, since the pipeline never deletes resources. The go live runbook lists them.
+- The stand ins and the seed job run as the app identity, which can read every Key Vault secret. That is fine while the vault holds no real secret, so the go live runbook deletes them before the first real secret goes in. A separate identity for them would need Arita to widen the deploy identity's role rule (docs/operations/deploy.md, step 5), which is not worth it for a few weeks of demo.
 - The reset needs the database admin, so it runs from GitHub, not inside Azure. The rows it drops are synthetic, so the GitHub log may show them; real rows never pass through it.
 - Long term backups (#82) of the server also hold `argus_demo`. It holds synthetic data only, so that is harmless, and the database is dropped at go live.
 - Signing in to ARGUS (#23) and the sweep job (#125) build on the same settings. The sweep calls `connections_from_env()` and never looks at the mode itself.
