@@ -13,4 +13,5 @@ Things that must be done before ARGUS works on the real accounts mailbox, the re
 
 ## One time steps for Arita in Azure
 
-- [ ] The one time setup and the retention lock switch in [infra/README.md](../../infra/README.md).
+- [ ] The one time setup in [docs/operations/deploy.md](../operations/deploy.md), up to a first green deploy (#81).
+- [ ] The retention lock switch in [infra/README.md](../../infra/README.md), after the tax advisor confirms the period.

@@ -30,5 +30,7 @@ param modelDeployments = [
 // Add WISE_API_TOKEN and the Graph secrets here once Arita has put them in Key Vault.
 param manualSecrets = []
 
+// The deploy pipeline (#81) sets these: first the running image, then the new one after the
+// migrations. Without them CI builds this file with the public placeholder.
 param appImage = readEnvironmentVariable('ARGUS_APP_IMAGE', 'mcr.microsoft.com/k8se/quickstart:latest')
 param appPort = int(readEnvironmentVariable('ARGUS_APP_PORT', '80'))

@@ -4,8 +4,9 @@
 // exception digest) run in this environment as Container Apps jobs. Each job story adds its
 // job here once the app has a command for it; today none has one yet.
 //
-// Every secret comes from Key Vault through the app's managed identity. The image is a public
-// placeholder until the pipeline from #81 builds and deploys the real one.
+// Every secret comes from Key Vault through the app's managed identity. The pipeline from #81
+// builds the ARGUS image and passes it in. The very first deploy starts with a public
+// placeholder, because the registry for the real image does not exist yet.
 
 import { manualSecret } from '../types.bicep'
 
@@ -21,6 +22,9 @@ param identityId string
 
 @description('Client ID of that identity, so the Azure SDK picks the right one.')
 param identityClientId string
+
+@description('Name of that identity. The pipeline maps it to a database role of the same name (#81).')
+param identityName string
 
 param registryLoginServer string
 param keyVaultUri string
@@ -93,9 +97,18 @@ var plainSettings = [
     value: identityClientId
   }
   {
-    // No password: the app signs in as argus_app with an Entra token (#81).
+    // No password: the app signs in as its own Entra role with a token from its managed
+    // identity, then works as argus_app (#81, src/argus/db/__init__.py).
     name: 'ARGUS_DATABASE_URL'
-    value: 'postgresql+psycopg://argus_app@${databaseHost}:5432/${databaseName}?sslmode=require'
+    value: 'postgresql+psycopg://${identityName}@${databaseHost}:5432/${databaseName}?sslmode=require'
+  }
+  {
+    name: 'ARGUS_DATABASE_AUTH'
+    value: 'entra'
+  }
+  {
+    name: 'ARGUS_DATABASE_ROLE'
+    value: 'argus_app'
   }
   {
     name: 'AZURE_OPENAI_ENDPOINT'
@@ -175,4 +188,5 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
 
 output environmentId string = environment.id
 output appName string = app.name
+output appImage string = image
 output appUrl string = 'https://${app.properties.configuration.ingress.fqdn}'
