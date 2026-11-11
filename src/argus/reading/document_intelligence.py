@@ -30,8 +30,9 @@ from argus.reading.pages import (
     Page,
     ReaderUnavailable,
 )
-from argus.reading.text_rules import clean_vat_id, compact_iban, parse_rate, squash
+from argus.reading.text_rules import compact_iban, parse_rate, squash
 from argus.secrets import SecretStore
+from argus.vat_ids import clean_vat_id
 
 log = logging.getLogger("argus.reading")
 

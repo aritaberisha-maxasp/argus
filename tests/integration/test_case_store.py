@@ -59,6 +59,9 @@ def new_case(app: Engine, kind: CaseKind = CaseKind.INCOMING_INVOICE, **fields: 
         "gross_cents": 892500,
         "currency": "EUR",
     }
+    if kind in (CaseKind.INCOMING_INVOICE, CaseKind.INCOMING_CREDIT_NOTE):
+        # Checked for duplicates, as intake does (#31): no approval without a duplicate key.
+        defaults["duplicate_key"] = f"vat:DE700000000|RETEST{n}|892500|EUR"
     with unit_of_work(app, INTAKE) as db:
         return create_case(db, kind, **{**defaults, **fields})  # type: ignore[arg-type]
 
@@ -321,7 +324,10 @@ def test_a_correction_before_approval_is_logged_with_old_and_new_value(app: Engi
 
     assert len(changed) == 1
     assert changed[0].actor == "user:arita-entra-id"
-    assert changed[0].details == {"gross_minor": {"old": 10000, "new": 11900}}
+    # The corrected amount also clears the duplicate key, so the case is checked again (#31).
+    assert changed[0].details["gross_minor"] == {"old": 10000, "new": 11900}
+    assert changed[0].details["duplicate_key"]["new"] is None
+    assert set(changed[0].details) == {"gross_minor", "duplicate_key"}
 
 
 # 5. Audit events cannot be updated or deleted by the application's database user
@@ -1133,7 +1139,7 @@ def test_a_case_with_a_second_open_exception_stays_in_exception(app: Engine) -> 
         second = open_exception(db, ExceptionReason.IBAN_MISMATCH, "IBAN differs", case_id=case_id)
 
     with unit_of_work(app, BENJAMIN) as db:
-        resolve_exception(db, first, Outcome.NOT_A_DUPLICATE)
+        resolve_exception(db, first, Outcome.NOT_A_DUPLICATE, resolution="two deliveries")
     assert status_of(app, case_id) is S.EXCEPTION
 
     for to in (S.BOOKED, S.IN_PAYMENT_RUN, S.CLOSED):

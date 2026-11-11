@@ -11,6 +11,15 @@ Things that must be done before ARGUS works on the real accounts mailbox, the re
 - [ ] **Graph paging link on the sandbox mailbox (#90).** Graph lists the Inbox 50 emails at a time. The tests use the link shape of our fake Graph and a few shapes real Graph is known to write, but only the real service shows which one it uses. Once the sandbox mailbox is connected (#65), the team puts at least 60 synthetic test emails in its Inbox and runs one sweep. Pass: the log line `Mailbox sweep: N in Inbox` shows the same number as the Inbox in Outlook, and there is no `refused Graph paging link` error. If that error shows up, it names the link's path: a developer adds that shape to `argus.intake.graph` with a test, and this check runs again before ARGUS reads the real accounts mailbox. While the link is refused, each sweep stops after the first page, so ARGUS also stops moving emails into its folders until the fix is deployed.
 - [ ] Two weeks of shadow mode before ARGUS routes anything (#72).
 
+## Settings in production
+
+- [ ] **Invoice reading is switched on in the sweep.** The sweep reads the invoices of an email only when `Sorting.invoicing` is set; it is off by default. Without it no case is opened, and the safety gates that need the invoice data (failed plausibility checks, a PDF that disagrees with its XML, an e-invoice that cannot be read safely, an unreadable document) never fire. Flagged by the compliance review of PR 108 (#71). The team sets it in the production wiring and checks it in the shadow run (#72).
+- [ ] **Max ASP's own VAT IDs are set once for both sorting and reading.** `SortingConfig.own_vat_ids` and `Invoicing.own_vat_ids` hold every VAT ID Max ASP prints on documents. The sweep refuses to start when the two lists differ. If the list is empty, supplier invoices that print Max ASP's VAT ID above their own go to a person instead of opening a case (#106).
+
 ## One time steps for Arita in Azure
 
-- [ ] The one time setup and the retention lock switch in [infra/README.md](../../infra/README.md).
+- [ ] The one time setup in [docs/operations/deploy.md](../operations/deploy.md), up to a first green deploy (#81).
+- [ ] Start the long term database backup: two roles for the backup vault, then `databaseBackupProtected = true` ([docs/operations/backup-and-restore.md](../operations/backup-and-restore.md), #82).
+- [ ] One real restore of a long term backup, checked with `tools/restore_check.py` and written into the restore record of that runbook (#82).
+- [ ] Sign in with Microsoft: the ARGUS app registration, the three groups and the five settings in [docs/operations/sign-in.md](../operations/sign-in.md) (#23). Needed before anyone uses the approval page (#38).
+- [ ] The retention lock switch in [infra/README.md](../../infra/README.md), after the tax advisor confirms the period. It locks the backup vault too (ADR 0007).

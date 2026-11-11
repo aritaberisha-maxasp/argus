@@ -13,6 +13,8 @@ import pypdf
 import pytest
 
 from argus.cases.model import CaseKind
+from argus.documents.store import MemoryDocumentStore
+from argus.intake.email_text import EmailReader
 from argus.intake.invoices import (
     EmailInvoices,
     Invoicing,
@@ -21,13 +23,16 @@ from argus.intake.invoices import (
     find_invoices,
     to_manual_review,
 )
+from argus.intake.sweep import Sorting
 from argus.reading import parse_analyze_result
 from argus.reading.fields import InvoiceReading, ReadField, Source
 from argus.reading.pages import Analysis, InvoiceSpan, Page
 from argus.reading.split import split_file
+from argus.reading.text_rules import find_fields
+from argus.sorting import RecordedModel
 from argus.sorting.models import Route, SortingDecision
 from tests.acceptance.intake import FixtureDocumentReader
-from tests.unit.sorting_helpers import EMAILS, FIXTURES, OWN_VAT_IDS, manifest
+from tests.unit.sorting_helpers import EMAILS, FIXTURES, OWN_VAT_IDS, fixture_config, manifest
 
 DOCUMENTS = FIXTURES / "documents"
 
@@ -512,3 +517,64 @@ def test_a_document_without_number_or_total_such_as_terms_raises_no_doubt() -> N
     )
     found = find_invoices(email_with_pdf(invoice, terms), Invoicing(reader, OWN_VAT_IDS))
     assert doubts_about(found, 1) == ()
+
+
+# Bug #106: sorting and reading must skip the same VAT IDs as Max ASP's own.
+
+
+@pytest.mark.req("IN-04", "IN-07")
+@pytest.mark.parametrize(
+    ("sorting_ids", "reading_ids"),
+    [(frozenset(), OWN_VAT_IDS), (OWN_VAT_IDS, frozenset()), (OWN_VAT_IDS, {"DE099000002"})],
+)
+def test_the_sweep_refuses_different_own_vat_ids_for_sorting_and_reading(
+    sorting_ids: frozenset[str], reading_ids: frozenset[str]
+) -> None:
+    with pytest.raises(ValueError, match="must be the same for sorting and invoice reading"):
+        Sorting(
+            documents=MemoryDocumentStore(),
+            model=RecordedModel({}),
+            config=replace(fixture_config(), own_vat_ids=sorting_ids),
+            read=EmailReader(FixtureDocumentReader()),
+            invoicing=Invoicing(FixtureDocumentReader(), frozenset(reading_ids)),
+        )
+
+
+@pytest.mark.req("IN-04", "IN-07")
+def test_the_same_own_vat_ids_written_differently_are_accepted() -> None:
+    Sorting(
+        documents=MemoryDocumentStore(),
+        model=RecordedModel({}),
+        config=replace(fixture_config(), own_vat_ids=frozenset({"DE 099 000 001"})),
+        read=EmailReader(FixtureDocumentReader()),
+        invoicing=Invoicing(FixtureDocumentReader(), OWN_VAT_IDS),
+    )
+
+
+@pytest.mark.req("IN-07")
+def test_max_asps_block_on_top_is_read_as_the_recipient_not_the_issuer() -> None:
+    page = Page(
+        1,
+        "Max ASP GmbH\nTestallee 1, 70000 Musterstadt\nUSt-IdNr. DE099000001\n"
+        "Beispiel Reinigung GmbH\nGlanzgasse 2, 70007 Beispielstadt, DE\n"
+        "USt-IdNr. DE012345607\nRechnung\nNummer: 1001\n",
+    )
+    found = find_fields((page,), OWN_VAT_IDS)
+    assert found["issuer_name"].value == "Beispiel Reinigung GmbH"
+    assert found["recipient_name"].value == "Max ASP GmbH"
+    assert found["vendor_vat_id"].value == "DE012345607"
+
+
+@pytest.mark.req("IN-07")
+@pytest.mark.parametrize("own", ["DE 099 000 001", "de099000001", "DEO99000001"])
+def test_own_vat_ids_written_with_spaces_are_still_skipped_by_the_reading(own: str) -> None:
+    page = Page(
+        1,
+        "Max ASP GmbH\nTestallee 1, 70000 Musterstadt\nUSt-IdNr. DE099000001\n"
+        "Beispiel Reinigung GmbH\nGlanzgasse 2, 70007 Beispielstadt, DE\n"
+        "USt-IdNr. DE012345607\nRechnung\nNummer: 1001\nGesamtbetrag 119,00 EUR\n",
+    )
+    invoicing = Invoicing(PagesReader(Analysis(pages=(page,))), frozenset({own}))
+    assert invoicing.reading_settings.own_vat_ids == OWN_VAT_IDS  # the setting itself is cleaned
+    [invoice] = find_invoices(email_with_pdf(merged_pdf("D14")), invoicing).invoices
+    assert invoice.key == "vat:DE012345607|1001"

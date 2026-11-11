@@ -17,6 +17,8 @@ REPO = Path(__file__).resolve().parents[2]
 
 # Built at runtime from repeated letters, so the secret scan does not take it for a real key.
 FAKE_ACCOUNT_KEY = "AccountKey=" + "A" * 40 + "=="
+# How Bicep compiles 'P${retentionYears}Y' in infra/modules/backup.bicep.
+YEARS_EXPRESSION = "[format('P{0}Y', parameters('retentionYears'))]"
 
 
 def load_check() -> ModuleType:
@@ -108,6 +110,64 @@ def good_main() -> dict[str, Any]:
             }
         ],
     }
+    database = {
+        "parameters": {"location": {"type": "string"}},
+        "resources": {
+            "server": {
+                "type": "Microsoft.DBforPostgreSQL/flexibleServers",
+                "name": "psql-argus",
+                "location": "[parameters('location')]",
+                "properties": {
+                    "backup": {"backupRetentionDays": 35, "geoRedundantBackup": "Disabled"}
+                },
+            }
+        },
+    }
+    backup = {
+        "parameters": {
+            "location": {"type": "string"},
+            "retentionYears": {"type": "int", "maxValue": 10},
+            "retentionLocked": {"type": "bool"},
+        },
+        "resources": {
+            "vault": {
+                "type": "Microsoft.DataProtection/backupVaults",
+                "name": "bvault-argus",
+                "location": "[parameters('location')]",
+                "properties": {
+                    "storageSettings": [{"datastoreType": "VaultStore", "type": "GeoRedundant"}],
+                    "securitySettings": {
+                        "immutabilitySettings": {
+                            "state": "[if(parameters('retentionLocked'), 'Locked', 'Unlocked')]"
+                        },
+                        "softDeleteSettings": {
+                            "state": "[if(parameters('retentionLocked'), 'AlwaysOn', 'On')]",
+                            "retentionDurationInDays": 14,
+                        },
+                    },
+                },
+            },
+            "policy": {
+                "type": "Microsoft.DataProtection/backupVaults/backupPolicies",
+                "name": "[format('{0}/{1}', 'bvault-argus', 'argus-database-monthly')]",
+                "properties": {
+                    "policyRules": [
+                        {"name": "BackupWeekly", "objectType": "AzureBackupRule"},
+                        {
+                            "name": "Default",
+                            "objectType": "AzureRetentionRule",
+                            "lifecycles": [{"deleteAfter": {"duration": "P3M"}}],
+                        },
+                        {
+                            "name": "Monthly",
+                            "objectType": "AzureRetentionRule",
+                            "lifecycles": [{"deleteAfter": {"duration": YEARS_EXPRESSION}}],
+                        },
+                    ]
+                },
+            },
+        },
+    }
     return {
         "definitions": {
             "_1.euDeploymentSku": {
@@ -127,6 +187,12 @@ def good_main() -> dict[str, Any]:
             },
             "retentionLocked": {"type": "bool", "defaultValue": False},
             "retentionDays": {"type": "int", "defaultValue": 4018, "minValue": 4018},
+            "databaseBackupYears": {
+                "type": "int",
+                "defaultValue": 10,
+                "minValue": 1,
+                "maxValue": 10,
+            },
         },
         "resources": {
             "identity": {
@@ -135,6 +201,8 @@ def good_main() -> dict[str, Any]:
                 "location": "[parameters('location')]",
             },
             "documents": module("documents", "[parameters('location')]", documents),
+            "database": module("database", "[parameters('location')]", database),
+            "backup": module("backup", "[parameters('location')]", backup),
             "ai": module("ai", "[parameters('aiLocation')]", ai),
             "apps": module("apps", "[parameters('location')]", apps),
         },
@@ -187,6 +255,7 @@ def good_parameters() -> dict[str, Any]:
         "parameters": {
             "retentionLocked": {"value": False},
             "retentionDays": {"value": 4018},
+            "databaseBackupYears": {"value": 10},
             "modelDeployments": {"value": [{"name": "argus-sorting", "sku": "DataZoneStandard"}]},
         }
     }
@@ -239,6 +308,32 @@ def test_an_ai_region_outside_the_eu_fails(tmp_path: Path) -> None:
     main = good_main()
     main["parameters"]["aiLocation"]["allowedValues"].append("eastus2")
     assert any("aiLocation" in p for p in run(tmp_path, main))
+
+
+@pytest.mark.req("NF-03")
+@pytest.mark.parametrize("module_name", ["documents", "apps"])
+def test_the_ai_region_on_a_module_without_ai_accounts_fails(
+    tmp_path: Path, module_name: str
+) -> None:
+    main = good_main()
+    main["resources"][module_name]["properties"]["parameters"]["location"]["value"] = (
+        "[parameters('aiLocation')]"
+    )
+    assert any(f"module {module_name} gets aiLocation" in p for p in run(tmp_path, main))
+
+
+@pytest.mark.req("NF-03")
+def test_the_ai_module_may_not_place_anything_else_in_the_ai_region(tmp_path: Path) -> None:
+    main = good_main()
+    main["resources"]["ai"]["properties"]["template"]["resources"].append(
+        {
+            "type": "Microsoft.Storage/storageAccounts",
+            "name": "stsidecar",
+            "location": "[parameters('location')]",
+        }
+    )
+    problems = run(tmp_path, main)
+    assert any("also places Microsoft.Storage/storageAccounts" in p for p in problems)
 
 
 @pytest.mark.req("NF-01")
@@ -443,3 +538,85 @@ def test_the_check_reports_and_fails(tmp_path: Path, capsys: pytest.CaptureFixtu
     run(tmp_path, main)
     assert check_infra.main([str(tmp_path)]) == 1
     assert "Infrastructure problem" in capsys.readouterr().out
+
+
+def backup_module(main: dict[str, Any]) -> dict[str, Any]:
+    template: dict[str, Any] = main["resources"]["backup"]["properties"]["template"]
+    return template
+
+
+@pytest.mark.req("NF-01")
+@pytest.mark.parametrize("days", [7, 34, None])
+def test_database_backups_shorter_than_35_days_fail(tmp_path: Path, days: int | None) -> None:
+    main = good_main()
+    server = main["resources"]["database"]["properties"]["template"]["resources"]["server"]
+    if days is None:
+        del server["properties"]["backup"]
+    else:
+        server["properties"]["backup"]["backupRetentionDays"] = days
+    assert any("not 35" in p for p in run(tmp_path, main))
+
+
+@pytest.mark.req("NF-01")
+def test_no_backup_vault_fails(tmp_path: Path) -> None:
+    main = good_main()
+    del main["resources"]["backup"]
+    assert any("no Backup vault" in p for p in run(tmp_path, main))
+
+
+@pytest.mark.req("NF-01")
+def test_long_term_backups_without_the_years_parameter_fail(tmp_path: Path) -> None:
+    main = good_main()
+    del main["parameters"]["databaseBackupYears"]
+    assert any("no databaseBackupYears parameter" in p for p in run(tmp_path, main))
+
+
+@pytest.mark.req("NF-01")
+def test_long_term_backups_kept_less_than_ten_years_by_default_fail(tmp_path: Path) -> None:
+    main = good_main()
+    main["parameters"]["databaseBackupYears"]["defaultValue"] = 8
+    assert any("default to at least 10" in p for p in run(tmp_path, main))
+
+
+@pytest.mark.req("NF-01")
+def test_long_term_backups_kept_less_than_ten_years_in_the_parameters_fail(
+    tmp_path: Path,
+) -> None:
+    parameters = good_parameters()
+    parameters["parameters"]["databaseBackupYears"]["value"] = 5
+    problems = run(tmp_path, good_main(), parameters=parameters)
+    assert any("databaseBackupYears in the parameters file" in p for p in problems)
+
+
+@pytest.mark.req("NF-01")
+def test_a_backup_policy_with_a_fixed_period_fails(tmp_path: Path) -> None:
+    main = good_main()
+    monthly = backup_module(main)["resources"]["policy"]["properties"]["policyRules"][2]
+    monthly["lifecycles"][0]["deleteAfter"]["duration"] = "P1Y"
+    assert any("period set by a parameter" in p for p in run(tmp_path, main))
+
+
+@pytest.mark.req("NF-01")
+@pytest.mark.parametrize(
+    "state",
+    [
+        "Locked",
+        "Disabled",
+        "[if(parameters('retentionLocked'), 'Locked', 'Disabled')]",
+        "[if(parameters('retentionLocked'), 'Unlocked', 'Disabled')]",
+    ],
+)
+def test_a_vault_lock_written_straight_into_the_code_fails(tmp_path: Path, state: str) -> None:
+    main = good_main()
+    vault = backup_module(main)["resources"]["vault"]
+    vault["properties"]["securitySettings"]["immutabilitySettings"]["state"] = state
+    assert any("immutability must come from retentionLocked" in p for p in run(tmp_path, main))
+
+
+@pytest.mark.req("NF-01")
+@pytest.mark.parametrize("state", ["Off", "[if(parameters('retentionLocked'), 'AlwaysOn', 'Off')]"])
+def test_a_vault_without_soft_delete_fails(tmp_path: Path, state: str) -> None:
+    main = good_main()
+    vault = backup_module(main)["resources"]["vault"]
+    vault["properties"]["securitySettings"]["softDeleteSettings"]["state"] = state
+    assert any("soft delete off" in p for p in run(tmp_path, main))

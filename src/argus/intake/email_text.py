@@ -48,7 +48,10 @@ class EmailReader:
             headers=first_headers(message.items()),
             attachments=tuple(
                 Attachment(
-                    a.filename or "attachment", a.content_type, self.text_of(position, a.data)
+                    a.filename or "attachment",
+                    a.content_type,
+                    self.text_of(position, a.data),
+                    einvoice_refused=einvoice_refused(a.data),
                 )
                 for position, a in enumerate(attachments_of(raw), start=1)
             ),
@@ -77,6 +80,17 @@ def body_of(message: EmailMessage) -> str:
     if part.get_content_type() == "text/html":
         body = re.sub(r"<[^>]+>", " ", body)
     return body
+
+
+def einvoice_refused(data: bytes) -> bool:
+    """Whether the attachment is XML the e-invoice reader refuses to read (#28, #71)."""
+    if sniff_type(data) is not None or not looks_like_xml(data):
+        return False
+    try:
+        read_xml("attachment", data)
+    except EInvoiceRefused:
+        return True
+    return False
 
 
 def einvoice_text(position: int, data: bytes) -> str | None:
