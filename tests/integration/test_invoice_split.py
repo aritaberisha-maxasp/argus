@@ -26,6 +26,7 @@ from argus.intake.graph import GraphClient
 from argus.intake.invoices import Invoicing
 from argus.intake.records import EmailRecord, EmailStep
 from argus.intake.sweep import SWEEP_ACTOR, DocumentArchive, Sorting, classify, sweep
+from argus.reading import Analysis, Page
 from argus.sorting import LanguageModel, RecordedModel
 from standins.graph.app import create_app
 from tests.acceptance.intake import FixtureDocumentReader
@@ -37,7 +38,7 @@ from tests.integration.test_reminder_forward import (
 )
 from tests.unit.intake.graph_helpers import TOKEN
 from tests.unit.sorting_helpers import MODEL_ANSWERS, OWN_VAT_IDS, fixture_config
-from tests.unit.test_invoice_split import email_with_pdf, merged_pdf
+from tests.unit.test_invoice_split import PagesReader, email_with_pdf, merged_pdf
 
 TWO_IN_ONE_PDF = "<split.two-invoices-one-pdf@fixtures.argus.example>"
 E14_ID = "<E14.drei-rechnungen-eine-mail@fixtures.argus.example>"
@@ -164,6 +165,41 @@ def test_two_invoices_on_two_pages_of_one_pdf_become_two_cases(app: Engine) -> N
     assert [c["documents"] for c in cases] == [[pdf], [pdf]]
     assert [c["pages"] for c in cases] == [["{1}"], ["{2}"]]
     assert [c["gross_minor"] for c in cases] == [30940, 17255]
+
+
+# Bug #106: Max ASP's address block with its VAT ID printed above the supplier's.
+UNDER_OUR_BLOCK = (
+    "Max ASP GmbH\nTestallee 1, 70000 Musterstadt\nUSt-IdNr. DE099000001\n"
+    "Beispiel Reinigung GmbH\nGlanzgasse 2, 70007 Beispielstadt, DE\nUSt-IdNr. DE012345607\n"
+    "Rechnung\nNummer: 1001\nDatum: 12.10.2026\n"
+    "Nettobetrag 100,00 EUR\nUSt 19 % 19,00 EUR\nGesamtbetrag 119,00 EUR\n"
+)
+
+
+@pytest.mark.req("IN-04", "IN-07", "IN-08")
+@pytest.mark.usefixtures("clean")
+def test_a_supplier_invoice_under_max_asps_block_opens_one_case_keyed_on_the_supplier(
+    app: Engine,
+) -> None:
+    raw = email_with_pdf(merged_pdf("D14"))  # sent from the supplier, as E14
+    reader = PagesReader(Analysis(pages=(Page(1, UNDER_OUR_BLOCK),)))
+    graph = graph_for(create_app(token=TOKEN, emails=[raw]), None)
+    documents = MemoryDocumentStore()
+    sorting = Sorting(
+        documents=documents,
+        model=model({TWO_IN_ONE_PDF: 1}),
+        config=fixture_config(),
+        read=EmailReader(reader),
+        invoicing=Invoicing(reader, OWN_VAT_IDS),
+    )
+    sweep(app, graph, DocumentArchive(documents), sorting)
+
+    email_id = record_for(app, raw)
+    assert open_exceptions(app, email_id) == []
+    [case] = cases_of(app, email_id)
+    assert case["kind"] == "incoming_invoice"
+    assert case["case_key"] == "vat:DE012345607|1001"
+    assert case["gross_minor"] == 11900
 
 
 @pytest.mark.req("IN-08", "NF-01", "NF-03")

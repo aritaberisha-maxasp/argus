@@ -9,12 +9,13 @@ These rules come from the document understanding prototype (spikes/document_unde
 """
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from argus.sorting import sender
 from argus.sorting.config import SortingConfig
 from argus.sorting.gates import Gate, GateHit
 from argus.sorting.models import Attachment, Category, CheckResult, EmailToSort
+from argus.vat_ids import VAT_LINE, clean_vat_id, states_only
 
 # Below this many characters a document counts as unreadable (IN-03).
 MIN_READABLE_CHARS = 40
@@ -57,7 +58,6 @@ TITLES = [
 _TITLE_RES = [(kind, re.compile(rf"^(?:{pattern})\b", re.IGNORECASE)) for kind, pattern in TITLES]
 INVOICE_KINDS = ("invoice", "credit_note", "cancellation")
 NOT_INVOICE_KINDS = ("quote", "advertising", "order_confirmation", "delivery_note")
-VAT_ID_LINE = re.compile(r"(USt-?IdNr|VAT ID|VAT No)", re.IGNORECASE)
 
 
 def document_kind(text: str) -> str:
@@ -84,16 +84,27 @@ class _Document:
     kind: str
     issuer: str  # normalised
     names_us: bool  # Max ASP is named somewhere other than as the issuer
+    # Max ASP's own block with its VAT ID stands above the issuer's. That is common on supplier
+    # invoices that must show the customer's VAT ID (#106), but Max ASP's own invoices to EU
+    # customers look the same, so only the sender tells which one it is.
+    under_our_block: bool = False
 
 
-def _read_document(source: str, text: str, own: str) -> _Document:
+def _read_document(
+    source: str, text: str, own: str, own_vat_ids: frozenset[str] = frozenset()
+) -> _Document:
     lines = [line.strip() for line in text.splitlines() if line.strip()]
+    vat_lines = [i for i, line in enumerate(lines[:20]) if VAT_LINE.match(line)]
+    # Max ASP's own VAT IDs never mark the issuer: the same rules as the invoice reading.
+    theirs = [i for i in vat_lines if not states_only(lines[i], own_vat_ids)]
+    first = vat_lines[0] if vat_lines else None
     # The issuer's name sits above its address line, which sits above its VAT ID.
-    vat_line = next((i for i, line in enumerate(lines[:20]) if VAT_ID_LINE.match(line)), None)
+    vat_line = theirs[0] if theirs else first
     issuer_at = vat_line - 2 if vat_line is not None and vat_line >= 2 else 0
+    under_our_block = bool(theirs) and first is not None and theirs[0] != first
     issuer = normalise(lines[issuer_at]) if lines else ""
     names_us = any(normalise(line) == own for i, line in enumerate(lines) if i != issuer_at)
-    return _Document(source, document_kind(text), issuer, names_us)
+    return _Document(source, document_kind(text), issuer, names_us, under_our_block)
 
 
 def claimed_sender(address: str, config: SortingConfig) -> str:
@@ -136,6 +147,7 @@ def _readable(attachment: Attachment) -> bool:
 
 def check_email(email: EmailToSort, config: SortingConfig) -> CheckResult:
     own = normalise(config.own_company)
+    own_vat_ids = frozenset(clean_vat_id(v) for v in config.own_vat_ids)
     who = check_sender(email, config)
     sender_kind = who.treated_as
     subject = email.subject.lower()
@@ -160,18 +172,24 @@ def check_email(email: EmailToSort, config: SortingConfig) -> CheckResult:
     documents: list[_Document] = []
     for position, attachment in enumerate(email.attachments, start=1):
         if _readable(attachment):
-            documents.append(_read_document(f"attachment {position}", attachment.text or "", own))
+            text = attachment.text or ""
+            documents.append(_read_document(f"attachment {position}", text, own, own_vat_ids))
         elif attachment.einvoice_refused:
             doubt(
                 Gate.EINVOICE_UNREADABLE, f"the e-invoice in attachment {position} cannot be read"
             )
         else:
             doubt(Gate.UNREADABLE_DOCUMENT, f"attachment {position} cannot be read")
-    body_document = _read_document("the email text", email.body, own)
+    body_document = _read_document("the email text", email.body, own, own_vat_ids)
     if body_document.kind in INVOICE_KINDS:
         documents.append(body_document)  # an invoice written in the email itself (E16)
 
     invoices = [d for d in documents if d.kind in INVOICE_KINDS]
+    for position, doc in enumerate(invoices):
+        if doc.under_our_block and sender_kind == sender.INVOICING_AGENT:
+            # The invoicing agent sends only Max ASP's own invoices (AR-01): the block on top is
+            # the issuer and the VAT ID below is the customer's.
+            invoices[position] = replace(doc, issuer=own)
     issued_by_us = any(d.issuer == own for d in invoices)
     for doc in invoices:
         if doc.issuer == own:
@@ -183,6 +201,14 @@ def check_email(email: EmailToSort, config: SortingConfig) -> CheckResult:
                     f"{doc.source} is issued by {config.own_company} but was not sent by the "
                     "invoicing agent",
                 )
+        elif doc.under_our_block and sender_kind != sender.KNOWN_VENDOR:
+            # From anyone but a known supplier this may be one of Max ASP's own invoices to an
+            # EU customer, sent back or forwarded (AR-02). A person decides.
+            doubt(
+                Gate.OWN_INVOICE_NOT_FROM_AGENT,
+                f"{doc.source} shows {config.own_company}'s VAT ID above the issuer's and was "
+                "not sent by a known supplier",
+            )
         elif doc.names_us:
             sign(Category.INCOMING_INVOICE, f"{doc.source} is an invoice to {config.own_company}")
         else:

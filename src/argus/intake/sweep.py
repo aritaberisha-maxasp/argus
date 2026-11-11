@@ -66,6 +66,7 @@ from argus.intake.reminders import ReminderMailbox, forward_reminder
 from argus.sorting import EmailToSort, LanguageModel, Route, SortingConfig, SortingDecision
 from argus.sorting.gates import gate_labels
 from argus.sorting.router import sort_email
+from argus.vat_ids import clean_vat_id
 
 log = logging.getLogger("argus.intake.sweep")
 
@@ -115,6 +116,17 @@ class Sorting:
     # Reads the invoices of an email sent to invoice processing and opens one case per invoice
     # (#30). Without it, such emails are routed and filed without cases.
     invoicing: Invoicing | None = None
+
+    def __post_init__(self) -> None:
+        # Sorting and reading must skip the same VAT IDs as Max ASP's own. Otherwise sorting
+        # could call an invoice incoming while the reading keys its case on Max ASP (#106).
+        if self.invoicing is not None:
+            sorting = {clean_vat_id(v) for v in self.config.own_vat_ids}
+            reading = {clean_vat_id(v) for v in self.invoicing.reading_settings.own_vat_ids}
+            if sorting != reading:
+                raise ValueError(
+                    "Max ASP's own VAT IDs must be the same for sorting and invoice reading"
+                )
 
 
 @dataclass

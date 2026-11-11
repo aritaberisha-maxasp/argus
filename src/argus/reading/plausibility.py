@@ -21,9 +21,10 @@ import re
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 from argus.reading.fields import Flag, InvoiceReading
-from argus.reading.text_rules import clean_vat_id, iban_valid
+from argus.reading.text_rules import iban_valid
 from argus.sorting.config import OWN_COMPANY
 from argus.sorting.gates import Gate, GateHit
+from argus.vat_ids import clean_vat_id
 
 CENT = Decimal("0.01")
 VAT_TOLERANCE = Decimal("0.02")

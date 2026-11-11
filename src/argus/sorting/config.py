@@ -60,6 +60,9 @@ class SortingConfig:
     # in their From addresses. A domain that only looks like one of these never matches (#70).
     vendor_domains: frozenset[str] = frozenset()
     customer_domains: frozenset[str] = frozenset()
+    # Max ASP's own VAT IDs. A supplier invoice may print them in Max ASP's address block above
+    # the supplier's own; they never mark the issuer (#106, as Invoicing.own_vat_ids for #30).
+    own_vat_ids: frozenset[str] = frozenset()
     thresholds: Thresholds = field(default_factory=Thresholds)
 
     def __post_init__(self) -> None:

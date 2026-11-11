@@ -45,11 +45,12 @@ from argus.reading.invoice import ReadingSettings, read_attachment_invoices, rea
 from argus.reading.language_model import FieldModel
 from argus.reading.pages import DocumentReader
 from argus.reading.plausibility import check_plausible
-from argus.reading.text_rules import CREDIT_KINDS, INVOICE_KINDS, clean_vat_id
+from argus.reading.text_rules import CREDIT_KINDS, INVOICE_KINDS
 from argus.sorting.checks import normalise
 from argus.sorting.config import OWN_COMPANY
 from argus.sorting.gates import Gate, GateHit
 from argus.sorting.models import Route, SortingDecision
+from argus.vat_ids import clean_vat_id
 
 
 @dataclass(frozen=True)
