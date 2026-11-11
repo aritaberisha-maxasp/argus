@@ -6,12 +6,25 @@ from collections.abc import Callable
 from pathlib import Path
 
 from alembic.script import ScriptDirectory
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import Engine, text
+from sqlalchemy.exc import NoResultFound
 
 from argus import __version__
+from argus.auth import (
+    CaseApprovers,
+    CurrentUser,
+    NoApproversYet,
+    Role,
+    TokenVerifier,
+    install_sign_in,
+    may_view_case,
+    verifier_from_env,
+)
+from argus.cases.model import CaseKind, CaseStatus
+from argus.cases.store import get_case
 from argus.db import engine_from_env
 
 log = logging.getLogger(__name__)
@@ -35,13 +48,45 @@ class DatabaseHealth(BaseModel):
     head: str | None = None
 
 
+class Me(BaseModel):
+    object_id: str
+    name: str
+    roles: list[Role]
+
+
+class CaseView(BaseModel):
+    """What a signed in person may see of a case: its status at any time (NF-05)."""
+
+    id: int
+    kind: CaseKind
+    status: CaseStatus
+    document_number: str | None
+    gross_cents: int | None
+    currency: str | None
+
+
+# Routes anyone may call. They carry no business data. Every other route needs sign in, and a
+# test walks all routes to make sure (#23).
+PUBLIC_PATHS = frozenset({"/health", "/health/database"})
+
+
 def migrations_head() -> str | None:
     """The newest migration shipped with this version of ARGUS."""
     return ScriptDirectory(str(MIGRATIONS)).get_current_head()
 
 
-def create_app(engine_factory: Callable[[], Engine] = engine_from_env) -> FastAPI:
-    app = FastAPI(title="ARGUS", version=__version__)
+def create_app(
+    engine_factory: Callable[[], Engine] = engine_from_env,
+    *,
+    sign_in: Callable[[], TokenVerifier | None] = verifier_from_env,
+    case_approvers: CaseApprovers | None = None,
+) -> FastAPI:
+    # No generated API pages: they would be routes without sign in.
+    app = FastAPI(
+        title="ARGUS", version=__version__, docs_url=None, redoc_url=None, openapi_url=None
+    )
+    install_sign_in(app, sign_in())
+    approvers = case_approvers or NoApproversYet()
     engines: list[Engine] = []
 
     def engine() -> Engine:
@@ -72,6 +117,33 @@ def create_app(engine_factory: Callable[[], Engine] = engine_from_env) -> FastAP
         status = "ok" if revision == head else "behind"
         body = DatabaseHealth(status=status, role=role, revision=revision, head=head)
         return JSONResponse(body.model_dump(), status_code=200 if status == "ok" else 503)
+
+    @app.get("/me")
+    def me(user: CurrentUser) -> Me:
+        """Who is signed in and which ARGUS roles they have."""
+        return Me(object_id=user.object_id, name=user.name, roles=sorted(user.roles))
+
+    @app.get("/cases/{case_id}")
+    def read_case(case_id: int, user: CurrentUser) -> CaseView:
+        """One case, if the signed in person may see it. A case they may not see answers
+        exactly like one that does not exist, so nobody learns which IDs are taken."""
+        not_found = HTTPException(status.HTTP_404_NOT_FOUND, "no such case")
+        with engine().connect() as connection:
+            try:
+                case = get_case(connection, case_id)
+            except NoResultFound:
+                raise not_found from None
+            if not may_view_case(user, approvers.approvers_of(connection, case_id)):
+                log.info("user %s may not see case %s", user.object_id, case_id)
+                raise not_found
+        return CaseView(
+            id=case.id,
+            kind=case.kind,
+            status=case.status,
+            document_number=case.document_number,
+            gross_cents=case.gross_cents,
+            currency=case.currency,
+        )
 
     return app
 
