@@ -138,19 +138,25 @@ def test_each_stored_email_is_sorted_routed_and_filed_in_one_sweep(app: Engine) 
         assert classified["actor"] == SWEEP_ACTOR.name
         assert classified["details"]["route"] == route.value
         assert classified["details"]["raw_sha256"] == record.raw_sha256
-        assert set(classified["details"]) == {
-            "route",
-            "category",
-            "model_category",
-            "model_confidence",
-            "model_invoices",
-            "check_category",
-            "reasons",
-            "evidence",
-            "sender",
-            "raw_sha256",
-            "raw_location",
-        }
+        # A pro forma (E45) stops at a safety gate, and the gate is named (#71).
+        gates = {"gates"} if route is Route.MANUAL_REVIEW else set()
+        assert (
+            set(classified["details"])
+            == {
+                "route",
+                "category",
+                "model_category",
+                "model_confidence",
+                "model_invoices",
+                "check_category",
+                "reasons",
+                "evidence",
+                "sender",
+                "raw_sha256",
+                "raw_location",
+            }
+            | gates
+        )
         assert classified["details"]["sender"]["authenticated"] is True
 
 
