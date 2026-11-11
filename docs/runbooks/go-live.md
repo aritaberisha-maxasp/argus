@@ -10,7 +10,7 @@ Things that must be done before ARGUS works on the real accounts mailbox, the re
 
 ## Checks the team runs
 
-- [ ] Mailbox sweep follow ups against the real mailbox (#90).
+- [ ] **Graph paging link on the sandbox mailbox (#90).** Graph lists the Inbox 50 emails at a time. The tests use the link shape of our fake Graph and a few shapes real Graph is known to write, but only the real service shows which one it uses. Once the sandbox mailbox is connected (#65), the team puts at least 60 synthetic test emails in its Inbox and runs one sweep. Pass: the log line `Mailbox sweep: N in Inbox` shows the same number as the Inbox in Outlook, and there is no `refused Graph paging link` error. If that error shows up, it names the link's path: a developer adds that shape to `argus.intake.graph` with a test, and this check runs again before ARGUS reads the real accounts mailbox. While the link is refused, each sweep stops after the first page, so ARGUS also stops moving emails into its folders until the fix is deployed.
 - [ ] Two weeks of shadow mode before ARGUS routes anything (#72). ARGUS starts in shadow mode on its own. See [docs/design/shadow-mode.md](../design/shadow-mode.md).
   - [ ] The folder list below is set as `ARGUS_SHADOW_FOLDERS` before the two weeks start.
   - [ ] After two weeks Arita opens the shadow report (`GET /intake/shadow-report`). Both lists of emails ARGUS would have sent to Other (`invoices_to_other` and `not_listed_to_other`) must be empty, and `warnings` must be empty too: a warning means a list may be empty for the wrong reason, for example because the folder list is missing or incomplete. If not, the thresholds (`ARGUS_SORTING_THRESHOLD_*`) are raised and the run goes on.

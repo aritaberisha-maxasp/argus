@@ -771,15 +771,27 @@ def test_the_trace_shows_the_email_and_every_step(app: Engine) -> None:
             ),
             {"id": email_id, "sha": f"{n:064x}"},
         )
+        # A stored email has its raw file recorded in the same transaction (#90).
+        db.execute(
+            text(
+                "insert into stored_document (email_id, kind, sha256, location, size_bytes,"
+                " content_type) values (:id, 'email', :sha, 'sha256/' || :sha, 1,"
+                " 'message/rfc822')"
+            ),
+            {"id": email_id, "sha": f"{n:064x}"},
+        )
     case_id = new_case(app, source_email_id=email_id)
     walk(app, case_id, S.AWAITING_APPROVAL, S.APPROVED, S.BOOKED, S.IN_PAYMENT_RUN, S.PAID)
 
     with unit_of_work(app, INTAKE) as db:
         events = trace(db, case_id)
 
-    assert [e.event_type for e in events] == ["email_seen", "email_stored", "case_created"] + [
-        "status_changed"
-    ] * 5
+    assert [e.event_type for e in events] == [
+        "email_seen",
+        "email_stored",
+        "document_stored",
+        "case_created",
+    ] + ["status_changed"] * 5
     assert events[-1].to_status is S.PAID
     assert all(e.actor and e.occurred_at for e in events)
 

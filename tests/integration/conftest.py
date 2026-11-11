@@ -116,6 +116,9 @@ def clean(owner: Engine) -> None:
     the guard off for this test cleanup only. The audit log stays (it is append only); tests
     only look at events of their own records."""
     with owner.begin() as connection:
+        # Stored documents point at the records and are append only. The replica role lets
+        # this test cleanup leave them behind; record IDs are never reused (#90).
+        connection.execute(text("set local session_replication_role = replica"))
         connection.execute(
             text("alter table mailbox_email disable trigger mailbox_email_no_delete")
         )
