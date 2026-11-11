@@ -112,6 +112,9 @@ def _wipe_emails(owner: Engine) -> None:
     """Start from no email records. Records cannot be deleted, so the owner turns the guards off
     for this cleanup only, as the ``clean`` fixture of the integration tests does."""
     with owner.begin() as connection:
+        # Stored documents point at the records and are append only. The replica role lets
+        # this test cleanup leave them behind; record IDs are never reused (#90).
+        connection.execute(text("set local session_replication_role = replica"))
         for table, trigger in (
             ("reminder_forward", "reminder_forward_no_delete"),
             ("mailbox_email", "mailbox_email_no_delete"),
