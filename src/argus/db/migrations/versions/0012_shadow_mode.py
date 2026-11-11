@@ -39,12 +39,8 @@ On ``mailbox_email`` the shadow run adds:
 
 Both new events start with ``email_``, which 0004 already refuses from the app.
 
-The number 0012 was handed out for this story: 0010 is #31 (PR 109) and 0011 is #90. This
-branch is built on main at 0009, so it follows 0009 for now and is moved behind whichever of
-0010 and 0011 lands last before it merges.
-
 Revision ID: 0012
-Revises: 0009
+Revises: 0011
 Create Date: 2026-11-07
 """
 
@@ -53,7 +49,7 @@ from alembic import op
 from argus.db import run_script
 
 revision = "0012"
-down_revision = "0009"
+down_revision = "0011"
 branch_labels = None
 depends_on = None
 

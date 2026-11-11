@@ -115,7 +115,8 @@ def changes(app: Engine, case_id: int) -> list[dict[str, Any]]:
 
 
 @pytest.mark.req("IN-10", "EX-01")
-@pytest.mark.usefixtures("clean")
+# Sweeps the mailbox and routes on its own, so it runs in live mode (#72).
+@pytest.mark.usefixtures("clean", "live")
 def test_e15_the_second_copy_of_e01_goes_to_the_exception_queue_linked_to_the_first(
     app: Engine,
 ) -> None:
