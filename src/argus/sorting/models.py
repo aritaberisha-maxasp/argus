@@ -12,6 +12,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from argus.sorting.gates import GateHit
 from argus.sorting.sender import SenderCheck
 
 
@@ -45,6 +46,9 @@ class Attachment:
     filename: str
     content_type: str
     text: str | None  # what a reader got out of it; None when nothing could be read
+    # An e-invoice XML the e-invoice reader refused (a DTD, a broken amount): it gets its own
+    # safety gate instead of "cannot be read" (#71, QA on PR 108).
+    einvoice_refused: bool = False
 
 
 @dataclass(frozen=True)
@@ -106,6 +110,8 @@ class CheckResult:
     reasons: tuple[str, ...]
     issued_by_us: bool  # a document in the email is issued by Max ASP (AR-02)
     sender: SenderCheck | None = None  # who sent it, and whether the domain is real (#70)
+    # The safety gates that fired (ADR 0006 point 7, #71). Any gate leaves ``category`` None.
+    gates: tuple[GateHit, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -125,6 +131,9 @@ class SortingDecision:
     # How many invoices ARGUS found in the documents and pages, page by page (#30). Kept next to
     # the model's count so the trail shows why cases were opened or not. None when not read.
     invoices_found: int | None = None
+    # The safety gates that sent the email to a person, by name (#71). Their reasons are in
+    # ``reasons``. Empty when no gate fired.
+    gates: tuple[str, ...] = ()
 
     def audit_details(self) -> dict[str, Any]:
         """What goes into the audit log: the decision and the evidence snippets, never the
@@ -146,6 +155,8 @@ class SortingDecision:
             details["model_invoices"] = self.model_invoices
         if self.invoices_found is not None:
             details["invoices_found"] = self.invoices_found
+        if self.gates:
+            details["gates"] = list(self.gates)
         return details
 
     @classmethod
@@ -170,4 +181,5 @@ class SortingDecision:
             else None,
             model_invoices=details.get("model_invoices"),
             invoices_found=details.get("invoices_found"),
+            gates=tuple(details.get("gates") or ()),
         )

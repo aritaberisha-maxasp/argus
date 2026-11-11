@@ -19,6 +19,9 @@ in a short unit of work (PR #79 review). Both steps work from the database recor
 the Inbox, so an email moved or deleted just before a crash is recorded on the next run. Moving
 an email into the folder it is already in, or deleting one that is already gone, changes
 nothing.
+
+Shadow mode (#72): ARGUS moves and deletes nothing. Both steps ask the database for the mode
+right before each Graph call, so switching back to shadow mode stops them within one email.
 """
 
 import logging
@@ -32,6 +35,7 @@ from sqlalchemy import Engine, text
 from argus.cases.model import Actor
 from argus.cases.store import unit_of_work
 from argus.intake.graph import GraphClient
+from argus.intake.mode import is_live
 from argus.intake.records import (
     DeletionOutcome,
     EmailRecord,
@@ -109,6 +113,7 @@ class RemovalResult:
     deleted: int = 0
     skipped: int = 0  # picked by the clock passed in, but not due by the database clock
     failed: int = 0
+    shadow: bool = False  # nothing was deleted because ARGUS runs in shadow mode (#72)
 
 
 def file_email(engine: Engine, graph: GraphClient, folders: Folders, record: EmailRecord) -> bool:
@@ -116,6 +121,8 @@ def file_email(engine: Engine, graph: GraphClient, folders: Folders, record: Ema
     when there was nothing to do."""
     if record.step is not EmailStep.ROUTED or record.route is None:
         return False
+    if not is_live(engine):
+        return False  # shadow mode: nothing moves (#72)
     folder = FOLDER_FOR[record.route]
     graph.move(record.graph_message_id, folders.id_of(folder))
     with unit_of_work(engine, FILING_ACTOR) as db:
@@ -156,6 +163,9 @@ def remove_due(
 ) -> RemovalResult:
     """Delete every email that has been in ARGUS/Removed for 30 days, as of ``clock()``, then
     record each deletion. One that fails is logged and tried again the next day."""
+    if not is_live(engine):
+        log.info("Removal skipped, ARGUS runs in shadow mode")
+        return RemovalResult(shadow=True)
     now = (clock or database_clock(engine))()
     with engine.connect() as connection:
         due = due_for_deletion(connection, REMOVED_FOLDER, now)
@@ -174,6 +184,10 @@ def remove_due(
                 log.warning("Email record %s is not due by the database clock, skipped", record.id)
                 result.skipped += 1
                 continue
+            if not is_live(engine):
+                log.info("Removal stopped, ARGUS was switched to shadow mode")
+                result.shadow = True
+                break
             # False means it was already deleted (in Deleted Items or gone): by a person, or
             # by ARGUS just before a crash. It is recorded as such, so the job stops trying and
             # the log stays true.

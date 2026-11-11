@@ -71,3 +71,32 @@ def test_every_incoming_invoice_email_opens_one_case_per_invoice(
     for e in intake_run.emails:
         expected = counts[e.fixture_id] if e.decision.route is Route.INVOICE_PROCESSING else 0
         assert opened.get(e.record_id, 0) == expected, e.fixture_id
+
+
+@pytest.mark.req("AC-1", "IN-10")
+def test_e15_the_second_copy_of_e01_is_flagged_as_a_duplicate(
+    app: Engine, intake_run: IntakeRun
+) -> None:
+    """E15 sends invoice BB-2026-1187 of E01 again (#31). Its case waits in the exception queue
+    as a duplicate, linked to the same first case as E01."""
+    records = {e.fixture_id: e.record_id for e in intake_run.emails}
+    with app.connect() as connection:
+        cases = {
+            fixture_id: connection.execute(
+                text(
+                    "select id, status, duplicate_of, exists (select 1 from exception_item x"
+                    " where x.case_id = c.id and x.reason = 'duplicate'"
+                    " and x.resolved_at is null) as flagged"
+                    " from invoice_case c where source_email_id = :id and exists"
+                    " (select 1 from case_document l join stored_document d on d.id = l.document_id"
+                    " where l.case_id = c.id and d.email_id = :id)"
+                ),
+                {"id": records[fixture_id]},
+            )
+            .mappings()
+            .one()
+            for fixture_id in ("E01", "E15")
+        }
+    first = cases["E01"]["duplicate_of"] or cases["E01"]["id"]
+    assert cases["E15"]["duplicate_of"] == first
+    assert (cases["E15"]["status"], cases["E15"]["flagged"]) == ("exception", True)

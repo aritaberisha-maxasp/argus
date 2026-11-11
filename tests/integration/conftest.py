@@ -25,8 +25,10 @@ from alembic.script import ScriptDirectory
 from fastapi import FastAPI
 from sqlalchemy import Engine, create_engine, make_url, text
 
+from argus.cases.model import Actor
 from argus.documents.store import AzureDocumentStore
 from argus.intake.graph import GraphClient
+from argus.intake.mode import IntakeMode, SwitchedBy, switch_intake_mode
 from standins.graph.app import create_app
 from tests.unit.intake.graph_helpers import TOKEN, client_for
 
@@ -114,11 +116,39 @@ def clean(owner: Engine) -> None:
     the guard off for this test cleanup only. The audit log stays (it is append only); tests
     only look at events of their own records."""
     with owner.begin() as connection:
+        # Stored documents point at the records and are append only. The replica role lets
+        # this test cleanup leave them behind; record IDs are never reused (#90).
+        connection.execute(text("set local session_replication_role = replica"))
         connection.execute(
             text("alter table mailbox_email disable trigger mailbox_email_no_delete")
         )
         connection.execute(text("delete from mailbox_email"))
         connection.execute(text("alter table mailbox_email enable trigger mailbox_email_no_delete"))
+
+
+# A made up Entra object ID for the admin who switches modes in the tests (#72).
+TEST_ADMIN = Actor.user("44444444-4444-4444-8444-444444444444")
+TEST_SWITCH = SwitchedBy(TEST_ADMIN, name="Test Admin", reason="switched by the test run")
+
+
+def set_mode(engine: Engine, mode: IntakeMode) -> None:
+    """Switch ARGUS to ``mode`` as the admin would (#72). Shadow mode is the default."""
+    switch_intake_mode(engine, TEST_SWITCH, mode)
+
+
+@pytest.fixture
+def live(owner: Engine) -> Iterator[None]:
+    """ARGUS in live mode for this test, so it sorts, routes, files and removes on its own.
+    Back to shadow mode, the default, afterwards."""
+    set_mode(owner, IntakeMode.LIVE)
+    yield
+    set_mode(owner, IntakeMode.SHADOW)
+
+
+@pytest.fixture
+def shadow(owner: Engine) -> None:
+    """ARGUS in shadow mode, the default, for this test."""
+    set_mode(owner, IntakeMode.SHADOW)
 
 
 @pytest.fixture

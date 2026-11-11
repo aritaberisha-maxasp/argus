@@ -3,11 +3,17 @@ on the in memory store that has the same rules."""
 
 import base64
 import hashlib
+import logging
 from pathlib import Path
 
 import pytest
 
-from argus.documents.email import EML_CONTENT_TYPE, attachments_of, store_email
+from argus.documents.email import (
+    EML_CONTENT_TYPE,
+    EmailNotReadable,
+    attachments_of,
+    store_email,
+)
 from argus.documents.store import (
     DocumentNotFound,
     FingerprintMismatch,
@@ -117,3 +123,45 @@ def _base64_body_after(raw: bytes, filename: bytes) -> bytes:
     header_end = raw.index(b"\n\n", raw.index(filename)) + 2
     body = raw[header_end:].split(b"\n--", 1)[0]
     return base64.b64decode(b"".join(body.split()))
+
+
+# --- #90: an email that cannot be split never shows its headers in an error ---
+
+VENDOR_HEADER = "Secret Vendor GmbH <billing@secret-vendor.example>"
+
+
+@pytest.mark.req("NF-03")
+@pytest.mark.parametrize("where", ["message_from_bytes", "_is_attachment"])
+def test_an_error_while_splitting_never_quotes_header_text(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, where: str
+) -> None:
+    def broken(*_: object, **__: object) -> None:
+        raise ValueError(f"cannot parse header From: {VENDOR_HEADER}")
+
+    monkeypatch.setattr(f"argus.documents.email.{where}", broken)
+    raw = b"From: " + VENDOR_HEADER.encode() + b"\r\nSubject: Rechnung 4711\r\n\r\nHallo\r\n"
+    log = logging.getLogger("argus.test")
+    with pytest.raises(EmailNotReadable, match="ValueError at part") as raised:
+        try:
+            attachments_of(raw)
+        except EmailNotReadable:
+            log.exception("Mailbox sweep failed on email %s, next sweep retries", "AAk-1")
+            raise
+    assert raised.value.__cause__ is None
+    assert raised.value.__suppress_context__
+    logged = caplog.text
+    assert "Mailbox sweep failed" in logged
+    for leak in ("Secret Vendor", "secret-vendor", "Rechnung 4711"):
+        assert leak not in str(raised.value)
+        assert leak not in logged
+
+
+@pytest.mark.req("NF-03")
+def test_a_readable_email_is_split_as_before() -> None:
+    raw = (
+        b"Content-Type: multipart/mixed; boundary=X\r\n\r\n--X\r\nContent-Type: text/plain\r\n\r\n"
+        b"Hallo\r\n--X\r\nContent-Type: application/pdf\r\n"
+        b'Content-Disposition: attachment; filename="r.pdf"\r\n'
+        b"Content-Transfer-Encoding: base64\r\n\r\nJVBERg==\r\n--X--\r\n"
+    )
+    assert [(a.data, a.filename) for a in attachments_of(raw)] == [(b"%PDF", "r.pdf")]

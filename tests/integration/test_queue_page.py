@@ -31,7 +31,8 @@ from argus.sorting.sender import Authentication, SenderCheck
 from standins.entra.app import FakeEntra
 from tests.unit.sorting_helpers import decision_for
 
-pytestmark = pytest.mark.req("EX-01", "EX-02", "NF-03")
+# Exceptions open only once ARGUS runs live; in shadow mode it sorts nothing for real (#72).
+pytestmark = [pytest.mark.req("EX-01", "EX-02", "NF-03"), pytest.mark.usefixtures("live")]
 
 BENJAMIN = "33333333-3333-4333-8333-333333333333"  # finance, made up
 ARITA = "44444444-4444-4444-8444-444444444444"  # admin, made up
