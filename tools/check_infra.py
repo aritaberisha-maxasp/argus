@@ -9,6 +9,11 @@ Azure sign in is needed. The script fails when:
 - the retention lock for original documents is on by default, or switched on anywhere but
   through the ``retentionLocked`` parameter, or the retention period is shorter than 10 years
   from the end of the calendar year (ADR 0001, NF-01);
+- the database keeps its own backups for less than 35 days, or no Backup vault keeps the
+  monthly backups for the legal period (at least 10 years by default, set through the
+  ``databaseBackupYears`` parameter), or the vault could be locked any other way than through
+  ``retentionLocked``, or is not immutable (Unlocked) before that lock, or soft delete is
+  off (#82, ADR 0007, NF-01);
 - a secret could end up in the code, a parameter default or a deployment output, or the app
   gets a secret any other way than from Key Vault (NF-06);
 - a model deployment, the allowed deployment types or the Azure Policy would let a Global
@@ -39,13 +44,23 @@ EU_REGIONS = frozenset(
     }
 )
 EU_DEPLOYMENT_SKUS = frozenset({"DataZoneStandard", "Standard"})
-LOCATION_EXPRESSIONS = frozenset({"[parameters('location')]", "[parameters('aiLocation')]"})
+AI_LOCATION = "[parameters('aiLocation')]"
+LOCATION_EXPRESSIONS = frozenset({"[parameters('location')]", AI_LOCATION})
+AI_ACCOUNT = "Microsoft.CognitiveServices/accounts"
 LOCK_PARAMETER = "retentionLocked"
 PERIOD_PARAMETER = "retentionDays"
 # 10 years from the end of the calendar year a file arrives in, plus the longest run to year
 # end with leap days (ADR 0001, § 147 (4) AO).
 MIN_RETENTION_DAYS = 4018
 SKU_ALIAS = "Microsoft.CognitiveServices/accounts/deployments/sku.name"
+# Point in time restore: 35 days is the most Azure allows for PostgreSQL Flexible Server (#82).
+DATABASE_BACKUP_DAYS = 35
+DATABASE_SERVER = "Microsoft.DBforPostgreSQL/flexibleServers"
+BACKUP_VAULT = "Microsoft.DataProtection/backupVaults"
+BACKUP_POLICY = "Microsoft.DataProtection/backupVaults/backupPolicies"
+BACKUP_YEARS_PARAMETER = "databaseBackupYears"
+# 10 years for the long term backups until the tax advisor confirms the period (ADR 0007).
+MIN_BACKUP_YEARS = 10
 
 # Things that look like a real credential written down as plain text.
 CREDENTIAL = re.compile(
@@ -104,6 +119,25 @@ def sku_lists(value: Any) -> Iterator[str]:
             yield from sku_lists(item)
 
 
+def ai_location_problems(module: dict[str, Any]) -> list[str]:
+    """aiLocation may only place the AI accounts (ADR 0006). Everything else stays in the home
+    region, and the Azure Policy alone would not catch it, since it allows every EU AI region
+    (QA on PR 100, picked up in #81)."""
+    name = module.get("name", "?")
+    nested = module.get("properties", {}).get("template")
+    placed = {
+        resource.get("type")
+        for resource in resources(nested if isinstance(nested, dict) else {})
+        if "location" in resource
+    }
+    if AI_ACCOUNT not in placed:
+        return [f"module {name} gets aiLocation but creates no AI account"]
+    others = sorted(str(kind) for kind in placed - {AI_ACCOUNT})
+    if others:
+        return [f"module {name} gets aiLocation but also places {', '.join(others)}"]
+    return []
+
+
 def location_problems(main: dict[str, Any]) -> list[str]:
     problems = []
     location = main.get("parameters", {}).get("location", {})
@@ -121,6 +155,8 @@ def location_problems(main: dict[str, Any]) -> list[str]:
             given = resource.get("properties", {}).get("parameters", {}).get("location")
             if given is not None and given.get("value") not in LOCATION_EXPRESSIONS:
                 problems.append(f"module {name} gets a location that is not a region parameter")
+            elif given is not None and given.get("value") == AI_LOCATION:
+                problems.extend(ai_location_problems(resource))
         elif "location" in resource and resource["location"] != "[parameters('location')]":
             problems.append(f"resource {name} has a fixed location {resource['location']!r}")
     return problems
@@ -166,6 +202,70 @@ def retention_problems(main: dict[str, Any], parameters: dict[str, Any] | None) 
             )
     if not states:
         problems.append("no storage account has a retention policy for the original documents")
+    return problems
+
+
+def backup_problems(main: dict[str, Any], parameters: dict[str, Any] | None) -> list[str]:
+    problems = []
+    servers = [r for r in resources(main) if r.get("type") == DATABASE_SERVER]
+    if not servers:
+        problems.append("no PostgreSQL Flexible Server found")
+    for server in servers:
+        days = server.get("properties", {}).get("backup", {}).get("backupRetentionDays")
+        if days != DATABASE_BACKUP_DAYS:
+            problems.append(
+                f"database server {server.get('name', '?')} keeps backups for {days} days, "
+                f"not {DATABASE_BACKUP_DAYS}"
+            )
+
+    years = main.get("parameters", {}).get(BACKUP_YEARS_PARAMETER)
+    if years is None:
+        problems.append(f"main template has no {BACKUP_YEARS_PARAMETER} parameter")
+    elif years.get("defaultValue", 0) < MIN_BACKUP_YEARS:
+        problems.append(
+            f"{BACKUP_YEARS_PARAMETER} must default to at least {MIN_BACKUP_YEARS} years"
+        )
+    if parameters is not None:
+        given = parameters.get("parameters", {}).get(BACKUP_YEARS_PARAMETER, {}).get("value")
+        if given is not None and given < MIN_BACKUP_YEARS:
+            problems.append(
+                f"{BACKUP_YEARS_PARAMETER} in the parameters file is below {MIN_BACKUP_YEARS}"
+            )
+
+    vaults = [r for r in resources(main) if r.get("type") == BACKUP_VAULT]
+    if not vaults:
+        problems.append("no Backup vault keeps long term backups of the database")
+    for vault in vaults:
+        name = vault.get("name", "?")
+        security = vault.get("properties", {}).get("securitySettings", {})
+        state = str(security.get("immutabilitySettings", {}).get("state", ""))
+        # Immutable from the start: Unlocked until the lock, then Locked (ADR 0007).
+        if (
+            f"parameters('{LOCK_PARAMETER}')" not in state
+            or "'Locked'" not in state
+            or "'Unlocked'" not in state
+        ):
+            problems.append(
+                f"backup vault {name} immutability must come from {LOCK_PARAMETER}, found {state!r}"
+            )
+        soft_delete = str(security.get("softDeleteSettings", {}).get("state", "Off"))
+        if soft_delete == "Off" or "'Off'" in soft_delete:
+            problems.append(f"backup vault {name} has soft delete off")
+
+    kept_long = False
+    for policy in (r for r in resources(main) if r.get("type") == BACKUP_POLICY):
+        for rule in policy.get("properties", {}).get("policyRules", []):
+            if rule.get("objectType") != "AzureRetentionRule":
+                continue
+            for lifecycle in rule.get("lifecycles", []):
+                duration = str(lifecycle.get("deleteAfter", {}).get("duration", ""))
+                if "parameters(" in duration:
+                    kept_long = True
+    if vaults and not kept_long:
+        problems.append(
+            "no backup policy keeps backups for a period set by a parameter "
+            f"({BACKUP_YEARS_PARAMETER})"
+        )
     return problems
 
 
@@ -271,6 +371,7 @@ def check(folder: Path) -> list[str]:
     return [
         *location_problems(main),
         *retention_problems(main, parameters),
+        *backup_problems(main, parameters),
         *secret_problems(main, parameters),
         *deployment_type_problems(main, policy, parameters),
     ]
@@ -285,7 +386,7 @@ def main(argv: list[str]) -> int:
         print(f"Infrastructure problem: {problem}")
     if problems:
         return 1
-    print("Infrastructure code keeps to the rules of #65 (NF-01, NF-03, NF-06).")
+    print("Infrastructure code keeps to the rules of #65 and #82 (NF-01, NF-03, NF-06).")
     return 0
 
 

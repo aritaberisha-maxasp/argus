@@ -40,6 +40,14 @@ param retentionDays int = 4018
 @description('Lock the document retention policy for good. Off by default. Only Arita switches it on (infra/README.md).')
 param retentionLocked bool = false
 
+@description('Years the monthly long term backup of the database is kept (#82, ADR 0007). 10 is the most Azure Backup allows and the default until the tax advisor confirms the period.')
+@minValue(1)
+@maxValue(10)
+param databaseBackupYears int = 10
+
+@description('Start the long term backup of the database. Switch on only after the backup vault identity has its two roles (docs/operations/backup-and-restore.md).')
+param databaseBackupProtected bool = false
+
 @description('Entra object ID of the database admin, the identity that runs the migrations (#81).')
 @minLength(36)
 @maxLength(36)
@@ -62,10 +70,10 @@ param modelDeployments modelDeployment[]
 @description('Secrets Arita puts in Key Vault by hand (Graph, Wise). Add one here only after the secret exists in the vault.')
 param manualSecrets manualSecret[] = []
 
-@description('Container image of the app. A public placeholder until #81 deploys the real image.')
+@description('Container image of the app. The pipeline (#81) passes the image to run; the default is a public placeholder for the very first deploy.')
 param appImage string = 'mcr.microsoft.com/k8se/quickstart:latest'
 
-@description('Port the app listens on. The placeholder uses 80, the ARGUS image will use its own.')
+@description('Port the app listens on. The placeholder uses 80, the ARGUS image 8000 (Dockerfile).')
 param appPort int = 80
 
 @minValue(0)
@@ -146,6 +154,20 @@ module database 'modules/database.bicep' = {
   }
 }
 
+module backup 'modules/backup.bicep' = {
+  name: 'backup'
+  params: {
+    location: location
+    name: 'bvault-${prefix}-${suffix}'
+    tags: tags
+    serverId: database.outputs.id
+    serverName: database.outputs.name
+    retentionYears: databaseBackupYears
+    retentionLocked: retentionLocked
+    protectDatabase: databaseBackupProtected
+  }
+}
+
 module ai 'modules/ai.bicep' = {
   name: 'ai'
   params: {
@@ -170,6 +192,7 @@ module apps 'modules/apps.bicep' = {
     logAnalyticsWorkspaceName: monitoring.outputs.name
     identityId: appIdentity.id
     identityClientId: appIdentity.properties.clientId
+    identityName: appIdentity.name
     registryLoginServer: registry.outputs.loginServer
     keyVaultUri: keyVault.outputs.uri
     image: appImage
@@ -197,5 +220,11 @@ output appIdentityName string = appIdentity.name
 output registryLoginServer string = registry.outputs.loginServer
 output keyVaultName string = keyVault.outputs.name
 output databaseHost string = database.outputs.fqdn
+output databaseServerName string = database.outputs.name
+output databaseName string = database.outputs.databaseName
+output registryName string = registry.outputs.name
+output appName string = apps.outputs.appName
 output documentsAccountName string = documents.outputs.name
+output backupVaultName string = backup.outputs.name
+output backupVaultPrincipalId string = backup.outputs.principalId
 output appUrl string = apps.outputs.appUrl

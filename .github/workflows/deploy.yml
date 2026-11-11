@@ -1,0 +1,208 @@
+# Deploys ARGUS to Azure (#81). Nobody deploys by hand: Arita's merge to main is the gate.
+#
+# Runs after CI passes on main, or by hand from the Actions tab for a redeploy of main.
+# Signs in with OpenID Connect, so no Azure password, client secret or key is stored in
+# GitHub. The deploy identity may only change the ARGUS resource group. It cannot read Key
+# Vault secrets, has no path to Wise (NF-04) and never touches the retention lock (#65).
+#
+# Order, so a failed migration leaves the running version alone:
+#   0. skip unless this commit is the tip of main
+#   1. build the image          4. run the migrations as the database admin
+#   2. apply the infrastructure  5. deploy the new image
+#      with the running image    6. smoke test /health and /health/database
+#   3. push the image
+#
+# The one time setup and the GitHub variables are in docs/operations/deploy.md.
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One deploy at a time, and a running deploy is never cancelled halfway.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  BICEP_VERSION: v0.33.93
+  # Names from infra/main.bicep with the default prefix "argus".
+  APP_NAME: ca-argus-web
+  # What the templates start with before the first ARGUS image exists.
+  PLACEHOLDER_IMAGE: mcr.microsoft.com/k8se/quickstart:latest
+  PLACEHOLDER_PORT: "80"
+  # The port in the Dockerfile.
+  ARGUS_PORT: "8000"
+
+jobs:
+  config:
+    name: Is Azure set up?
+    # Only main: a merged push whose CI passed, or a manual run on main.
+    if: >-
+      github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push'))
+    runs-on: ubuntu-latest
+    outputs:
+      configured: ${{ steps.check.outputs.configured }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: pip install -e .
+      # None of the variables set: Azure is not ready yet, so the run skips the deploy and
+      # stays green. Some set, or not real IDs: the run fails and names what is missing.
+      # Only the tip of main deploys. A re-run of an old CI run, or CI runs that finish out
+      # of order, are skipped, so old code or old infrastructure never goes live again.
+      - name: Check the GitHub variables and that this is the tip of main
+        id: check
+        env:
+          COMMIT: ${{ github.event.workflow_run.head_sha || github.sha }}
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          ARGUS_RESOURCE_GROUP: ${{ vars.ARGUS_RESOURCE_GROUP }}
+          ARGUS_DATABASE_ADMIN_OBJECT_ID: ${{ vars.ARGUS_DATABASE_ADMIN_OBJECT_ID }}
+          ARGUS_DATABASE_ADMIN_NAME: ${{ vars.ARGUS_DATABASE_ADMIN_NAME }}
+        run: |
+          tip=$(git ls-remote origin refs/heads/main | cut -f1)
+          python tools/deploy.py check-config --mode deploy --commit "$COMMIT" --main-tip "$tip"
+
+  deploy:
+    name: Deploy to Azure
+    needs: config
+    if: needs.config.outputs.configured == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Lets the job ask GitHub for the OpenID Connect token that Azure trusts.
+      id-token: write
+    env:
+      COMMIT: ${{ github.event.workflow_run.head_sha || github.sha }}
+      RESOURCE_GROUP: ${{ vars.ARGUS_RESOURCE_GROUP }}
+      ARGUS_DATABASE_ADMIN_OBJECT_ID: ${{ vars.ARGUS_DATABASE_ADMIN_OBJECT_ID }}
+      ARGUS_DATABASE_ADMIN_NAME: ${{ vars.ARGUS_DATABASE_ADMIN_NAME }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.COMMIT }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: pip install -e .
+
+      - name: Build the app image
+        run: docker build --build-arg ARGUS_BUILD="$COMMIT" --tag "argus:$COMMIT" .
+
+      - name: Sign in to Azure with OpenID Connect
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Install Bicep
+        run: az bicep install --version "$BICEP_VERSION"
+
+      - name: Look up the running version
+        id: current
+        run: tools/azure/current_app.sh >> "$GITHUB_OUTPUT"
+
+      # Changes to the Azure setup go live here. The app keeps its running image and port.
+      - name: Apply the infrastructure code
+        id: infra
+        env:
+          ARGUS_APP_IMAGE: ${{ steps.current.outputs.image }}
+          ARGUS_APP_PORT: ${{ steps.current.outputs.port }}
+        run: tools/azure/apply_infra.sh "argus-infra-$GITHUB_RUN_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Push the app image
+        id: image
+        env:
+          REGISTRY: ${{ steps.infra.outputs.registryLoginServer }}
+          REGISTRY_NAME: ${{ steps.infra.outputs.registryName }}
+        run: |
+          az acr login --name "$REGISTRY_NAME"
+          docker tag "argus:$COMMIT" "$REGISTRY/argus:$COMMIT"
+          docker push "$REGISTRY/argus:$COMMIT"
+          echo "image=$REGISTRY/argus:$COMMIT" >> "$GITHUB_OUTPUT"
+
+      # The database only lets in Azure services. This runner gets a rule for its own address
+      # for the length of the migrations, and the step after them takes it away again. Rules
+      # left behind by an earlier run that broke off are removed first.
+      - name: Let this runner reach the database
+        id: firewall
+        env:
+          SERVER: ${{ steps.infra.outputs.databaseServerName }}
+        run: |
+          az postgres flexible-server firewall-rule list \
+            --resource-group "$RESOURCE_GROUP" --name "$SERVER" \
+            --query "[?starts_with(name, 'github-deploy-')].name" --output tsv \
+          | while read -r old; do
+              echo "Removing the leftover firewall rule $old."
+              az postgres flexible-server firewall-rule delete \
+                --resource-group "$RESOURCE_GROUP" --name "$SERVER" --rule-name "$old" --yes
+            done
+          rule="github-deploy-$GITHUB_RUN_ID"
+          echo "rule=$rule" >> "$GITHUB_OUTPUT"
+          address=$(curl --silent --show-error --fail https://api.ipify.org)
+          az postgres flexible-server firewall-rule create \
+            --resource-group "$RESOURCE_GROUP" --name "$SERVER" --rule-name "$rule" \
+            --start-ip-address "$address" --end-ip-address "$address" --output none
+
+      # Signs in as the database admin (the deploy identity) with an Entra token, no password.
+      # Then maps the app identity to its own database role, a member of argus_app, and makes
+      # sure the database is not owned by azure_pg_admin, which the long term backup skips (#82).
+      # If anything here fails, the run stops and the running version stays as it is.
+      # tools/deploy.py keeps the database's error text out of this log, because it can
+      # hold the failing row and the log is stored outside the EU (NF-03).
+      - name: Run the database migrations
+        id: migrate
+        env:
+          ARGUS_DATABASE_URL: postgresql+psycopg://${{ steps.infra.outputs.databaseHost }}:5432/${{ steps.infra.outputs.databaseName }}?sslmode=require
+          PGUSER: ${{ vars.ARGUS_DATABASE_ADMIN_NAME }}
+          APP_IDENTITY_NAME: ${{ steps.infra.outputs.appIdentityName }}
+          APP_IDENTITY_OBJECT_ID: ${{ steps.infra.outputs.appIdentityPrincipalId }}
+        run: |
+          PGPASSWORD=$(az account get-access-token --resource-type oss-rdbms --query accessToken --output tsv)
+          echo "::add-mask::$PGPASSWORD"
+          export PGPASSWORD
+          python tools/deploy.py migrate
+          python tools/deploy.py app-db-role \
+            --identity-name "$APP_IDENTITY_NAME" --object-id "$APP_IDENTITY_OBJECT_ID"
+          python tools/deploy.py database-owner
+
+      # A rule that cannot be removed fails the run before the new image goes out.
+      - name: Close the database to this runner again
+        id: close-firewall
+        if: always() && steps.firewall.outputs.rule != ''
+        env:
+          SERVER: ${{ steps.infra.outputs.databaseServerName }}
+          RULE: ${{ steps.firewall.outputs.rule }}
+        run: |
+          az postgres flexible-server firewall-rule delete \
+            --resource-group "$RESOURCE_GROUP" --name "$SERVER" --rule-name "$RULE" --yes
+
+      - name: Deploy the new version
+        id: release
+        env:
+          ARGUS_APP_IMAGE: ${{ steps.image.outputs.image }}
+          ARGUS_APP_PORT: ${{ env.ARGUS_PORT }}
+        run: tools/azure/apply_infra.sh "argus-release-$GITHUB_RUN_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke test
+        id: smoke
+        env:
+          APP_URL: ${{ steps.release.outputs.appUrl }}
+        run: python tools/deploy.py smoke --url "$APP_URL" --build "$COMMIT"

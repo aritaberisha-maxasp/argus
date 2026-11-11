@@ -40,6 +40,9 @@ resource server 'Microsoft.DBforPostgreSQL/flexibleServers@2023-12-01-preview' =
       storageSizeGB: 32
       autoGrow: 'Enabled'
     }
+    // Point in time restore for the last 35 days, the most Azure allows (#82). The copies
+    // for the legal retention period come from the Backup vault in backup.bicep, which is
+    // geo redundant inside Germany, so these short term backups stay in this region.
     backup: {
       backupRetentionDays: 35
       geoRedundantBackup: 'Disabled'
