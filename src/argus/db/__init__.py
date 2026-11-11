@@ -55,7 +55,8 @@ def engine_from_env(
     url = url or environ.get(DATABASE_URL_ENV)
     if not url:
         raise RuntimeError(f"{DATABASE_URL_ENV} is not set")
-    engine = create_engine(url)
+    # Errors never quote the values of a statement: they can hold email data (NF-03).
+    engine = create_engine(url, hide_parameters=True)
 
     auth = environ.get(DATABASE_AUTH_ENV, "").strip().lower()
     if auth == "entra":

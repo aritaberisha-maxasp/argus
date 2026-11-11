@@ -473,6 +473,9 @@ jobs:
           cat failed.log
           test "$code" = 1
           grep -q "argus-job failed sweep" failed.log
+          # Errors as type and codes only, never a traceback with the error's text (NF-03).
+          grep -q "error: OperationalError" failed.log
+          if grep -q "Traceback" failed.log; then echo "::error::the job log holds a traceback"; exit 1; fi
       - name: Stand in logs
         if: always()
         run: |

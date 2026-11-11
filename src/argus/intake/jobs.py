@@ -26,7 +26,6 @@ import argparse
 import logging
 import os
 import re
-import sys
 from collections.abc import Callable, Mapping
 from contextlib import ExitStack
 from dataclasses import dataclass, field
@@ -44,6 +43,7 @@ from argus.intake.filing import Folders, remove_due
 from argus.intake.graph import GraphClient
 from argus.intake.invoices import Invoicing
 from argus.intake.sweep import DocumentArchive, Sorting, sweep
+from argus.logsafe import use_safe_logging
 from argus.reading.document_intelligence import AzureDocumentIntelligence
 from argus.reading.language_model import AzureOpenAIFieldModel
 from argus.secrets import EnvironmentSecretStore
@@ -245,8 +245,8 @@ def run_job(
     environ: Mapping[str, str],
     build: Callable[[Mapping[str, str]], Services] = services_from_env,
 ) -> bool:
-    """Run one job once and log its outcome line. Never raises: a failure is logged with the
-    error type and its message, which name settings, IDs and error codes, never email content."""
+    """Run one job once and log its outcome line. Never raises: a failure is logged through
+    :mod:`argus.logsafe`, as its type and codes only."""
     ok = False
     try:
         services = build(environ)
@@ -275,9 +275,9 @@ def main(
     )
     parser.add_argument("job", choices=JOBS)
     args = parser.parse_args(argv)
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s %(name)s %(message)s", stream=sys.stdout
-    )
+    # Errors as type and codes only, never their text: a database error can quote the row,
+    # with a sender or a subject in it (NF-03, review of PR 131).
+    use_safe_logging()
     # One line per HTTP call every 5 minutes would fill the logs; failures still show.
     logging.getLogger("httpx").setLevel(logging.WARNING)
     return 0 if run_job(args.job, os.environ if environ is None else environ, build) else 1

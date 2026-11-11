@@ -6,19 +6,23 @@ because CI has no Azure OpenAI and no Document Intelligence.
 """
 
 import logging
+import sys
 import threading
 from collections.abc import Mapping
 
 import pytest
 from fastapi import FastAPI
 from sqlalchemy import Engine, text
+from sqlalchemy.exc import DBAPIError
 
+from argus.db import engine_from_env
 from argus.documents.store import MemoryDocumentStore
 from argus.intake.email_text import EmailReader
 from argus.intake.invoices import Invoicing
 from argus.intake.jobs import FAILED_MARK, OK_MARK, Services, main
 from argus.intake.records import EmailStep
 from argus.intake.sweep import DocumentArchive, Sorting, sweep_lock
+from argus.logsafe import SafeFormatter
 from argus.sorting import RecordedModel
 from tests.acceptance.intake import FixtureDocumentReader
 from tests.integration.test_reminder_forward import (
@@ -168,3 +172,36 @@ def test_in_shadow_mode_a_run_is_clean_and_only_proposes(
     assert f"{OK_MARK} sweep" in caplog.text
     assert EmailStep.FILED.value not in steps(app)
     assert cases(app) == 0
+
+
+@pytest.mark.req("NF-03")
+def test_a_real_database_error_reaches_the_job_log_without_the_row(database_url: str) -> None:
+    """PostgreSQL quotes the failing row and SQLAlchemy the values; the job log has neither."""
+    sender = "erika.muster@muster-buerobedarf.example"
+    engine = engine_from_env(database_url, environ={})
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("create temp table probe (sender text, subject text not null)"))
+            connection.execute(
+                text("insert into probe values (:sender, :subject)"),
+                {"sender": sender, "subject": None},
+            )
+    except DBAPIError:
+        record = logging.LogRecord(
+            "argus.intake.sweep",
+            logging.ERROR,
+            __file__,
+            1,
+            "failed on email %s",
+            (7,),
+            sys.exc_info(),
+        )
+    finally:
+        engine.dispose()
+    raw = logging.Formatter().format(record)
+    assert sender in raw  # without the safe formatter the row would be in the log
+    line = SafeFormatter("%(message)s").format(record)
+    assert sender not in line
+    assert "Failing row" not in line
+    assert "SQLSTATE 23502" in line
+    assert "column subject" in line
