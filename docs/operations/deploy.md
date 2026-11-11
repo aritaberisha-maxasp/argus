@@ -15,7 +15,7 @@ This runbook has three parts: what the pipeline does, the one time setup Arita d
 2. Signs in to Azure with OpenID Connect. GitHub hands the run a short lived token that Azure trusts for runs on `main` only. No Azure password, client secret or key is stored in GitHub.
 3. Applies `infra/main.bicep` with `infra/main.bicepparam`. The app keeps the image it runs right now.
 4. Pushes the new image to ARGUS's own Container Registry.
-5. Opens the database firewall for the runner's address, runs the migrations (`tools/deploy.py migrate`, which runs `alembic upgrade head`) as the database admin with an Entra token, gives the app identity its database role, and closes the firewall again. Leftover rules from a run that broke off are removed first, and a rule that cannot be removed fails the run before the new image goes out.
+5. Opens the database firewall for the runner's address, runs the migrations (`tools/deploy.py migrate`, which runs `alembic upgrade head`) as the database admin with an Entra token, gives the app identity its database role, makes sure the database is not owned by `azure_pg_admin` (the long term backup would skip it, #82), and closes the firewall again. Leftover rules from a run that broke off are removed first, and a rule that cannot be removed fails the run before the new image goes out.
 6. Deploys the new image.
 7. Smoke test: waits until `/health` shows the new commit and `/health/database` shows that the app works as `argus_app` and the database is on the newest migration. If not, the run fails.
 
@@ -39,6 +39,7 @@ Until Azure is set up, the deploy and the preview skip themselves with a notice 
 | Hand out roles | Only AcrPull and Key Vault Secrets User, only to the app identity | No |
 | Change Azure Policy or locks | No | No |
 | Switch the retention lock | No, only Arita's PR to `main.bicepparam` (infra/README.md) | No |
+| Delete database backups early | No once the vault is locked. Before that, only by first switching the vault's immutability off in a merged template change | No |
 | Reach Wise | No, the pipeline never calls Wise (NF-04) | No |
 | Sign in to the database | Yes, as its admin, to run the migrations | No |
 
@@ -231,8 +232,9 @@ A new app version can fail once right after its roles are handed out, while Azur
 
 These are the steps 4 and 5 from [infra/README.md](../../infra/README.md#one-time-setup-arita):
 
-- Delete locks on the storage account for originals and on the database server.
+- Delete locks on the storage account for originals, the database server and the backup vault.
 - The Microsoft Graph and Wise secrets into Key Vault, then a PR that adds them to `manualSecrets` in `main.bicepparam`.
+- The two roles for the backup vault, then a PR that switches `databaseBackupProtected` on, so the long term backup of the database starts ([backup-and-restore.md](backup-and-restore.md)).
 
 The retention lock stays off until the tax advisor confirms the period. Switching it on is a separate PR by Arita (infra/README.md).
 

@@ -21,6 +21,12 @@ The steps of the pipeline that need logic live here, so they can be tested witho
         Uses ARGUS_DATABASE_URL, PGUSER and PGPASSWORD like the migrations do, and holds
         back database error text the same way.
 
+    python tools/deploy.py database-owner
+        Makes sure the ARGUS database is not owned by ``azure_pg_admin`` or ``azuresu``.
+        Azure Backup's long term backup skips databases owned by those two roles, and a
+        database that Azure creates from the templates may start out owned by them (#82).
+        Hands the database to the signed in admin in that case, otherwise changes nothing.
+
     python tools/deploy.py smoke --url https://<app> --build <commit>
         Waits until the new version answers, then checks it reaches the database as
         argus_app and the database is on the newest migration. Fails the run otherwise.
@@ -71,6 +77,8 @@ IDS = frozenset(
     }
 )
 APP_ROLE = "argus_app"
+# Azure Backup's long term backup leaves out every database these roles own (#82).
+SKIPPED_BY_BACKUP = ("azure_pg_admin", "azuresu")
 ALEMBIC_INI = Path(__file__).resolve().parents[1] / "alembic.ini"
 HELD_BACK = (
     "The database error text is held back because it can contain row data (NF-03). "
@@ -200,6 +208,33 @@ def ensure_app_role(
     return exists is None
 
 
+def ensure_backup_owner(engine: Engine) -> tuple[str, str]:
+    """Hand the database to the signed in admin when Azure Backup would skip it (#82).
+
+    Azure Backup for PostgreSQL Flexible Server (long term retention) backs up every database
+    except those owned by ``azure_pg_admin`` or ``azuresu``. Returns the owner before and
+    after. Safe to run on every deploy: any other owner is kept as it is.
+    """
+    with engine.begin() as connection:
+        before: str = connection.execute(
+            text(
+                "select pg_get_userbyid(datdba) from pg_database where datname = current_database()"
+            )
+        ).scalar_one()
+        if before not in SKIPPED_BY_BACKUP:
+            return before, before
+        database: str = connection.execute(text("select current_database()")).scalar_one()
+        connection.execute(
+            text(f"alter database {quote(connection, database)} owner to current_user")
+        )
+        after: str = connection.execute(
+            text(
+                "select pg_get_userbyid(datdba) from pg_database where datname = current_database()"
+            )
+        ).scalar_one()
+    return before, after
+
+
 @dataclass(frozen=True)
 class Check:
     ok: bool
@@ -319,6 +354,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="database that holds the pgaadauth functions (postgres on Azure)",
     )
 
+    commands.add_parser("database-owner")
+
     check = commands.add_parser("smoke")
     check.add_argument("--url", required=True)
     check.add_argument("--build", required=True)
@@ -352,6 +389,25 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"{'created' if created else 'kept'} database role {args.identity_name}, "
             f"member of {APP_ROLE}"
         )
+        return 0
+
+    if args.command == "database-owner":
+        try:
+            before, after = ensure_backup_owner(engine_from_env())
+        except Exception as error:
+            print(
+                "::error::Handing the database to the admin for the long term backup failed: "
+                f"{failure_summary(error)}."
+            )
+            print(HELD_BACK)
+            return 1
+        if before == after:
+            print(f"the database stays owned by {after}, the long term backup includes it")
+        else:
+            print(
+                f"the database now belongs to {after} instead of {before}, "
+                "so the long term backup includes it"
+            )
         return 0
 
     with httpx.Client(base_url=args.url, timeout=15) as client:
