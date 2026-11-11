@@ -309,7 +309,13 @@ def test_a_case_only_takes_files_from_its_own_email(
 def test_a_closed_case_takes_no_new_files(app: Engine, documents: AzureDocumentStore) -> None:
     email_id, (raw_id, _) = stored_and_recorded(app, documents, "E01_buerobedarf-rechnung")
     with unit_of_work(app, INTAKE) as db:
-        case_id = create_case(db, CaseKind.INCOMING_INVOICE, source_email_id=email_id)
+        # A duplicate key, as intake sets it (#31): no approval without one.
+        case_id = create_case(
+            db,
+            CaseKind.INCOMING_INVOICE,
+            source_email_id=email_id,
+            duplicate_key=f"vat:DE700000000|DOCTEST|{email_id}|EUR",
+        )
         move_case(db, case_id, expected=CaseStatus.RECEIVED, to=CaseStatus.AWAITING_APPROVAL)
         move_case(
             db,

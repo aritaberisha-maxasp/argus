@@ -137,15 +137,18 @@ def email_events(app: Engine, email_id: int) -> list[tuple[str, dict[str, Any]]]
 
 
 def new_invoice(app: Engine, number: str, kind: CaseKind = CaseKind.INCOMING_INVOICE) -> int:
+    n = next(_numbers)
     with unit_of_work(app, INTAKE) as db:
         return create_case(
             db,
             kind,
-            source_email_id=1_000_000 + next(_numbers),
+            source_email_id=1_000_000 + n,
             partner_account="70001",
             document_number=number,
             gross_cents=21240,
             currency="EUR",
+            # Checked for duplicates, as intake does (#31): no approval without a key.
+            duplicate_key=f"vat:DE700000000|{number}|21240|EUR|test:{n}",
         )
 
 
