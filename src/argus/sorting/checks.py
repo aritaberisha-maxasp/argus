@@ -2,17 +2,20 @@
 
 The checks name a category only when every sign in the email points to the same one. Mixed or
 missing signs give no category, and then the email goes to manual review because the model and
-the checks do not agree. The named safety gates of ADR 0006 point 7 are their own story (#71).
+the checks do not agree. Every doubt here is one of the named safety gates of ADR 0006 point 7
+(:mod:`argus.sorting.gates`, #71): it sends the email to manual review whatever the model says.
 
 These rules come from the document understanding prototype (spikes/document_understanding).
 """
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from argus.sorting import sender
 from argus.sorting.config import SortingConfig
+from argus.sorting.gates import Gate, GateHit
 from argus.sorting.models import Attachment, Category, CheckResult, EmailToSort
+from argus.vat_ids import VAT_LINE, clean_vat_id, states_only
 
 # Below this many characters a document counts as unreadable (IN-03).
 MIN_READABLE_CHARS = 40
@@ -30,6 +33,7 @@ AUTO_REPLY_SUBJECT = re.compile(
     r"^(automatische antwort|auto(matic)?[ -]?reply|out of office|abwesenheit|abwesenheitsnotiz)"
 )
 LINK = re.compile(r"https?://")
+URL = re.compile(r"https?://\S+")
 CLICK_TO_ACT = re.compile(
     r"click here|klicken sie|bestätigen sie|confirm your|verify your|view and pay|login"
 )
@@ -54,7 +58,6 @@ TITLES = [
 _TITLE_RES = [(kind, re.compile(rf"^(?:{pattern})\b", re.IGNORECASE)) for kind, pattern in TITLES]
 INVOICE_KINDS = ("invoice", "credit_note", "cancellation")
 NOT_INVOICE_KINDS = ("quote", "advertising", "order_confirmation", "delivery_note")
-VAT_ID_LINE = re.compile(r"(USt-?IdNr|VAT ID|VAT No)", re.IGNORECASE)
 
 
 def document_kind(text: str) -> str:
@@ -81,16 +84,27 @@ class _Document:
     kind: str
     issuer: str  # normalised
     names_us: bool  # Max ASP is named somewhere other than as the issuer
+    # Max ASP's own block with its VAT ID stands above the issuer's. That is common on supplier
+    # invoices that must show the customer's VAT ID (#106), but Max ASP's own invoices to EU
+    # customers look the same, so only the sender tells which one it is.
+    under_our_block: bool = False
 
 
-def _read_document(source: str, text: str, own: str) -> _Document:
+def _read_document(
+    source: str, text: str, own: str, own_vat_ids: frozenset[str] = frozenset()
+) -> _Document:
     lines = [line.strip() for line in text.splitlines() if line.strip()]
+    vat_lines = [i for i, line in enumerate(lines[:20]) if VAT_LINE.match(line)]
+    # Max ASP's own VAT IDs never mark the issuer: the same rules as the invoice reading.
+    theirs = [i for i in vat_lines if not states_only(lines[i], own_vat_ids)]
+    first = vat_lines[0] if vat_lines else None
     # The issuer's name sits above its address line, which sits above its VAT ID.
-    vat_line = next((i for i, line in enumerate(lines[:20]) if VAT_ID_LINE.match(line)), None)
+    vat_line = theirs[0] if theirs else first
     issuer_at = vat_line - 2 if vat_line is not None and vat_line >= 2 else 0
+    under_our_block = bool(theirs) and first is not None and theirs[0] != first
     issuer = normalise(lines[issuer_at]) if lines else ""
     names_us = any(normalise(line) == own for i, line in enumerate(lines) if i != issuer_at)
-    return _Document(source, document_kind(text), issuer, names_us)
+    return _Document(source, document_kind(text), issuer, names_us, under_our_block)
 
 
 def claimed_sender(address: str, config: SortingConfig) -> str:
@@ -133,6 +147,7 @@ def _readable(attachment: Attachment) -> bool:
 
 def check_email(email: EmailToSort, config: SortingConfig) -> CheckResult:
     own = normalise(config.own_company)
+    own_vat_ids = frozenset(clean_vat_id(v) for v in config.own_vat_ids)
     who = check_sender(email, config)
     sender_kind = who.treated_as
     subject = email.subject.lower()
@@ -140,10 +155,14 @@ def check_email(email: EmailToSort, config: SortingConfig) -> CheckResult:
     words = subject + "\n" + body
 
     signs: dict[Category, list[str]] = {}
-    doubts: list[str] = []
+    gates: list[GateHit] = []
+
+    def doubt(gate: Gate, why: str) -> None:
+        gates.append(GateHit(gate, why))
+
     if who.failed_claim:
         # Always a person, whatever else the email says (ADR 0006 points 4 and 7).
-        doubts.append(who.reason())
+        doubt(Gate.SENDER_FAILS_AUTHENTICATION, who.reason())
 
     def sign(category: Category, why: str) -> None:
         signs.setdefault(category, []).append(why)
@@ -153,35 +172,57 @@ def check_email(email: EmailToSort, config: SortingConfig) -> CheckResult:
     documents: list[_Document] = []
     for position, attachment in enumerate(email.attachments, start=1):
         if _readable(attachment):
-            documents.append(_read_document(f"attachment {position}", attachment.text or "", own))
+            text = attachment.text or ""
+            documents.append(_read_document(f"attachment {position}", text, own, own_vat_ids))
+        elif attachment.einvoice_refused:
+            doubt(
+                Gate.EINVOICE_UNREADABLE, f"the e-invoice in attachment {position} cannot be read"
+            )
         else:
-            doubts.append(f"attachment {position} cannot be read")
-    body_document = _read_document("the email text", email.body, own)
+            doubt(Gate.UNREADABLE_DOCUMENT, f"attachment {position} cannot be read")
+    body_document = _read_document("the email text", email.body, own, own_vat_ids)
     if body_document.kind in INVOICE_KINDS:
         documents.append(body_document)  # an invoice written in the email itself (E16)
 
     invoices = [d for d in documents if d.kind in INVOICE_KINDS]
+    for position, doc in enumerate(invoices):
+        if doc.under_our_block and sender_kind == sender.INVOICING_AGENT:
+            # The invoicing agent sends only Max ASP's own invoices (AR-01): the block on top is
+            # the issuer and the VAT ID below is the customer's.
+            invoices[position] = replace(doc, issuer=own)
     issued_by_us = any(d.issuer == own for d in invoices)
     for doc in invoices:
         if doc.issuer == own:
             if sender_kind == sender.INVOICING_AGENT:
                 sign(Category.OUTGOING_INVOICE, f"{doc.source} is issued by {config.own_company}")
             else:
-                doubts.append(
+                doubt(
+                    Gate.OWN_INVOICE_NOT_FROM_AGENT,
                     f"{doc.source} is issued by {config.own_company} but was not sent by the "
-                    "invoicing agent"
+                    "invoicing agent",
                 )
+        elif doc.under_our_block and sender_kind != sender.KNOWN_VENDOR:
+            # From anyone but a known supplier this may be one of Max ASP's own invoices to an
+            # EU customer, sent back or forwarded (AR-02). A person decides.
+            doubt(
+                Gate.OWN_INVOICE_NOT_FROM_AGENT,
+                f"{doc.source} shows {config.own_company}'s VAT ID above the issuer's and was "
+                "not sent by a known supplier",
+            )
         elif doc.names_us:
             sign(Category.INCOMING_INVOICE, f"{doc.source} is an invoice to {config.own_company}")
         else:
-            doubts.append(f"{doc.source} is an invoice that does not name {config.own_company}")
+            doubt(
+                Gate.ADDRESSED_TO_SOMEONE_ELSE,
+                f"{doc.source} is an invoice that does not name {config.own_company}",
+            )
     for doc in documents:
         if doc.kind == "reminder":
             sign(Category.PAYMENT_REMINDER, f"{doc.source} is a payment reminder")
         elif doc.kind in NOT_INVOICE_KINDS:
             sign(Category.OTHER, f"{doc.source} is a {doc.kind.replace('_', ' ')}, not an invoice")
         elif doc.kind == "proforma":
-            doubts.append(f"{doc.source} is a pro forma invoice, not a VAT invoice")
+            doubt(Gate.PRO_FORMA, f"{doc.source} is a pro forma invoice, not a VAT invoice")
 
     if REMINDER_WORDS.search(words):
         sign(Category.PAYMENT_REMINDER, "reminder words in the subject or text")
@@ -189,26 +230,46 @@ def check_email(email: EmailToSort, config: SortingConfig) -> CheckResult:
         sign(Category.OTHER, "marketing or newsletter wording")
     if AUTO_REPLY_SUBJECT.search(subject) or email.headers.get("auto-submitted", "no") != "no":
         sign(Category.OTHER, "automatic reply")
+    link_to_click = bool(LINK.search(body) and CLICK_TO_ACT.search(body))
+    invoice_words = bool(INVOICE_WORDS.search(words))
+    partner = sender_kind in (sender.KNOWN_VENDOR, sender.KNOWN_CUSTOMER)
+    # A partner who asks about an invoice always goes to a person (Arita on #9). Someone not
+    # known yet may be a new customer; their question counts unless the email already reads
+    # as a newsletter or a reminder.
     if (
-        sender_kind == sender.UNKNOWN
-        and not email.attachments
-        and LINK.search(body)
-        and CLICK_TO_ACT.search(body)
+        not documents
+        and invoice_words
+        and "?" in URL.sub(" ", body)  # a "?" inside a link is no question (review of PR 108)
+        and (partner or (sender_kind == sender.UNKNOWN and not signs))
     ):
+        who_asks = "a business partner" if partner else "a sender not known yet"
+        doubt(Gate.QUESTION, f"{who_asks} asks about an invoice")
+    elif not documents and not email.attachments and invoice_words:
+        if link_to_click and Category.OTHER not in signs:
+            # An invoice only as a link to click is either spam or a real invoice that never
+            # reached ARGUS as a document. Arita decided on #25 that a person looks at it.
+            doubt(
+                Gate.NO_DOCUMENT,
+                "the email speaks of an invoice and asks to click a link, but brings no document",
+            )
+    elif sender_kind == sender.UNKNOWN and not email.attachments and link_to_click:
         sign(Category.OTHER, "unknown sender asks to click a link and brings no document")
     if sender_kind == sender.INTERNAL:
         if invoices:
-            doubts.append("an employee forwarded an invoice")
+            doubt(Gate.EMPLOYEE_FORWARD, "an employee forwarded an invoice")
         else:
             sign(Category.OTHER, "internal email without an invoice")
-    if sender_kind in (sender.KNOWN_VENDOR, sender.KNOWN_CUSTOMER) and not documents:
-        if not INVOICE_WORDS.search(words):
-            sign(Category.OTHER, "general notice from a business partner, no invoice words")
-        elif "?" in body:
-            doubts.append("a business partner asks about an invoice")
+    if partner and not documents and not invoice_words:
+        sign(Category.OTHER, "general notice from a business partner, no invoice words")
+    if invoices and Category.PAYMENT_REMINDER in signs:
+        doubt(
+            Gate.INVOICE_AND_REMINDER,
+            "an invoice and a payment reminder in one email: "
+            + "; ".join(signs[Category.PAYMENT_REMINDER]),
+        )
 
-    if doubts:
-        return CheckResult(None, tuple(doubts), issued_by_us, who)
+    if gates:
+        return CheckResult(None, tuple(g.reason for g in gates), issued_by_us, who, tuple(gates))
     if len(signs) > 1:
         named = " and ".join(sorted(signs))
         return CheckResult(None, (f"signs for {named} in one email",), issued_by_us, who)

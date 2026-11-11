@@ -39,7 +39,7 @@ The fake mailbox holds ten emails, one for each thing ARGUS can show:
 
 ARGUS picks the emails up on its own once the sweep runs in Azure (#125), and the exception queue page shows what needs a person (#126). Until those two are merged, the demo shows the stand ins and the seeded mailbox only.
 
-Once shadow mode (#72) is merged, a fresh database starts in shadow mode: the sweep only proposes where each email should go and opens no cases. To show sorted emails and cases, a person switches the demo database to live mode before the demo, as #72 describes. A reset starts the demo database in shadow mode again.
+Since shadow mode (#72), a fresh database starts in shadow mode: the sweep only proposes where each email should go and opens no cases. To show sorted emails and cases, a person switches the demo database to live mode before the demo, as #72 describes. A reset starts the demo database in shadow mode again.
 
 To show it again from the start, run the Demo workflow with **reset and seed** again. To add the demo emails once more without emptying anything, run it with **seed**. Seeding twice does no harm: the mailbox keeps one copy of each email.
 

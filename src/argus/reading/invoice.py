@@ -52,6 +52,7 @@ from argus.reading.text_rules import (
     vat_rates,
 )
 from argus.sorting.language_model import ModelAnswerInvalid
+from argus.vat_ids import clean_vat_id
 
 log = logging.getLogger("argus.reading")
 
@@ -80,6 +81,8 @@ class ReadingSettings:
     def __post_init__(self) -> None:
         if not 0.0 <= self.ignore_below <= self.flag_below <= 1.0:
             raise ValueError("ignore_below must not be above flag_below, both between 0 and 1")
+        # Cleaned as the page text is, so "DE 099 000 001" in the settings still matches (#106).
+        object.__setattr__(self, "own_vat_ids", frozenset(map(clean_vat_id, self.own_vat_ids)))
 
 
 def sniff_type(data: bytes) -> str | None:

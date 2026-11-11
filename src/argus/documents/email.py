@@ -4,6 +4,10 @@ The raw email is stored exactly as it arrived. Each attachment is stored as the 
 attached: its transfer encoding (base64, quoted printable) is undone and nothing else. An
 e-invoice XML is kept as the XML that arrived (NF-02), and a ZUGFeRD PDF keeps its embedded XML
 because the PDF itself is stored unchanged. Nothing is ever converted.
+
+When an email cannot be split, the error never quotes its headers or content: the sweep logs
+errors with ``log.exception``, and a header can hold a sender, a subject or a file name
+(NF-03, #90).
 """
 
 from dataclasses import dataclass
@@ -13,6 +17,11 @@ from email.message import EmailMessage, Message
 from argus.documents.store import DocumentStore, StoredDocument
 
 EML_CONTENT_TYPE = "message/rfc822"
+
+
+class EmailNotReadable(ValueError):
+    """The email could not be split into its files. The message names only the kind of error
+    and the position of the part, never header text or content (NF-03)."""
 
 
 @dataclass(frozen=True)
@@ -37,15 +46,23 @@ class Attachment:
 def attachments_of(raw: bytes) -> list[Attachment]:
     """Every attached file, in the order it appears, including attachments of an email that was
     forwarded as an attachment. The text of the email itself is not an attachment."""
-    message = message_from_bytes(raw, policy=policy.default)
-    found = []
-    for part in message.walk():
-        if part.is_multipart() or not _is_attachment(part):
-            continue
-        data = part.get_payload(decode=True)
-        if not isinstance(data, bytes):
-            continue
-        found.append(Attachment(data, part.get_content_type(), part.get_filename()))
+    position = 0
+    try:
+        message = message_from_bytes(raw, policy=policy.default)
+        found = []
+        for index, part in enumerate(message.walk()):
+            position = index
+            if part.is_multipart() or not _is_attachment(part):
+                continue
+            data = part.get_payload(decode=True)
+            if not isinstance(data, bytes):
+                continue
+            found.append(Attachment(data, part.get_content_type(), part.get_filename()))
+    except Exception as error:
+        # "from None" drops the original error, whose text may quote a header (NF-03).
+        raise EmailNotReadable(
+            f"the email cannot be split into its files: {type(error).__name__} at part {position}"
+        ) from None
     return found
 
 
