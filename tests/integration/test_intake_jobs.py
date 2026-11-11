@@ -77,7 +77,7 @@ def cases(app: Engine) -> int:
 
 
 @pytest.mark.req("IN-01", "NF-01")
-@pytest.mark.usefixtures("clean")
+@pytest.mark.usefixtures("clean", "live")  # live: ARGUS sorts and files itself (#72)
 def test_one_sweep_run_turns_new_emails_into_sorted_cases(
     app: Engine, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -94,7 +94,7 @@ def test_one_sweep_run_turns_new_emails_into_sorted_cases(
 
 
 @pytest.mark.req("IN-01", "NF-01")
-@pytest.mark.usefixtures("clean")
+@pytest.mark.usefixtures("clean", "live")  # live: ARGUS sorts and files itself (#72)
 def test_a_run_while_another_sweep_works_does_nothing_and_is_not_a_failure(
     app: Engine, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -108,7 +108,7 @@ def test_a_run_while_another_sweep_works_does_nothing_and_is_not_a_failure(
 
 
 @pytest.mark.req("IN-01", "NF-01")
-@pytest.mark.usefixtures("clean")
+@pytest.mark.usefixtures("clean", "live")  # live: ARGUS sorts and files itself (#72)
 def test_two_runs_started_together_process_each_email_once(app: Engine) -> None:
     build = build_for(app, fake_graph_with(INVOICE, OTHER))
     codes: list[int] = []
@@ -126,7 +126,7 @@ def test_two_runs_started_together_process_each_email_once(app: Engine) -> None:
 
 
 @pytest.mark.req("IN-01", "NF-01")
-@pytest.mark.usefixtures("clean")
+@pytest.mark.usefixtures("clean", "live")  # live: ARGUS sorts and files itself (#72)
 def test_a_failed_run_is_reported_and_the_next_run_still_works(
     app: Engine, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -144,7 +144,7 @@ def test_a_failed_run_is_reported_and_the_next_run_still_works(
 
 
 @pytest.mark.req("IN-01", "NF-01")
-@pytest.mark.usefixtures("clean")
+@pytest.mark.usefixtures("clean", "live")  # live: ARGUS sorts and files itself (#72)
 def test_the_removal_job_runs_once_and_exits_clean(
     app: Engine, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -155,3 +155,16 @@ def test_the_removal_job_runs_once_and_exits_clean(
         assert main(["removal"], environ={}, build=build) == 0
     assert f"{OK_MARK} removal" in caplog.text
     assert steps(app) == [EmailStep.FILED.value]
+
+
+@pytest.mark.req("IN-01", "NF-01")
+@pytest.mark.usefixtures("clean", "shadow")
+def test_in_shadow_mode_a_run_is_clean_and_only_proposes(
+    app: Engine, caplog: pytest.LogCaptureFixture
+) -> None:
+    build = build_for(app, fake_graph_with(INVOICE, OTHER))
+    with caplog.at_level(logging.INFO):
+        assert main(["sweep"], environ={}, build=build) == 0
+    assert f"{OK_MARK} sweep" in caplog.text
+    assert EmailStep.FILED.value not in steps(app)
+    assert cases(app) == 0

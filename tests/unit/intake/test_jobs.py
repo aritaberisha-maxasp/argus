@@ -146,6 +146,7 @@ def test_demo_settings_build_the_job_without_calling_anything() -> None:
         assert services.sorting.reminders is services.graph
         assert services.sorting.invoicing is not None
         assert services.sorting.invoicing.own_vat_ids == frozenset({"DE099000001"})
+        assert services.sorting.config.own_vat_ids == frozenset({"DE099000001"})
         assert services.sorting.config.vendor_domains == frozenset(
             {"muster-buerobedarf.example", "beispiel-cloud.example"}
         )
@@ -193,6 +194,7 @@ def test_live_without_a_microsoft_365_sign_in_does_not_run() -> None:
         **{k: v for k, v in DEMO.items() if "STANDIN" not in k},
         "ARGUS_DEMO": "false",
         "ARGUS_GRAPH_URL": "https://graph.microsoft.com/v1.0",
+        "ARGUS_DATABASE_URL": "postgresql+psycopg://argus_app@localhost:5432/argus",
     }
     with pytest.raises(NotConnected):
         services_from_env(live)
@@ -211,6 +213,8 @@ def test_clients_already_open_are_closed_when_building_fails(
             closed.append("graph")
 
     class Connections:
+        demo = True
+
         def graph_client(self) -> Graph:
             return Graph()
 
@@ -320,3 +324,48 @@ def test_a_removal_with_a_failed_email_is_a_failed_run(
     monkeypatch.setattr(jobs, "Folders", lambda graph: None)
     monkeypatch.setattr(jobs, "remove_due", lambda *args: RemovalResult(due=1, failed=failed))
     assert jobs.run_removal(Run()) is ok  # type: ignore[arg-type]
+
+
+@pytest.mark.req("IN-01", "NF-06")
+@pytest.mark.parametrize("database", ["argus", "argus_demo_copy", "argus_test", ""])
+def test_demo_mode_refuses_a_database_not_named_demo(database: str) -> None:
+    url = f"postgresql+psycopg://argus_app@localhost:5432/{database}"
+    with pytest.raises(JobSettingsError, match="does not end in _demo") as raised:
+        services_from_env({**DEMO, "ARGUS_DATABASE_URL": url})
+    assert "argus_app" not in str(raised.value)
+
+
+@pytest.mark.req("IN-01", "NF-06")
+def test_live_mode_refuses_the_demo_database() -> None:
+    live = {
+        **{k: v for k, v in DEMO.items() if "STANDIN" not in k},
+        "ARGUS_DEMO": "false",
+        "ARGUS_GRAPH_URL": "https://graph.microsoft.com/v1.0",
+    }
+    with pytest.raises(JobSettingsError, match="demo mode is off but the database"):
+        services_from_env(live)
+
+
+@pytest.mark.req("IN-01")
+def test_a_database_setting_that_is_no_url_is_named_without_its_value() -> None:
+    with pytest.raises(JobSettingsError, match="ARGUS_DATABASE_URL") as raised:
+        services_from_env({**DEMO, "ARGUS_DATABASE_URL": "secret-value"})
+    assert "secret" not in str(raised.value)
+
+
+@pytest.mark.req("IN-01")
+def test_the_database_is_checked_before_any_client_is_built(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    built: list[str] = []
+
+    class Connections:
+        demo = True
+
+        def graph_client(self) -> None:
+            built.append("graph")
+
+    monkeypatch.setattr(jobs, "connections_from_env", lambda environ: Connections())
+    with pytest.raises(JobSettingsError):
+        services_from_env({**DEMO, "ARGUS_DATABASE_URL": "postgresql+psycopg://x@h/argus"})
+    assert built == []

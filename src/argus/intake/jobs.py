@@ -32,10 +32,12 @@ from contextlib import ExitStack
 from dataclasses import dataclass, field
 from typing import Final
 
-from sqlalchemy import Engine
+from sqlalchemy import Engine, make_url
+from sqlalchemy.exc import ArgumentError
 
 from argus.connections import connections_from_env
-from argus.db import engine_from_env
+from argus.db import DATABASE_URL_ENV, engine_from_env
+from argus.demo.reset import DEMO_SUFFIX
 from argus.documents.store import AzureDocumentStore
 from argus.intake.email_text import EmailReader
 from argus.intake.filing import Folders, remove_due
@@ -131,6 +133,7 @@ class IntakeSettings:
                 invoicing_agent=self.invoicing_agent,
                 vendor_domains=self.vendor_domains,
                 customer_domains=self.customer_domains,
+                own_vat_ids=self.own_vat_ids,
                 thresholds=self.thresholds,
             )
         except ValueError:
@@ -159,6 +162,25 @@ def _setting(environ: Mapping[str, str], name: str) -> str:
     return value
 
 
+def check_database_for_mode(environ: Mapping[str, str], *, demo: bool) -> None:
+    """Demo data only in the demo database, real data never in it (#124, ADR 0009, QA on PR
+    130): in demo mode the database name must end in ``_demo``, otherwise it must not. Names
+    the setting, never the URL, which can hold a user name."""
+    url = _setting(environ, DATABASE_URL_ENV)
+    try:
+        name = make_url(url).database or ""
+    except ArgumentError:
+        raise JobSettingsError(f"{DATABASE_URL_ENV} is not a database URL") from None
+    if demo and not name.endswith(DEMO_SUFFIX):
+        raise JobSettingsError(
+            f"demo mode is on but the database in {DATABASE_URL_ENV} does not end in {DEMO_SUFFIX}"
+        )
+    if not demo and name.endswith(DEMO_SUFFIX):
+        raise JobSettingsError(
+            f"demo mode is off but the database in {DATABASE_URL_ENV} ends in {DEMO_SUFFIX}"
+        )
+
+
 def services_from_env(environ: Mapping[str, str]) -> Services:
     """Build everything from the settings Azure gives the job (infra/modules/apps.bicep).
 
@@ -170,7 +192,9 @@ def services_from_env(environ: Mapping[str, str]) -> Services:
     secrets = EnvironmentSecretStore(environ)
     resources = ExitStack()
     try:
-        graph = connections_from_env(environ).graph_client()
+        connections = connections_from_env(environ)
+        check_database_for_mode(environ, demo=connections.demo)
+        graph = connections.graph_client()
         resources.callback(graph.close)
         documents = AzureDocumentStore.from_secrets(secrets)
         openai_endpoint = _setting(environ, OPENAI_ENDPOINT_ENV)
