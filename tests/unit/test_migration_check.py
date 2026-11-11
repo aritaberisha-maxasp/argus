@@ -42,6 +42,13 @@ def folder(tmp_path: Path, files: dict[str, str]) -> Path:
     return tmp_path / "migrations"
 
 
+def next_free(path: Path, step: int = 1) -> str:
+    """A number no migration in ``path`` uses yet, so a test file never clashes by number
+    with a real migration that merges later."""
+    numbers = [int(file.name[:4]) for file in (path / "versions").glob("[0-9][0-9][0-9][0-9]_*.py")]
+    return f"{max(numbers) + step:04d}"
+
+
 def copy_of_main(tmp_path: Path) -> Path:
     """The real migrations of this branch, copied so a test can add a file to them."""
     target = tmp_path / "migrations"
@@ -99,13 +106,14 @@ def test_a_second_head_fails_and_names_the_files(tmp_path: Path) -> None:
 
 @pytest.mark.req("NF-01")
 def test_a_new_migration_on_an_old_parent_in_main_fails(tmp_path: Path) -> None:
-    # The Sprint 2 case: a PR adds 0010 on top of 0008 while main already has 0009 there.
+    # The Sprint 2 case: a PR adds a migration on top of 0008 while main already has 0009 there.
     path = copy_of_main(tmp_path)
-    (path / "versions" / "0010_late.py").write_text(migration("0010", "0008"), encoding="utf-8")
+    late = f"{next_free(path)}_late.py"
+    (path / "versions" / late).write_text(migration(next_free(path), "0008"), encoding="utf-8")
     found = load_check().problems(path)
     assert found[0].startswith("The chain has 2 heads:")
-    assert "versions/0010_late.py" in found[0]
-    assert "versions/0010_late.py" in found[1] and "point at 0008" in found[1]
+    assert f"versions/{late}" in found[0]
+    assert f"versions/{late}" in found[1] and "point at 0008" in found[1]
 
 
 @pytest.mark.req("NF-01")
@@ -209,25 +217,28 @@ def test_the_command_names_the_files_with_no_argument(
     # The way CI runs it: from the repository root, with the default folder.
     copy = tmp_path / "src" / "argus" / "db" / "migrations"
     shutil.copytree(MIGRATIONS, copy, ignore=shutil.ignore_patterns("__pycache__"))
-    (copy / "versions" / "0010_late.py").write_text(migration("0010", "0008"), encoding="utf-8")
+    late = f"{next_free(copy)}_late.py"
+    (copy / "versions" / late).write_text(migration(next_free(copy), "0008"), encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     assert load_check().main(["check_migrations.py"]) == 1
     output = capsys.readouterr().out
     assert "Migration clash: The chain has 2 heads:" in output
-    assert "versions/0010_late.py" in output and "point at 0008" in output
+    assert f"versions/{late}" in output and "point at 0008" in output
 
 
 @pytest.mark.req("NF-01")
 def test_a_parent_from_another_branch_gets_its_own_advice(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    # Pointing 0012 at 0011 from an open PR while the branch is based on main.
+    # Pointing the next number at a parent that only an open PR has, while the branch is
+    # based on main.
     path = copy_of_main(tmp_path)
-    (path / "versions" / "0012_next.py").write_text(migration("0012", "0011"), encoding="utf-8")
+    other, mine = next_free(path), next_free(path, 2)
+    (path / "versions" / f"{mine}_next.py").write_text(migration(mine, other), encoding="utf-8")
     check = load_check()
     assert check.main(["check_migrations.py", str(path)]) == 1
     output = capsys.readouterr().out
-    assert "0011" in output and "is not present" in output
+    assert other in output and "is not present" in output
     assert check.HOW_TO_FIX_MISSING_PARENT in output
     assert check.HOW_TO_FIX not in output
 
