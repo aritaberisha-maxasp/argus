@@ -361,8 +361,8 @@ def test_a_demo_workflow_that_does_more_than_seed_and_reset_fails(
         root,
         DEMO,
         lambda s: s.replace(
-            "          ARGUS_DEMO=true python -m argus.demo reset\n",
-            "          ARGUS_DEMO=true python -m argus.demo reset\n" + line,
+            "          python -m argus.demo reset\n",
+            "          python -m argus.demo reset\n" + line,
         ),
     )
     assert check_pipeline.check(root) == [f"demo.yml must not make {problem}"]
@@ -375,9 +375,39 @@ def test_a_wise_call_in_the_demo_workflow_fails(tmp_path: Path) -> None:
         root,
         DEMO,
         lambda s: s.replace(
-            "          ARGUS_DEMO=true python -m argus.demo reset\n",
-            "          ARGUS_DEMO=true python -m argus.demo reset\n"
-            "          curl https://api.wise.com/v1/me\n",
+            "          python -m argus.demo reset\n",
+            "          python -m argus.demo reset\n          curl https://api.wise.com/v1/me\n",
         ),
     )
     assert check_pipeline.check(root) == ["demo.yml mentions Wise"]
+
+
+@pytest.mark.req("NF-04")
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        (
+            "          ARGUS_DEMO: ${{ steps.target.outputs.demo }}\n",
+            '          ARGUS_DEMO: "true"\n',
+        ),
+        (
+            "          python -m argus.demo reset\n",
+            "          ARGUS_DEMO=true python -m argus.demo reset\n",
+        ),
+    ],
+)
+def test_a_demo_reset_with_demo_mode_written_in_fails(tmp_path: Path, old: str, new: str) -> None:
+    root = copy_repo(tmp_path)
+    edit(root, DEMO, lambda s: s.replace(old, new))
+    assert check_pipeline.check(root) == [
+        "demo.yml must hand the reset the running app's own ARGUS_DEMO, so the reset checks "
+        "demo mode again"
+    ]
+
+
+def test_a_demo_workflow_in_the_deploy_queue_fails(tmp_path: Path) -> None:
+    root = copy_repo(tmp_path)
+    edit(root, DEMO, lambda s: s.replace("group: demo-production", "group: deploy-production"))
+    assert check_pipeline.check(root) == [
+        "demo.yml needs a concurrency group of its own, not the deploy's"
+    ]

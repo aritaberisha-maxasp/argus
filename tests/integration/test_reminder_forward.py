@@ -50,6 +50,9 @@ from standins.graph.app import MAILBOX, Mailbox, create_app
 from tests.unit.intake.graph_helpers import BASE_URL, TOKEN, StaticTokens, standin_transport
 from tests.unit.sorting_helpers import EMAILS, decision_for, read_fixture_email
 
+# The live mode behaviour of ARGUS (#72): shadow mode is the default, so these tests switch it.
+pytestmark = pytest.mark.usefixtures("live")
+
 # Synthetic, like every address in the fixtures. The real one is a setting (IN-05).
 FORWARD_TO = "benjamin@maxasp.example"
 REMINDERS = ["E25", "E26", "E27", "E28", "E29", "E30", "E31"]
@@ -78,6 +81,9 @@ def clean(owner: Engine) -> Iterator[None]:
 
     def wipe() -> None:
         with owner.begin() as connection:
+            # Stored documents point at the records and are append only. The replica role lets
+            # this test cleanup leave them behind; record IDs are never reused (#90).
+            connection.execute(text("set local session_replication_role = replica"))
             for table, trigger in (
                 ("reminder_forward", "reminder_forward_no_delete"),
                 ("mailbox_email", "mailbox_email_no_delete"),
@@ -137,15 +143,18 @@ def email_events(app: Engine, email_id: int) -> list[tuple[str, dict[str, Any]]]
 
 
 def new_invoice(app: Engine, number: str, kind: CaseKind = CaseKind.INCOMING_INVOICE) -> int:
+    n = next(_numbers)
     with unit_of_work(app, INTAKE) as db:
         return create_case(
             db,
             kind,
-            source_email_id=1_000_000 + next(_numbers),
+            source_email_id=1_000_000 + n,
             partner_account="70001",
             document_number=number,
             gross_cents=21240,
             currency="EUR",
+            # Checked for duplicates, as intake does (#31): no approval without a key.
+            duplicate_key=f"vat:DE700000000|{number}|21240|EUR|test:{n}",
         )
 
 

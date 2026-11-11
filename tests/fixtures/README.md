@@ -22,8 +22,8 @@ Test data for ARGUS. Everything here is invented. See the [test strategy](../../
 | `incoming_invoice` (invoices and credit notes from vendors) | `invoice_processing` | 16 |
 | `outgoing_invoice` (invoices and credit notes from Max ASP's invoicing agent) | `outgoing_booking` | 8 |
 | `payment_reminder` (reminders, dunning letters, collection) | `forward_reminder` | 7 |
-| `other` (marketing, newsletters, spam, general mail) | `deletion_folder` | 12 |
-| `uncertain` (deliberately ambiguous, IN-09) | `manual_review` | 7 |
+| `other` (marketing, newsletters, spam, general mail) | `deletion_folder` | 11 |
+| `uncertain` (deliberately ambiguous, IN-09) | `manual_review` | 8 |
 
 `manifest.csv` columns: `email_id`, `file`, `expected_category`, `expected_route`, `invoice_count` (cases ARGUS should create, IN-08), `documents` (IDs in `expected.json`), `flags`, `requirements`, `note`.
 
@@ -46,7 +46,8 @@ Scenarios worth knowing:
 | E17 to E19 | Outgoing: domestic 19 %, EU reverse charge, USA not taxable | AC-6 |
 | E22 | Outgoing invoice to a customer not in DATEV | AR-03 |
 | E23 | Outgoing invoice MA-2026-0107; MA-2026-0106 never arrives | AR-07 |
-| E32 to E43 | "Other" emails that use invoice words, come from known vendors or carry PDFs with prices | IN-04 |
+| E32 to E42 | "Other" emails that use invoice words, come from known vendors or carry PDFs with prices | IN-04 |
+| E43 | An "invoice" that is only a link to click, from an unknown sender. Goes to manual review, not the deletion folder (decided by Arita on #25, built in #71) | IN-09 |
 | E44 | A customer asks about one of our invoices. Goes to manual review, not the deletion folder (decided by Arita on #9) | IN-09 |
 
 ## How the data is kept synthetic

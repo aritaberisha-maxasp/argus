@@ -9,6 +9,12 @@ routes it (step ``routed``): a payment reminder by forwarding it (#27), every ot
 recording its route. After the pass over the Inbox it files every routed email into its ARGUS
 folder (#26, :mod:`argus.intake.filing`).
 
+Shadow mode (#72, :mod:`argus.intake.mode`), the default: the sweep still stores every email
+and sorts it, but records the result only as a proposal (:mod:`argus.intake.shadow`). It does
+not classify, route, forward, file or open cases or exceptions, and it moves nothing. Instead
+it records where a person put each proposed email once it left the Inbox. The mode is read for
+each email, so a switch takes effect within one email.
+
 Sorting calls the language model and the document reader outside any transaction. Only the
 decision is recorded afterwards, and the database writes ``email_classified`` with it
 (migration 0005). If the model or the reader cannot be reached, the email stays at ``stored``
@@ -32,7 +38,7 @@ import logging
 import threading
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import timedelta
 from typing import Protocol
 
@@ -46,12 +52,14 @@ from argus.documents.store import DocumentStore
 from argus.intake.filing import Folders, file_routed
 from argus.intake.graph import GraphClient, InboxMessage
 from argus.intake.invoices import (
+    EmailInvoices,
     Invoicing,
     doubts_about,
     find_invoices,
     open_cases,
     to_manual_review,
 )
+from argus.intake.mode import is_live
 from argus.intake.records import (
     EmailRecord,
     EmailStep,
@@ -63,8 +71,11 @@ from argus.intake.records import (
     see_email,
 )
 from argus.intake.reminders import ReminderMailbox, forward_reminder
+from argus.intake.shadow import PersonFolders, has_proposal, mark_proposed, observe_person
 from argus.sorting import EmailToSort, LanguageModel, Route, SortingConfig, SortingDecision
+from argus.sorting.gates import gate_labels
 from argus.sorting.router import sort_email
+from argus.vat_ids import clean_vat_id
 
 log = logging.getLogger("argus.intake.sweep")
 
@@ -114,6 +125,19 @@ class Sorting:
     # Reads the invoices of an email sent to invoice processing and opens one case per invoice
     # (#30). Without it, such emails are routed and filed without cases.
     invoicing: Invoicing | None = None
+    # Max ASP's folders and what each means, to see what the person did in shadow mode (#72).
+    person_folders: PersonFolders = field(default_factory=PersonFolders)
+
+    def __post_init__(self) -> None:
+        # Sorting and reading must skip the same VAT IDs as Max ASP's own. Otherwise sorting
+        # could call an invoice incoming while the reading keys its case on Max ASP (#106).
+        if self.invoicing is not None:
+            sorting = {clean_vat_id(v) for v in self.config.own_vat_ids}
+            reading = {clean_vat_id(v) for v in self.invoicing.reading_settings.own_vat_ids}
+            if sorting != reading:
+                raise ValueError(
+                    "Max ASP's own VAT IDs must be the same for sorting and invoice reading"
+                )
 
 
 @dataclass
@@ -126,6 +150,10 @@ class SweepResult:
     routed: int = 0
     filed: int = 0
     failed: int = 0
+    # Shadow mode (#72): proposals recorded, and emails whose folder after the person's sorting
+    # was recorded.
+    proposed: int = 0
+    sorted_by_person: int = 0
 
 
 @contextmanager
@@ -170,24 +198,32 @@ def store(engine: Engine, graph: GraphClient, archive: EmailArchive, record: Ema
     return True
 
 
-def classify(engine: Engine, sorting: Sorting, record: EmailRecord) -> SortingDecision | None:
-    """Step classified: sort the stored copy, then record the decision in one short unit of
-    work. Returns None when the email is not at step stored or another worker recorded it
-    first. Raises when the model or the reader cannot be reached; nothing is recorded then."""
-    if record.step is not EmailStep.STORED or record.raw_sha256 is None:
-        return None
-    raw = sorting.documents.get(record.raw_sha256)
+def decide(sorting: Sorting, raw: bytes) -> tuple[SortingDecision, EmailInvoices | None]:
+    """Sort a stored email and, for an invoice, find its invoices (#30). Calls the model and
+    the reader, so it runs outside any transaction. Live and shadow mode both use it, so the
+    shadow run proposes exactly what live mode would do."""
     decision = sort_email(
         sorting.read(raw), sorting.model, sorting.config
     )  # outside any transaction
     invoices = None
     if decision.route is Route.INVOICE_PROCESSING and sorting.invoicing is not None:
         # Also outside any transaction: the reader and the model may be called (#30).
-        invoices = find_invoices(raw, sorting.invoicing)
+        invoices = find_invoices(raw, sorting.invoicing, sorting.config.own_company)
         decision = replace(decision, invoices_found=len(invoices.invoices))
         doubts = doubts_about(invoices, decision.model_invoices)
         if doubts:
-            decision, invoices = to_manual_review(decision, doubts), None
+            decision, invoices = to_manual_review(decision, doubts, invoices.gates), None
+    return decision, invoices
+
+
+def classify(engine: Engine, sorting: Sorting, record: EmailRecord) -> SortingDecision | None:
+    """Step classified: sort the stored copy, then record the decision in one short unit of
+    work. Returns None when the email is not at step stored or another worker recorded it
+    first. Raises when the model or the reader cannot be reached; nothing is recorded then.
+    The database refuses it in shadow mode (migration 0012)."""
+    if record.step is not EmailStep.STORED or record.raw_sha256 is None:
+        return None
+    decision, invoices = decide(sorting, sorting.documents.get(record.raw_sha256))
     with unit_of_work(engine, SWEEP_ACTOR) as db:
         if not mark_classified(db, record.id, decision):
             return None
@@ -207,11 +243,33 @@ def classify(engine: Engine, sorting: Sorting, record: EmailRecord) -> SortingDe
     return decision
 
 
+def propose(engine: Engine, sorting: Sorting, record: EmailRecord) -> SortingDecision | None:
+    """Shadow mode (#72): sort the stored copy exactly as :func:`classify` would, but record
+    the result only as a proposal. Opens no case and no exception and leaves the email at step
+    stored. Returns None when the email already has a proposal or is past step stored, without
+    asking the model again."""
+    if record.step is not EmailStep.STORED or record.raw_sha256 is None:
+        return None
+    with engine.connect() as connection:
+        if has_proposal(connection, record.id):
+            return None
+    decision, _ = decide(sorting, sorting.documents.get(record.raw_sha256))
+    with unit_of_work(engine, SWEEP_ACTOR) as db:
+        if not mark_proposed(db, record.id, decision):
+            return None
+    log.info("Email record %s proposed: %s", record.id, decision.route)
+    return decision
+
+
 def manual_review_detail(decision: SortingDecision) -> str:
     """What the person in the exception queue reads: why ARGUS could not sort the email. It
     stays on the exception; the audit log gets the decision from ``email_classified``."""
     reasons = "; ".join(decision.reasons) or "no reason given"
-    return f"ARGUS could not sort this email on its own. Check it and route it by hand: {reasons}"
+    detail = f"ARGUS could not sort this email on its own. Check it and route it by hand: {reasons}"
+    if decision.gates:
+        # The gates first, so the person sees at a glance which rule stopped the email (#71).
+        detail = f"Safety gate: {gate_labels(decision.gates)}. {detail}"
+    return detail
 
 
 def route(engine: Engine, sorting: Sorting, record: EmailRecord) -> bool:
@@ -226,6 +284,9 @@ def route(engine: Engine, sorting: Sorting, record: EmailRecord) -> bool:
         raise RuntimeError(f"email record {record.id} is classified without a decision")
     decision = SortingDecision.from_audit_details(details)
     if decision.route is Route.FORWARD_REMINDER:
+        if not is_live(engine):
+            log.info("Email record %s not forwarded, ARGUS runs in shadow mode", record.id)
+            return False
         if sorting.reminders is None:
             log.warning("Email record %s is a payment reminder, forwarding is not set", record.id)
             return False
@@ -274,33 +335,46 @@ def sweep(
             log.info("Mailbox sweep skipped, another sweep is running")
             return SweepResult(ran=False)
         result = SweepResult(ran=True)
+        in_inbox: set[str] = set()
         for message in graph.list_inbox():
             result.listed += 1
+            in_inbox.add(message.id)
             try:
                 record, new = see(engine, message)
                 result.new += new
                 result.stored += store(engine, graph, archive, record)
-                if sorting is not None:
+                if sorting is None:
+                    continue
+                record = _current(engine, record)
+                if not is_live(engine):
+                    result.proposed += propose(engine, sorting, record) is not None
+                    continue
+                if classify(engine, sorting, record) is not None:
+                    result.classified += 1
                     record = _current(engine, record)
-                    if classify(engine, sorting, record) is not None:
-                        result.classified += 1
-                        record = _current(engine, record)
-                    result.routed += route(engine, sorting, record)
+                result.routed += route(engine, sorting, record)
             except Exception:
                 # The ID only: no sender, subject or content in the log (NF-03).
                 log.exception("Mailbox sweep failed on email %s, next sweep retries", message.id)
                 result.failed += 1
-        filing = file_routed(engine, graph, Folders(graph))
-        result.filed, result.failed = filing.filed, result.failed + filing.failed
+        if is_live(engine):
+            filing = file_routed(engine, graph, Folders(graph))
+            result.filed, result.failed = filing.filed, result.failed + filing.failed
+        elif sorting is not None:
+            seen = observe_person(engine, graph, sorting.person_folders, in_inbox)
+            result.sorted_by_person = seen.sorted_by_person + seen.mapped_later
+            result.failed += seen.failed
         log.info(
             "Mailbox sweep: %d in Inbox, %d new, %d stored, %d classified, %d routed, %d filed,"
-            " %d failed",
+            " %d proposed, %d sorted by a person, %d failed",
             result.listed,
             result.new,
             result.stored,
             result.classified,
             result.routed,
             result.filed,
+            result.proposed,
+            result.sorted_by_person,
             result.failed,
         )
         return result

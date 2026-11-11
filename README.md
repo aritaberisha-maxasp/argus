@@ -56,7 +56,7 @@ The hash chain in the database catches a change to an old audit event, but not t
 
 ## Stand ins
 
-ARGUS cannot reach Wise or DATEV from the build environment, so development and CI use stand ins that answer like the real systems. See [standins/wise/README.md](standins/wise/README.md) for the Wise one.
+ARGUS cannot reach Wise or DATEV from the build environment, so development and CI use stand ins that answer like the real systems. See [standins/wise/README.md](standins/wise/README.md) for the Wise one. Sign in uses a fake Microsoft Entra ID locally and in CI, see [standins/entra/README.md](standins/entra/README.md).
 
 ## Start here
 

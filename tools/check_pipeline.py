@@ -192,6 +192,10 @@ def demo_problems(workflow: dict[str, Any], text: str) -> list[str]:
     triggers = workflow.get("on", {})
     if not isinstance(triggers, dict) or set(triggers) != {"workflow_dispatch"}:
         problems.append("demo.yml may only run by hand")
+    # Sharing the deploy's queue would cancel a deploy waiting in it (review of PR 130).
+    group = str((workflow.get("concurrency") or {}).get("group", ""))
+    if not group or "deploy" in group:
+        problems.append("demo.yml needs a concurrency group of its own, not the deploy's")
     jobs = workflow.get("jobs", {})
     for job_name, job in jobs.items():
         if "github.ref == 'refs/heads/main'" not in str(job.get("if", "")):
@@ -203,13 +207,18 @@ def demo_problems(workflow: dict[str, Any], text: str) -> list[str]:
         reset = next((i for i, run in enumerate(names) if "argus.demo reset" in run), None)
         if reset is not None and (check is None or check > reset):
             problems.append("demo.yml must check that the running app is in demo mode first")
+        if reset is not None:
+            given = str(steps(job)[reset].get("env", {}).get("ARGUS_DEMO", ""))
+            if "steps.target.outputs.demo" not in given or "ARGUS_DEMO=" in names[reset]:
+                problems.append(
+                    "demo.yml must hand the reset the running app's own ARGUS_DEMO, so the "
+                    "reset checks demo mode again"
+                )
         for step in steps(job):
             if step.get("continue-on-error"):
                 problems.append(f"demo.yml step {step.get('name')} may not continue on error")
             if "firewall-rule delete" in str(step.get("run", "")) and "||" in str(step["run"]):
                 problems.append("demo.yml must fail when the database firewall cannot be closed")
-    if "argus.demo reset" in text and "ARGUS_DEMO=true python -m argus.demo reset" not in text:
-        problems.append("demo.yml must reset through python -m argus.demo reset")
     for what, pattern in FORBIDDEN_IN_DEMO.items():
         if pattern.search(code_only(text)):
             problems.append(f"demo.yml must not make {what}")

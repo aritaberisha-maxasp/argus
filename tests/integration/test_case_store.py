@@ -59,6 +59,9 @@ def new_case(app: Engine, kind: CaseKind = CaseKind.INCOMING_INVOICE, **fields: 
         "gross_cents": 892500,
         "currency": "EUR",
     }
+    if kind in (CaseKind.INCOMING_INVOICE, CaseKind.INCOMING_CREDIT_NOTE):
+        # Checked for duplicates, as intake does (#31): no approval without a duplicate key.
+        defaults["duplicate_key"] = f"vat:DE700000000|RETEST{n}|892500|EUR"
     with unit_of_work(app, INTAKE) as db:
         return create_case(db, kind, **{**defaults, **fields})  # type: ignore[arg-type]
 
@@ -321,7 +324,10 @@ def test_a_correction_before_approval_is_logged_with_old_and_new_value(app: Engi
 
     assert len(changed) == 1
     assert changed[0].actor == "user:arita-entra-id"
-    assert changed[0].details == {"gross_minor": {"old": 10000, "new": 11900}}
+    # The corrected amount also clears the duplicate key, so the case is checked again (#31).
+    assert changed[0].details["gross_minor"] == {"old": 10000, "new": 11900}
+    assert changed[0].details["duplicate_key"]["new"] is None
+    assert set(changed[0].details) == {"gross_minor", "duplicate_key"}
 
 
 # 5. Audit events cannot be updated or deleted by the application's database user
@@ -765,15 +771,27 @@ def test_the_trace_shows_the_email_and_every_step(app: Engine) -> None:
             ),
             {"id": email_id, "sha": f"{n:064x}"},
         )
+        # A stored email has its raw file recorded in the same transaction (#90).
+        db.execute(
+            text(
+                "insert into stored_document (email_id, kind, sha256, location, size_bytes,"
+                " content_type) values (:id, 'email', :sha, 'sha256/' || :sha, 1,"
+                " 'message/rfc822')"
+            ),
+            {"id": email_id, "sha": f"{n:064x}"},
+        )
     case_id = new_case(app, source_email_id=email_id)
     walk(app, case_id, S.AWAITING_APPROVAL, S.APPROVED, S.BOOKED, S.IN_PAYMENT_RUN, S.PAID)
 
     with unit_of_work(app, INTAKE) as db:
         events = trace(db, case_id)
 
-    assert [e.event_type for e in events] == ["email_seen", "email_stored", "case_created"] + [
-        "status_changed"
-    ] * 5
+    assert [e.event_type for e in events] == [
+        "email_seen",
+        "email_stored",
+        "document_stored",
+        "case_created",
+    ] + ["status_changed"] * 5
     assert events[-1].to_status is S.PAID
     assert all(e.actor and e.occurred_at for e in events)
 
@@ -1121,7 +1139,7 @@ def test_a_case_with_a_second_open_exception_stays_in_exception(app: Engine) -> 
         second = open_exception(db, ExceptionReason.IBAN_MISMATCH, "IBAN differs", case_id=case_id)
 
     with unit_of_work(app, BENJAMIN) as db:
-        resolve_exception(db, first, Outcome.NOT_A_DUPLICATE)
+        resolve_exception(db, first, Outcome.NOT_A_DUPLICATE, resolution="two deliveries")
     assert status_of(app, case_id) is S.EXCEPTION
 
     for to in (S.BOOKED, S.IN_PAYMENT_RUN, S.CLOSED):

@@ -35,6 +35,7 @@ from sqlalchemy import Connection, Engine, text
 from argus.cases.model import Actor, CaseKind, CaseStatus, ExceptionReason
 from argus.cases.store import change_case, open_exception, unit_of_work
 from argus.intake.graph import GraphApiError, GraphCallRefused
+from argus.intake.mode import StoppedByShadowMode, is_live
 from argus.intake.records import EmailRecord, EmailStep, mark_routed
 from argus.sorting.models import EmailToSort, Route, SortingDecision
 
@@ -310,6 +311,10 @@ def _send(engine: Engine, graph: ReminderMailbox, email: EmailRecord, draft_id: 
         if not graph.is_draft(draft_id):
             log.info("Reminder forward for email %s was found already sent", email.id)
             return False
+        if not is_live(engine):
+            # Switched to shadow mode since the draft was saved: nothing is sent (#72). The
+            # draft stays, and the next sweep in live mode sends it.
+            raise StoppedByShadowMode(f"reminder forward of email {email.id} not sent")
         graph.send_draft(draft_id)
     except GraphApiError as error:
         if error.status != 404:

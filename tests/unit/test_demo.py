@@ -277,3 +277,61 @@ def test_the_wise_stand_in_in_azure_cannot_fund_or_release_a_batch(
             path, json={"type": "BALANCE"}, headers={"Authorization": f"Bearer {token}"}
         )
         assert answer.status_code in (404, 405), path
+
+
+class Clock:
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.now += seconds
+
+
+def test_seed_waits_until_the_fake_mailbox_answers() -> None:
+    standin, token = demo_graph()
+    tries = {"n": 0}
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/_standin/records" and tries["n"] < 3:
+            tries["n"] += 1
+            if tries["n"] == 1:
+                raise httpx.ConnectError("starting")
+            return httpx.Response(503, text="upstream connect error")
+        reply = standin.request(request.method, request.url.path, content=request.read())
+        return httpx.Response(reply.status_code, content=reply.content)
+
+    clock = Clock()
+    connections = connections_from_env({**DEMO, "ARGUS_GRAPH_STANDIN_TOKEN": token})
+    with httpx.Client(transport=httpx.MockTransport(answer)) as http:
+        seeded = seed(connections, EMAILS, http, clock=clock, sleep=clock.sleep)
+    assert len(seeded) == len(DEMO_EMAILS)
+    assert clock.now == 15.0
+
+
+def test_seed_gives_up_when_the_fake_mailbox_never_answers() -> None:
+    def down(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("nobody home")
+
+    clock = Clock()
+    with (
+        httpx.Client(transport=httpx.MockTransport(down)) as http,
+        pytest.raises(DemoRefused, match="did not answer within 60 seconds"),
+    ):
+        seed(connections_from_env(DEMO), EMAILS, http, timeout=60, clock=clock, sleep=clock.sleep)
+    assert clock.now <= 60
+
+
+def test_seed_does_not_wait_on_something_that_is_not_the_fake_mailbox() -> None:
+    def other(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"detail": "Not Found"})
+
+    clock = Clock()
+    with (
+        httpx.Client(transport=httpx.MockTransport(other)) as http,
+        pytest.raises(httpx.HTTPStatusError),
+    ):
+        seed(connections_from_env(DEMO), EMAILS, http, clock=clock, sleep=clock.sleep)
+    assert clock.now == 0
