@@ -66,6 +66,10 @@ jobs:
         run: ruff format --check .
       - name: Type check
         run: mypy
+      # Two PRs whose migrations point at the same earlier one would give the database two
+      # "latest" versions (#123). Reads the files only, no database needed.
+      - name: Migration chain
+        run: python tools/check_migrations.py
       # The document store tests need Azurite. A service container cannot take the flag that
       # lets Azurite accept the newest storage API version, so it is started here instead.
       - name: Start Azurite
