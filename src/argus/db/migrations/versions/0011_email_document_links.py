@@ -14,11 +14,8 @@ Covers NF-01 and IN-01. Follow ups from the reviews of PR 88 (#24):
 
 Both tables are append only or step only, so a link checked once stays right.
 
-PR 109 (#31) takes 0010. This migration follows 0009 on main for now and moves to follow 0010
-once PR 109 is merged, so the chain stays one line.
-
 Revision ID: 0011
-Revises: 0009
+Revises: 0010
 Create Date: 2026-11-07
 """
 
@@ -27,7 +24,7 @@ from alembic import op
 from argus.db import run_script
 
 revision = "0011"
-down_revision = "0009"
+down_revision = "0010"
 branch_labels = None
 depends_on = None
 
