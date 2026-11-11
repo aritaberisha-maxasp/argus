@@ -45,6 +45,7 @@ To show it again from the start, run the Demo workflow with **reset and seed** a
 
 ## If something goes wrong
 
+- **"Check that no deploy runs or waits" failed.** A merge is being deployed right now. Wait until the Deploy run has finished, then run the Demo workflow again.
 - **"Check that Azure is set up" failed.** The one time setup is not finished. See step 1 above.
 - **"Check that ARGUS runs in demo mode" failed.** Either demo mode is off in `main.bicepparam`, or the deploy has not run since it was switched on. Merge a change or run the Deploy workflow by hand.
 - **"Empty the demo database" failed.** The log says why. "must end in _demo" means the app is not on the demo database, so nothing was changed.

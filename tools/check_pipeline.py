@@ -192,6 +192,10 @@ def demo_problems(workflow: dict[str, Any], text: str) -> list[str]:
     triggers = workflow.get("on", {})
     if not isinstance(triggers, dict) or set(triggers) != {"workflow_dispatch"}:
         problems.append("demo.yml may only run by hand")
+    # Sharing the deploy's queue would cancel a deploy waiting in it (review of PR 130).
+    group = str((workflow.get("concurrency") or {}).get("group", ""))
+    if not group or "deploy" in group:
+        problems.append("demo.yml needs a concurrency group of its own, not the deploy's")
     jobs = workflow.get("jobs", {})
     for job_name, job in jobs.items():
         if "github.ref == 'refs/heads/main'" not in str(job.get("if", "")):

@@ -1,6 +1,7 @@
 """Put the demo emails into the fake mailbox (#124)."""
 
-from collections.abc import Sequence
+import time
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from email import message_from_bytes
 from pathlib import Path
@@ -10,6 +11,11 @@ import httpx
 from argus.connections import GRAPH_URL_ENV, Connections, is_standin_address
 from argus.demo.common import DemoRefused, control_root
 from argus.demo.data import DEMO_EMAILS, DemoEmail
+
+# How long seed waits for the fake mailbox to answer, for example right after the Demo
+# workflow restarted it or Azure pulled the image anew (review of PR 130).
+READY_TIMEOUT = 180.0
+READY_INTERVAL = 5.0
 
 
 @dataclass(frozen=True)
@@ -24,6 +30,10 @@ def seed(
     folder: Path,
     http: httpx.Client | None = None,
     emails: Sequence[DemoEmail] = DEMO_EMAILS,
+    *,
+    timeout: float = READY_TIMEOUT,
+    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> list[SeededEmail]:
     """Add each demo email to the Inbox of the fake mailbox. Seeding twice adds nothing new:
     the fake Graph keys an email by its content, as Graph keeps one copy of one email."""
@@ -41,6 +51,7 @@ def seed(
     seeded = []
     try:
         root = control_root(connections.graph_url)
+        wait_until_ready(client, root, timeout, clock, sleep)
         for email in emails:
             answer = client.post(
                 f"{root}/_standin/messages",
@@ -53,6 +64,29 @@ def seed(
         if http is None:
             client.close()
     return seeded
+
+
+def wait_until_ready(
+    client: httpx.Client,
+    root: str,
+    timeout: float,
+    clock: Callable[[], float],
+    sleep: Callable[[float], None],
+) -> None:
+    """Wait until the fake mailbox answers. Not reachable yet and 5xx count as starting up;
+    anything else, such as 404 from something that is not the fake Graph, is a real error."""
+    deadline = clock() + timeout
+    while True:
+        try:
+            answer = client.get(f"{root}/_standin/records")
+        except httpx.TransportError:
+            answer = None
+        if answer is not None and answer.status_code < 500:
+            answer.raise_for_status()
+            return
+        if clock() + READY_INTERVAL > deadline:
+            raise DemoRefused(f"the fake mailbox did not answer within {timeout:.0f} seconds")
+        sleep(READY_INTERVAL)
 
 
 def _synthetic(path: Path) -> bool:

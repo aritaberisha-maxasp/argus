@@ -27,9 +27,10 @@ on:
 permissions:
   contents: read
 
-# Never at the same time as a deploy.
+# Its own queue, so starting a demo never cancels a deploy that waits in the deploy queue
+# (review of PR 130). The first step refuses to run while a deploy runs or waits.
 concurrency:
-  group: deploy-production
+  group: demo-production
   cancel-in-progress: false
 
 env:
@@ -44,10 +45,26 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      # Only to see whether a deploy runs right now.
+      actions: read
     env:
       RESOURCE_GROUP: ${{ vars.ARGUS_RESOURCE_GROUP }}
       ACTION: ${{ inputs.action }}
     steps:
+      - name: Check that no deploy runs or waits
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          busy=0
+          for status in queued in_progress waiting pending requested; do
+            count=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow deploy.yml \
+              --status "$status" --json databaseId --jq length)
+            busy=$((busy + count))
+          done
+          if [[ "$busy" != 0 ]]; then
+            echo "::error::A Deploy run is running or waiting. Run the Demo workflow again once it has finished."
+            exit 1
+          fi
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
@@ -150,8 +167,6 @@ jobs:
         run: |
           read -r -a apps <<<"$STANDINS"
           tools/azure/restart_apps.sh "${apps[@]}" "$APP_NAME"
-          # Give the fake mailbox a moment to come back before seeding.
-          sleep 30
 
       - name: Put the demo emails into the fake mailbox
         if: inputs.action != 'reset'

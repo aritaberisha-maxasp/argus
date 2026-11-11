@@ -403,3 +403,11 @@ def test_a_demo_reset_with_demo_mode_written_in_fails(tmp_path: Path, old: str, 
         "demo.yml must hand the reset the running app's own ARGUS_DEMO, so the reset checks "
         "demo mode again"
     ]
+
+
+def test_a_demo_workflow_in_the_deploy_queue_fails(tmp_path: Path) -> None:
+    root = copy_repo(tmp_path)
+    edit(root, DEMO, lambda s: s.replace("group: demo-production", "group: deploy-production"))
+    assert check_pipeline.check(root) == [
+        "demo.yml needs a concurrency group of its own, not the deploy's"
+    ]
