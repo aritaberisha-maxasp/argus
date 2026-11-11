@@ -35,6 +35,9 @@ class SignedInUser:
     object_id: str
     name: str
     roles: frozenset[Role]
+    # The sign in address (preferred_username) when Entra gives one. Kept next to the object ID
+    # with a person's decisions, as they were at that moment (ADR 0008).
+    sign_in_address: str | None = None
 
     @property
     def actor(self) -> Actor:

@@ -40,6 +40,9 @@ from tests.unit.test_safety_gates import GOOD_PAGE, d08_with_dtd
 
 LINK_ONLY = "E43"
 
+# These tests check what ARGUS does on its own, so they run in live mode (#72).
+pytestmark = pytest.mark.usefixtures("live")
+
 
 @pytest.mark.req("IN-09", "NF-01")
 @pytest.mark.usefixtures("clean")

@@ -40,6 +40,9 @@ from tests.integration.test_reminder_forward import (
 from tests.unit.intake.graph_helpers import TOKEN
 from tests.unit.sorting_helpers import MODEL_ANSWERS, decision_for, fixture_config
 
+# The live mode behaviour of ARGUS (#72): shadow mode is the default, so these tests switch it.
+pytestmark = pytest.mark.usefixtures("live")
+
 INVOICE, REMINDER, OTHER, REVIEW = "E01", "E25", "E32", "E45"
 
 

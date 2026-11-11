@@ -178,10 +178,12 @@ class TokenVerifier:
         if not isinstance(object_id, str) or not object_id.strip():
             raise SignInRefused("token has no object ID")
         name = claims.get("name") or claims.get("preferred_username") or ""
+        address = claims.get("preferred_username")
         return SignedInUser(
             object_id=object_id,
             name=str(name),
             roles=roles_from_groups(groups, settings.role_groups),
+            sign_in_address=address if isinstance(address, str) and address.strip() else None,
         )
 
 

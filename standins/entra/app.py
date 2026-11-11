@@ -79,6 +79,7 @@ class FakeEntra:
         *,
         roles: Iterable[Role] = (),
         name: str = "Test User",
+        sign_in_address: str | None = None,
         scope: str = DEFAULT_SCOPE,
         lifetime: int = 3600,
     ) -> dict[str, Any]:
@@ -97,7 +98,7 @@ class FakeEntra:
             "nbf": now,
             "exp": now + lifetime,
             "ver": "2.0",
-        }
+        } | ({"preferred_username": sign_in_address} if sign_in_address else {})
 
     def sign(self, claims: Mapping[str, Any], *, key_id: str | None = None) -> str:
         return jwt.encode(

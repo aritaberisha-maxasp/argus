@@ -40,6 +40,9 @@ from standins.graph.app import DELETED_ITEMS_ID, INBOX_ID
 from tests.integration.test_mailbox_sweep import MemoryArchive
 from tests.unit.sorting_helpers import decision_for
 
+# The live mode behaviour of ARGUS (#72): shadow mode is the default, so these tests switch it.
+pytestmark = pytest.mark.usefixtures("live")
+
 DAY = timedelta(days=1)
 
 
