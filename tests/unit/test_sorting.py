@@ -295,7 +295,7 @@ def test_a_max_asp_invoice_from_the_invoicing_agent_goes_to_the_outgoing_stream(
 @pytest.mark.parametrize(
     ("email_id", "category"),
     [("E01", "incoming_invoice"), ("E21", "outgoing_invoice"), ("E28", "payment_reminder"),
-     ("E35", "other"), ("E40", "other"), ("E43", "other")],
+     ("E35", "other"), ("E40", "other"), ("E42", "other")],
 )  # fmt: skip
 def test_the_checks_name_the_category_from_their_own_rules(email_id: str, category: str) -> None:
     emails = {row["email_id"]: email for row, email in fixture_emails()}
@@ -309,7 +309,10 @@ def test_the_checks_name_the_category_from_their_own_rules(email_id: str, catego
         ("E44", "a business partner asks about an invoice"),
         ("E45", "attachment 1 is a pro forma invoice, not a VAT invoice"),
         ("E46", "attachment 1 cannot be read"),
-        ("E47", "signs for incoming_invoice and payment_reminder in one email"),
+        (
+            "E47",
+            "an invoice and a payment reminder in one email: reminder words in the subject or text",
+        ),
         ("E48", "an employee forwarded an invoice"),
         ("E49", "attachment 1 is an invoice that does not name Max ASP GmbH"),
         (

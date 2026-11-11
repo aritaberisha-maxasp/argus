@@ -11,6 +11,10 @@ Things that must be done before ARGUS works on the real accounts mailbox, the re
 - [ ] Mailbox sweep follow ups against the real mailbox (#90).
 - [ ] Two weeks of shadow mode before ARGUS routes anything (#72).
 
+## Settings in production
+
+- [ ] **Invoice reading is switched on in the sweep.** The sweep reads the invoices of an email only when `Sorting.invoicing` is set; it is off by default. Without it no case is opened, and the safety gates that need the invoice data (failed plausibility checks, a PDF that disagrees with its XML, an e-invoice that cannot be read safely, an unreadable document) never fire. Flagged by the compliance review of PR 108 (#71). The team sets it in the production wiring and checks it in the shadow run (#72).
+
 ## One time steps for Arita in Azure
 
 - [ ] The one time setup in [docs/operations/deploy.md](../operations/deploy.md), up to a first green deploy (#81).

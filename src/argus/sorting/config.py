@@ -6,6 +6,9 @@ from dataclasses import dataclass, field
 from argus.sorting.models import Category
 
 THRESHOLD_ENV = "ARGUS_SORTING_THRESHOLD_{}"
+# Max ASP's legal name as it stands on invoices. The default of SortingConfig.own_company; code that
+# has the config passes that value instead.
+OWN_COMPANY = "Max ASP GmbH"
 
 
 @dataclass(frozen=True)
@@ -52,7 +55,7 @@ class Thresholds:
 class SortingConfig:
     own_domain: str  # Max ASP's email domain
     invoicing_agent: str  # the address the invoicing agent sends from (AR-01)
-    own_company: str = "Max ASP GmbH"
+    own_company: str = OWN_COMPANY
     # The email domains the vendors and customers in DATEV really send from, exactly as written
     # in their From addresses. A domain that only looks like one of these never matches (#70).
     vendor_domains: frozenset[str] = frozenset()
