@@ -20,7 +20,10 @@ Azure sign in is needed. The script fails when:
   deployment type through (ADR 0006);
 - demo mode is on by default in the template, a stand in can be reached from the internet, the
   stand ins could run without demo mode, or the parameters file puts real secrets next to demo
-  mode (#124, ADR 0009).
+  mode (#124, ADR 0009);
+- the mailbox sweep does not run every 5 minutes or the removal not once a day as scheduled
+  jobs, a job retries or runs twice at once, either job can run with no alert watching it, an
+  alert has no action group, or an alert email address is written in the code (#125).
 
 Run from the repository root: ``python tools/check_infra.py build/infra``
 """
@@ -68,6 +71,16 @@ CONTAINER_JOB = "Microsoft.App/jobs"
 # The one module whose app may be reached from the internet: the ARGUS web app (ADR 0001).
 PUBLIC_APP_MODULE = "apps"
 STANDINS_MODULE = "standins"
+# The scheduled intake jobs (#125) and the log lines their alerts look for.
+INTAKE_COMMAND = "argus.intake"
+INTAKE_SCHEDULES = {"sweep": "*/5 * * * *"}
+INTAKE_DAILY = ("removal",)
+ACTION_GROUP = "Microsoft.Insights/actionGroups"
+LOG_ALERT = "Microsoft.Insights/scheduledQueryRules"
+# Action groups exist only as global resources; they hold the address and send the email.
+GLOBAL_TYPES = frozenset({ACTION_GROUP})
+EMAIL = re.compile(r"[\w.+-]+@[\w-]+(\.[\w-]+)+")
+_COPY_VARIABLE = re.compile(r"variables\('(\w+)'\)")
 # 10 years for the long term backups until the tax advisor confirms the period (ADR 0007).
 MIN_BACKUP_YEARS = 10
 
@@ -166,6 +179,8 @@ def location_problems(main: dict[str, Any]) -> list[str]:
                 problems.append(f"module {name} gets a location that is not a region parameter")
             elif given is not None and given.get("value") == AI_LOCATION:
                 problems.extend(ai_location_problems(resource))
+        elif resource.get("type") in GLOBAL_TYPES and resource.get("location") == "global":
+            continue
         elif "location" in resource and resource["location"] != "[parameters('location')]":
             problems.append(f"resource {name} has a fixed location {resource['location']!r}")
     return problems
@@ -354,6 +369,108 @@ def demo_problems(main: dict[str, Any], parameters: dict[str, Any] | None) -> li
     return problems
 
 
+def _job_items(template: dict[str, Any], resource: dict[str, Any]) -> list[dict[str, Any]]:
+    """The items a job loop runs over, read from the template's plain variable, or the job
+    itself when it is not a loop."""
+    copy = resource.get("copy")
+    if not copy:
+        return [{}]
+    found = _COPY_VARIABLE.search(str(copy.get("count", "")))
+    items = template.get("variables", {}).get(found[1]) if found else None
+    return items if isinstance(items, list) and all(isinstance(i, dict) for i in items) else []
+
+
+def _daily(cron: str) -> bool:
+    fields = cron.split()
+    return len(fields) == 5 and all(f.isdigit() for f in fields[:2]) and fields[2:] == ["*"] * 3
+
+
+def intake_job_problems(main: dict[str, Any]) -> list[str]:
+    """The sweep runs every 5 minutes and the removal once a day, one run at a time and
+    without retries, only when switched on, and every run is watched by an alert (#125)."""
+    problems = []
+    scheduled: dict[str, str] = {}
+    for template in templates(main):
+        found = template.get("resources", [])
+        for resource in found.values() if isinstance(found, dict) else found:
+            if resource.get("type") != CONTAINER_JOB:
+                continue
+            properties = resource.get("properties", {})
+            containers = properties.get("template", {}).get("containers", [])
+            command = " ".join(str(part) for c in containers for part in c.get("command", []))
+            if INTAKE_COMMAND not in command:
+                continue
+            name = str(resource.get("name", "?"))
+            configuration = properties.get("configuration", {})
+            trigger = configuration.get("scheduleTriggerConfig", {})
+            if configuration.get("triggerType") != "Schedule":
+                problems.append(f"intake job {name} must run on a schedule")
+            if configuration.get("replicaRetryLimit") != 0:
+                problems.append(f"intake job {name} must not retry; the next run tries again")
+            if trigger.get("parallelism") != 1 or trigger.get("replicaCompletionCount") != 1:
+                problems.append(f"intake job {name} must run one replica at a time")
+            if not configuration.get("replicaTimeout"):
+                problems.append(f"intake job {name} needs a time limit per run")
+            if "condition" not in resource:
+                problems.append(f"intake job {name} must only run when the intake jobs are on")
+            items = _job_items(template, resource)
+            if not items:
+                problems.append(f"intake job {name} must loop over a plain list of jobs")
+            for item in items:
+                job = str(item.get("job", ""))
+                cron = str(item.get("cron", trigger.get("cronExpression", "")))
+                if job not in command and "copyIndex()].job" not in command:
+                    problems.append(f"intake job {name} does not run the job {job!r}")
+                scheduled[job] = cron
+    for job, cron in INTAKE_SCHEDULES.items():
+        if scheduled.get(job) != cron:
+            problems.append(f"the {job} job must run on the schedule {cron!r}")
+    for job in INTAKE_DAILY:
+        if not _daily(scheduled.get(job, "")):
+            problems.append(f"the {job} job must run once a day")
+    unknown = sorted(set(scheduled) - set(INTAKE_SCHEDULES) - set(INTAKE_DAILY))
+    if unknown:
+        problems.append(f"unknown intake jobs {unknown}: add their schedule to this check")
+    problems.extend(alert_problems(main, sorted(scheduled)))
+    return problems
+
+
+def alert_problems(main: dict[str, Any], jobs: list[str]) -> list[str]:
+    """Every intake job has a rule for a failed run and one for no run, each sending to an
+    action group, and no alert address is written in the code (#125)."""
+    problems = []
+    queries: list[str] = []
+    groups = 0
+    for template in templates(main):
+        found = template.get("resources", [])
+        for resource in found.values() if isinstance(found, dict) else found:
+            kind = resource.get("type")
+            properties = resource.get("properties", {})
+            if kind == ACTION_GROUP:
+                groups += 1
+                for text in strings(properties):
+                    if not text.startswith("[") and EMAIL.search(text):
+                        problems.append("an alert email address is written in the code")
+            if kind != LOG_ALERT:
+                continue
+            name = str(resource.get("name", "?"))
+            if not properties.get("actions", {}).get("actionGroups"):
+                problems.append(f"alert {name} sends to no action group")
+            items = _job_items(template, resource) if resource.get("copy") else [properties]
+            for item in items:
+                queries.append(str(item.get("query", "")))
+                criteria = item.get("criteria", {}).get("allOf", [])
+                queries.extend(str(c.get("query", "")) for c in criteria)
+    if jobs and not groups:
+        problems.append("no action group for the operations alerts")
+    for job in jobs:
+        for outcome in ("failed", "ok"):
+            mark = f"argus-job {outcome} {job}"
+            if not any(mark in query for query in queries):
+                problems.append(f"no alert watches the log line {mark!r}")
+    return problems
+
+
 def deployment_type_problems(
     main: dict[str, Any], policy: dict[str, Any], parameters: dict[str, Any] | None
 ) -> list[str]:
@@ -428,6 +545,7 @@ def check(folder: Path) -> list[str]:
         *secret_problems(main, parameters),
         *deployment_type_problems(main, policy, parameters),
         *demo_problems(main, parameters),
+        *intake_job_problems(main),
     ]
 
 
@@ -440,7 +558,9 @@ def main(argv: list[str]) -> int:
         print(f"Infrastructure problem: {problem}")
     if problems:
         return 1
-    print("Infrastructure code keeps to the rules of #65, #82 and #124 (NF-01, NF-03, NF-06).")
+    print(
+        "Infrastructure code keeps to the rules of #65, #82, #124 and #125 (NF-01, NF-03, NF-06)."
+    )
     return 0
 
 

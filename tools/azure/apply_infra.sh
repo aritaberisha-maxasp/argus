@@ -5,7 +5,8 @@
 # Usage: tools/azure/apply_infra.sh <deployment name>
 # Needs: RESOURCE_GROUP, ARGUS_APP_IMAGE, ARGUS_APP_PORT, ARGUS_DATABASE_ADMIN_OBJECT_ID,
 # ARGUS_DATABASE_ADMIN_NAME, and a signed in az with Bicep. main.bicepparam reads the
-# ARGUS_* values from the environment.
+# ARGUS_* values from the environment, including the optional ARGUS_ALERT_EMAIL and the
+# intake settings (ARGUS_OWN_DOMAIN and so on, #125).
 #
 # A new app revision can fail once while fresh role assignments spread through Azure
 # (Key Vault and registry access for the app identity). So a failed run is tried once more.

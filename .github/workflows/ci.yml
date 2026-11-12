@@ -430,6 +430,52 @@ jobs:
             echo "::error::reset ran against a database whose name does not end in _demo"
             exit 1
           fi
+      # The scheduled intake jobs from #125, with the same command and the same settings as in
+      # Azure (infra/modules/apps.bicep), as the app identity would get them. CI has no Azure
+      # OpenAI or Document Intelligence, so the jobs run on the empty mailbox after the reset;
+      # tests/integration/test_intake_jobs.py shows one run turning new emails into cases.
+      - name: Write the settings the intake jobs get in Azure
+        run: |
+          cat > intake.env <<'EOF'
+          ARGUS_DEMO=true
+          ARGUS_GRAPH_URL=http://localhost:8081/v1.0
+          ARGUS_MAILBOX=accounts@maxasp.example
+          ARGUS_REMINDER_FORWARD_TO=reminders@maxasp.example
+          ARGUS_DATABASE_URL=postgresql+psycopg://argus_owner@localhost:5432/argus_demo
+          ARGUS_DOCUMENTS_CONNECTION_STRING=UseDevelopmentStorage=true
+          AZURE_OPENAI_ENDPOINT=https://openai.invalid
+          AZURE_OPENAI_DEPLOYMENT=argus-sorting
+          AZURE_OPENAI_API_KEY=not-used-on-an-empty-mailbox
+          AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT=https://reader.invalid
+          AZURE_DOCUMENT_INTELLIGENCE_API_KEY=not-used-on-an-empty-mailbox
+          ARGUS_OWN_DOMAIN=maxasp.example
+          ARGUS_INVOICING_AGENT=rechnungen@maxasp.example
+          ARGUS_OWN_VAT_IDS=DE099000001
+          ARGUS_VENDOR_DOMAINS=muster-buerobedarf.example,beispiel-cloud.example
+          ARGUS_CUSTOMER_DOMAINS=beispiel-handel.example
+          EOF
+      - name: Run the sweep and the removal jobs like Azure does
+        run: |
+          for job in sweep removal; do
+            docker run --rm --network host --env-file intake.env -e ARGUS_GRAPH_STANDIN_TOKEN \
+              argus:ci python -m argus.intake "$job" | tee "$job.log"
+            grep -q "argus-job ok $job" "$job.log"
+          done
+      # What the alert in infra/modules/alerts.bicep looks for when the database is down.
+      - name: A sweep that cannot reach the database fails and says so
+        run: |
+          set +e
+          docker run --rm --network host --env-file intake.env -e ARGUS_GRAPH_STANDIN_TOKEN \
+            -e ARGUS_DATABASE_URL=postgresql+psycopg://argus_owner@localhost:1/argus_demo \
+            argus:ci python -m argus.intake sweep > failed.log 2>&1
+          code=$?
+          set -e
+          cat failed.log
+          test "$code" = 1
+          grep -q "argus-job failed sweep" failed.log
+          # Errors as type and codes only, never a traceback with the error's text (NF-03).
+          grep -q "error: OperationalError" failed.log
+          if grep -q "Traceback" failed.log; then echo "::error::the job log holds a traceback"; exit 1; fi
       - name: Stand in logs
         if: always()
         run: |

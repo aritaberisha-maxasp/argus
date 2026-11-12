@@ -37,7 +37,7 @@ The fake mailbox holds ten emails, one for each thing ARGUS can show:
 | E43 | Doubtful sender: SPF, DKIM and DMARC fail |
 | E32 | Marketing mail from a known supplier |
 
-ARGUS picks the emails up on its own once the sweep runs in Azure (#125), and the exception queue page shows what needs a person (#126). Until those two are merged, the demo shows the stand ins and the seeded mailbox only.
+ARGUS picks the emails up on its own: the job `caj-argus-sweep` runs every 5 minutes, so a seeded email is sorted and filed at the latest 5 minutes after the seed, without anyone starting anything (#125). To show it right away, start the job by hand in the portal: job `caj-argus-sweep`, **Run now**. The exception queue page shows what needs a person (#126). Until that one is merged, the demo shows the sorted emails in the fake mailbox folders.
 
 Since shadow mode (#72), a fresh database starts in shadow mode: the sweep only proposes where each email should go and opens no cases. To show sorted emails and cases, a person switches the demo database to live mode before the demo, as #72 describes. A reset starts the demo database in shadow mode again.
 

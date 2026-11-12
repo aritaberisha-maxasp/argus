@@ -34,3 +34,24 @@ type manualSecret = {
   @description('Environment variable the app reads it from, for example WISE_API_TOKEN.')
   envName: string
 }
+
+// Who Max ASP is, for the sorting and the invoice reading (#125). Plain values, no secrets. The
+// pipeline passes them from GitHub variables; in demo mode apps.bicep uses the synthetic values
+// of the test fixtures instead.
+@export()
+type intakeSettingValues = {
+  @description('Max ASP\'s own email domain (ARGUS_OWN_DOMAIN).')
+  ownDomain: string
+
+  @description('The address the invoicing agent sends outgoing invoices from (ARGUS_INVOICING_AGENT).')
+  invoicingAgent: string
+
+  @description('Max ASP\'s own VAT IDs, comma separated (ARGUS_OWN_VAT_IDS).')
+  ownVatIds: string
+
+  @description('Email domains the vendors in DATEV send from, comma separated (ARGUS_VENDOR_DOMAINS).')
+  vendorDomains: string
+
+  @description('Email domains the customers in DATEV send from, comma separated (ARGUS_CUSTOMER_DOMAINS).')
+  customerDomains: string
+}

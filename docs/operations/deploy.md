@@ -219,6 +219,17 @@ In the repository: Settings, Secrets and variables, Actions, tab **Variables** (
 | `ARGUS_RESOURCE_GROUP` | `rg-argus` |
 | `ARGUS_DATABASE_ADMIN_OBJECT_ID` | `principalId` of `id-argus-deploy` |
 | `ARGUS_DATABASE_ADMIN_NAME` | `id-argus-deploy` |
+| `ARGUS_ALERT_EMAIL` | The address that gets operations alerts, for example a failed mailbox sweep (#125). Optional, but without it the alerts reach nobody. |
+
+At go live, add who Max ASP is, for the sorting and the invoice reading (#125). While demo mode is on they are not used, so leave them out until then:
+
+| Variable | Value |
+| --- | --- |
+| `ARGUS_OWN_DOMAIN` | Max ASP's own email domain |
+| `ARGUS_INVOICING_AGENT` | The address the invoicing agent sends outgoing invoices from |
+| `ARGUS_OWN_VAT_IDS` | Max ASP's own VAT IDs, comma separated |
+| `ARGUS_VENDOR_DOMAINS` | The email domains of the vendors, comma separated, from the partner list in the [go live runbook](../runbooks/go-live.md) |
+| `ARGUS_CUSTOMER_DOMAINS` | The same for the customers |
 
 The deploy identity is also the database admin, because it runs the migrations. The app never uses it: the app signs in with its own identity and works as `argus_app`.
 
@@ -236,9 +247,21 @@ These are the steps 4 and 5 from [infra/README.md](../../infra/README.md#one-tim
 - The Microsoft Graph and Wise secrets into Key Vault, then a PR that adds them to `manualSecrets` in `main.bicepparam`.
 - The two roles for the backup vault, then a PR that switches `databaseBackupProtected` on, so the long term backup of the database starts ([backup-and-restore.md](backup-and-restore.md)).
 
+After the first deploy with the ARGUS image, two scheduled jobs run in the environment: `caj-argus-sweep` every 5 minutes and `caj-argus-removal` once a day at 02:30 UTC (#125). Their alerts go to `ARGUS_ALERT_EMAIL` through the action group `ag-argus-ops`. Right after the jobs first appear, the "no removal run" alert can fire once, until the first nightly run; it clears by itself. To check the email path, open `ag-argus-ops` in the portal and use **Test action group**.
+
 For the demo with the stand ins, see [docs/runbooks/demo.md](../runbooks/demo.md). Demo mode is on in `main.bicepparam` until go live, so the first deploy already brings up the stand ins (#124).
 
 The retention lock stays off until the tax advisor confirms the period. Switching it on is a separate PR by Arita (infra/README.md).
+
+## When an alert arrives
+
+The alert email names the rule. Open the job in the portal (resource group `rg-argus`, the job named in the rule, **Execution history**, then **Console logs** of the run) to see what happened.
+
+- **`alert-caj-argus-sweep-failed`.** A sweep run failed, or one email in it failed. The next run starts on time anyway and tries the failed email again. If the alert stays on, the same email keeps failing: the log names its record ID and the error.
+- **`alert-caj-argus-sweep-silent`.** No sweep finished in 30 minutes. The job did not start, crashed before it could log, or was switched off. Look at the execution history first.
+- **`alert-caj-argus-removal-failed`** and **`alert-caj-argus-removal-silent`.** The same for the daily removal from ARGUS/Removed.
+
+Each alert clears by itself once the runs are clean again.
 
 ## When a deploy fails
 

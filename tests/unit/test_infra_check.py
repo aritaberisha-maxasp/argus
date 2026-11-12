@@ -43,6 +43,86 @@ def module(name: str, location: str, template: dict[str, Any]) -> dict[str, Any]
     }
 
 
+def intake_jobs() -> dict[str, Any]:
+    """The sweep and removal jobs as Bicep compiles the loop in infra/modules/apps.bicep."""
+    return {
+        "copy": {"name": "intakeJobs", "count": "[length(variables('intakeJobList'))]"},
+        "condition": "[parameters('runIntakeJobs')]",
+        "type": "Microsoft.App/jobs",
+        "name": "[parameters('intakeJobNames')[variables('intakeJobList')[copyIndex()].job]]",
+        "location": "[parameters('location')]",
+        "properties": {
+            "configuration": {
+                "triggerType": "Schedule",
+                "replicaTimeout": 1800,
+                "replicaRetryLimit": 0,
+                "scheduleTriggerConfig": {
+                    "cronExpression": "[variables('intakeJobList')[copyIndex()].cron]",
+                    "parallelism": 1,
+                    "replicaCompletionCount": 1,
+                },
+                "secrets": [
+                    {
+                        "name": "azure-openai-api-key",
+                        "keyVaultUrl": "[format('{0}secrets/x', parameters('kv'))]",
+                        "identity": "[parameters('identityId')]",
+                    }
+                ],
+            },
+            "template": {
+                "containers": [
+                    {
+                        "name": "[variables('intakeJobList')[copyIndex()].job]",
+                        "command": [
+                            "python",
+                            "-m",
+                            "argus.intake",
+                            "[variables('intakeJobList')[copyIndex()].job]",
+                        ],
+                    }
+                ]
+            },
+        },
+    }
+
+
+def alerts() -> dict[str, Any]:
+    """The action group and the log alert loop as compiled from infra/modules/alerts.bicep."""
+    rules = [
+        {"job": job, "kind": kind, "query": f'Logs | where Log_s contains "argus-job {mark} {job}"'}
+        for job in ("sweep", "removal")
+        for kind, mark in (("failed", "failed"), ("silent", "ok"))
+    ]
+    return {
+        "parameters": {"location": {"type": "string"}, "alertEmail": {"type": "string"}},
+        "variables": {"intakeRules": rules},
+        "resources": {
+            "actionGroup": {
+                "type": "Microsoft.Insights/actionGroups",
+                "name": "ag-argus-ops",
+                "location": "global",
+                "properties": {
+                    "emailReceivers": "[if(empty(parameters('alertEmail')), createArray(),"
+                    " createArray(createObject('emailAddress', parameters('alertEmail'))))]"
+                },
+            },
+            "intakeAlerts": {
+                "copy": {"name": "intakeAlerts", "count": "[length(variables('intakeRules'))]"},
+                "condition": "[parameters('watchIntakeJobs')]",
+                "type": "Microsoft.Insights/scheduledQueryRules",
+                "name": "[format('alert-{0}', variables('intakeRules')[copyIndex()].kind)]",
+                "location": "[parameters('location')]",
+                "properties": {
+                    "criteria": {
+                        "allOf": [{"query": "[variables('intakeRules')[copyIndex()].query]"}]
+                    },
+                    "actions": {"actionGroups": ["[resourceId('x', 'ag-argus-ops')]"]},
+                },
+            },
+        },
+    }
+
+
 def good_main() -> dict[str, Any]:
     documents = {
         "parameters": {
@@ -91,7 +171,14 @@ def good_main() -> dict[str, Any]:
     }
     apps = {
         "parameters": {"location": {"type": "string"}},
+        "variables": {
+            "intakeJobList": [
+                {"job": "sweep", "cron": "*/5 * * * *"},
+                {"job": "removal", "cron": "30 2 * * *"},
+            ]
+        },
         "resources": [
+            intake_jobs(),
             {
                 "type": "Microsoft.App/containerApps",
                 "name": "ca-argus-web",
@@ -107,7 +194,7 @@ def good_main() -> dict[str, Any]:
                         ]
                     }
                 },
-            }
+            },
         ],
     }
     # Each stand in reachable only inside the Container Apps environment (#124).
@@ -242,6 +329,7 @@ def good_main() -> dict[str, Any]:
             "backup": module("backup", "[parameters('location')]", backup),
             "ai": module("ai", "[parameters('aiLocation')]", ai),
             "apps": module("apps", "[parameters('location')]", apps),
+            "alerts": module("alerts", "[parameters('location')]", alerts()),
             "standins": {
                 **module("standins", "[parameters('location')]", standins),
                 "condition": "[and(parameters('demo'), not(empty(parameters('demoImage'))))]",
@@ -733,4 +821,143 @@ def test_a_template_without_stand_ins_or_demo_switch_fails(tmp_path: Path) -> No
     assert run(tmp_path, main) == [
         "main template has no demo parameter",
         "no standins module found",
+    ]
+
+
+def apps_module(main: dict[str, Any]) -> dict[str, Any]:
+    template: dict[str, Any] = main["resources"]["apps"]["properties"]["template"]
+    return template
+
+
+def intake_job(main: dict[str, Any]) -> dict[str, Any]:
+    job: dict[str, Any] = apps_module(main)["resources"][0]
+    return job
+
+
+def alerts_module(main: dict[str, Any]) -> dict[str, Any]:
+    template: dict[str, Any] = main["resources"]["alerts"]["properties"]["template"]
+    return template
+
+
+@pytest.mark.req("IN-01", "NF-01")
+@pytest.mark.parametrize(
+    ("cron", "problem"),
+    [
+        ("*/15 * * * *", "the sweep job must run on the schedule '*/5 * * * *'"),
+        ("0 */6 * * *", "the sweep job must run on the schedule '*/5 * * * *'"),
+    ],
+)
+def test_a_sweep_that_does_not_run_every_5_minutes_fails(
+    tmp_path: Path, cron: str, problem: str
+) -> None:
+    main = good_main()
+    apps_module(main)["variables"]["intakeJobList"][0]["cron"] = cron
+    assert run(tmp_path, main) == [problem]
+
+
+@pytest.mark.req("IN-01", "NF-01")
+@pytest.mark.parametrize("cron", ["*/30 * * * *", "30 2 * * 1", "30 2,14 * * *", ""])
+def test_a_removal_that_does_not_run_once_a_day_fails(tmp_path: Path, cron: str) -> None:
+    main = good_main()
+    apps_module(main)["variables"]["intakeJobList"][1]["cron"] = cron
+    assert run(tmp_path, main) == ["the removal job must run once a day"]
+
+
+@pytest.mark.req("IN-01", "NF-01")
+def test_a_missing_intake_job_fails(tmp_path: Path) -> None:
+    main = good_main()
+    del apps_module(main)["variables"]["intakeJobList"][0]
+    assert run(tmp_path, main) == ["the sweep job must run on the schedule '*/5 * * * *'"]
+
+
+@pytest.mark.req("IN-01", "NF-01")
+def test_an_intake_job_without_its_schedule_check_fails(tmp_path: Path) -> None:
+    main = good_main()
+    apps_module(main)["variables"]["intakeJobList"].append({"job": "digest", "cron": "0 6 * * *"})
+    problems = run(tmp_path, main)
+    assert "unknown intake jobs ['digest']: add their schedule to this check" in problems
+
+
+@pytest.mark.req("IN-01", "NF-01")
+@pytest.mark.parametrize(
+    ("change", "problem"),
+    [
+        (("triggerType", "Manual"), "must run on a schedule"),
+        (("replicaRetryLimit", 2), "must not retry"),
+        (("replicaTimeout", None), "needs a time limit per run"),
+    ],
+)
+def test_an_intake_job_that_retries_or_has_no_schedule_fails(
+    tmp_path: Path, change: tuple[str, Any], problem: str
+) -> None:
+    main = good_main()
+    key, value = change
+    intake_job(main)["properties"]["configuration"][key] = value
+    problems = run(tmp_path, main)
+    assert len(problems) == 1
+    assert problem in problems[0]
+
+
+@pytest.mark.req("IN-01", "NF-01")
+def test_two_sweeps_at_once_fail(tmp_path: Path) -> None:
+    main = good_main()
+    trigger = intake_job(main)["properties"]["configuration"]["scheduleTriggerConfig"]
+    trigger["parallelism"] = 2
+    problems = run(tmp_path, main)
+    assert len(problems) == 1
+    assert "one replica at a time" in problems[0]
+
+
+@pytest.mark.req("IN-01")
+def test_intake_jobs_that_cannot_be_switched_off_fail(tmp_path: Path) -> None:
+    main = good_main()
+    del intake_job(main)["condition"]
+    problems = run(tmp_path, main)
+    assert len(problems) == 1
+    assert "only run when the intake jobs are on" in problems[0]
+
+
+@pytest.mark.req("NF-01")
+@pytest.mark.parametrize("index", range(4))
+def test_an_intake_job_outcome_no_alert_watches_fails(tmp_path: Path, index: int) -> None:
+    main = good_main()
+    rule = alerts_module(main)["variables"]["intakeRules"][index]
+    mark = rule["query"].split('"')[1]
+    rule["query"] = "Logs | take 1"
+    assert run(tmp_path, main) == [f"no alert watches the log line {mark!r}"]
+
+
+@pytest.mark.req("NF-01")
+def test_an_alert_without_an_action_group_fails(tmp_path: Path) -> None:
+    main = good_main()
+    alerts_module(main)["resources"]["intakeAlerts"]["properties"]["actions"]["actionGroups"] = []
+    problems = run(tmp_path, main)
+    assert len(problems) == 1
+    assert "sends to no action group" in problems[0]
+
+
+@pytest.mark.req("NF-01")
+def test_no_action_group_fails(tmp_path: Path) -> None:
+    main = good_main()
+    del alerts_module(main)["resources"]["actionGroup"]
+    assert run(tmp_path, main) == ["no action group for the operations alerts"]
+
+
+@pytest.mark.req("NF-03")
+def test_an_alert_address_written_in_the_code_fails(tmp_path: Path) -> None:
+    main = good_main()
+    group = alerts_module(main)["resources"]["actionGroup"]
+    group["properties"]["emailReceivers"] = [{"emailAddress": "someone@maxasp.example"}]
+    assert run(tmp_path, main) == ["an alert email address is written in the code"]
+
+
+@pytest.mark.req("NF-03")
+def test_only_an_action_group_may_be_global(tmp_path: Path) -> None:
+    main = good_main()
+    assert run(tmp_path, main) == []
+    rules = alerts_module(main)["resources"]["intakeAlerts"]
+    rules["location"] = "global"
+    assert run(tmp_path, main) == [
+        "resource [format('alert-{0}', variables('intakeRules')"
+        "[copyIndex()].kind)] has a fixed location 'global'"
     ]

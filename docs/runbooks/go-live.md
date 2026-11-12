@@ -31,6 +31,9 @@ Things that must be done before ARGUS works on the real accounts mailbox, the re
   Steps in [docs/runbooks/demo.md](demo.md).
 
 - [ ] The one time setup in [docs/operations/deploy.md](../operations/deploy.md), up to a first green deploy (#81).
+- [ ] **Who Max ASP is, for the intake jobs** (#125). The GitHub variables `ARGUS_OWN_DOMAIN`, `ARGUS_INVOICING_AGENT`, `ARGUS_OWN_VAT_IDS`, `ARGUS_VENDOR_DOMAINS` and `ARGUS_CUSTOMER_DOMAINS` from [deploy.md](../operations/deploy.md), step 7. With demo mode off, the sweep refuses to start until the first three are set, and the alert says so.
+- [ ] **Operations alerts reach Arita** (#125). `ARGUS_ALERT_EMAIL` is set, and **Test action group** on `ag-argus-ops` delivered an email.
+- [ ] **The sweep signs in to the real mailbox** (#125, ADR 0003). The intake jobs need a Microsoft 365 sign in for the real mailbox before they can run live; until then they fail with "not set up" and the sweep alert fires. Keep `intakeJobs` on in `main.bicepparam` only once that is in.
 - [ ] Start the long term database backup: two roles for the backup vault, then `databaseBackupProtected = true` ([docs/operations/backup-and-restore.md](../operations/backup-and-restore.md), #82).
 - [ ] One real restore of a long term backup, checked with `tools/restore_check.py` and written into the restore record of that runbook (#82).
 - [ ] Sign in with Microsoft: the ARGUS app registration, the three groups and the five settings in [docs/operations/sign-in.md](../operations/sign-in.md) (#23). Needed before anyone uses the approval page (#38).

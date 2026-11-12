@@ -7,7 +7,7 @@
 
 targetScope = 'resourceGroup'
 
-import { modelDeployment, manualSecret } from 'types.bicep'
+import { intakeSettingValues, modelDeployment, manualSecret } from 'types.bicep'
 
 @description('Every ARGUS resource runs in Germany West Central (ADR 0001, NF-03).')
 @allowed([
@@ -82,6 +82,21 @@ param demo bool = false
 @description('The argus-demo image with the stand ins. The pipeline passes it when it deploys a new version; empty leaves the running stand ins as they are.')
 param demoImage string = ''
 
+@description('Run the mailbox sweep every 5 minutes and the daily removal as Container Apps jobs (#125). Switch on only once a mailbox is connected: the fake one in demo mode, the real one at go live. The jobs never run with the placeholder image.')
+param intakeJobs bool = false
+
+@description('Who Max ASP is, for the sorting and the invoice reading (#125). Not used in demo mode, which has synthetic values.')
+param intakeSettings intakeSettingValues = {
+  ownDomain: ''
+  invoicingAgent: ''
+  ownVatIds: ''
+  vendorDomains: ''
+  customerDomains: ''
+}
+
+@description('Where the operations alerts go, for example a failed sweep (#125). Comes from the GitHub variable ARGUS_ALERT_EMAIL, never from the repo. Empty: the alerts still fire in Azure but email nobody.')
+param alertEmail string = ''
+
 @minValue(0)
 param appMinReplicas int = 0
 
@@ -112,6 +127,14 @@ var standinNames = {
   seed: 'caj-${prefix}-demo-seed'
 }
 var demoMailbox = 'accounts@maxasp.example'
+
+// The scheduled intake jobs (#125). They run the ARGUS image, so never with the public
+// placeholder of the very first deploy (appImage's default).
+var runIntakeJobs = intakeJobs && appImage != 'mcr.microsoft.com/k8se/quickstart:latest'
+var intakeJobNames = {
+  sweep: 'caj-${prefix}-sweep'
+  removal: 'caj-${prefix}-removal'
+}
 
 resource appIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
   name: 'id-${prefix}-app'
@@ -247,6 +270,9 @@ module apps 'modules/apps.bicep' = {
     wiseStandinTokenSecretName: wiseStandinTokenSecretName
     standinNames: standinNames
     demoMailbox: demoMailbox
+    runIntakeJobs: runIntakeJobs
+    intakeJobNames: intakeJobNames
+    intakeSettings: intakeSettings
   }
   // The secrets must exist in Key Vault before the app revision reads them.
   dependsOn: [
@@ -278,6 +304,23 @@ module standins 'modules/standins.bicep' = if (demo && !empty(demoImage)) {
   ]
 }
 
+module alerts 'modules/alerts.bicep' = {
+  name: 'alerts'
+  params: {
+    location: location
+    tags: tags
+    actionGroupName: 'ag-${prefix}-ops'
+    alertEmail: alertEmail
+    workspaceId: monitoring.outputs.id
+    watchIntakeJobs: runIntakeJobs
+    intakeJobNames: intakeJobNames
+  }
+  // The rules watch the logs of the jobs, so the jobs come first.
+  dependsOn: [
+    apps
+  ]
+}
+
 output appIdentityPrincipalId string = appIdentity.properties.principalId
 output appIdentityName string = appIdentity.name
 output registryLoginServer string = registry.outputs.loginServer
@@ -294,3 +337,4 @@ output appUrl string = apps.outputs.appUrl
 output demo bool = demo
 output demoDocumentsAccountName string = demo ? demoStore.outputs.accountName : ''
 output demoSeedJobName string = standinNames.seed
+output intakeJobs bool = runIntakeJobs
