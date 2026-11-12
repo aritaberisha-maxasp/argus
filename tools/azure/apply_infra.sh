@@ -25,7 +25,8 @@ apply() {
 }
 
 if ! outputs=$(apply "$name"); then
-  echo "::warning::Deployment $name failed. A new app revision can fail once while role assignments spread, so it runs once more in ${retry_after} seconds."
+  # To the log, not to stdout: stdout becomes the step outputs.
+  echo "::warning::Deployment $name failed. A new app revision can fail once while role assignments spread, so it runs once more in ${retry_after} seconds." >&2
   sleep "$retry_after"
   outputs=$(apply "$name-retry")
 fi
