@@ -49,6 +49,8 @@ To show Benjamin an email coming in while you watch, drop one more test email in
 2. Branch `main`, action **send one email**, and under **Email** pick the one to send, then **Run workflow**.
 3. Wait for the green tick, about 1 to 2 minutes. The run summary says which email went in.
 
+Try it once before the meeting, after the one time setup: run **send one email**, check the green tick, then **reset and seed** so the demo starts clean. Sending is new in Azure, so a problem shows up then and not in front of Benjamin.
+
 The email lands in the Inbox of the fake mailbox. The sweep picks it up within 5 minutes; start `caj-argus-sweep` by hand to show it at once. All 50 synthetic test emails in `tests/fixtures/emails/` can be picked. [manifest.csv](../../tests/fixtures/emails/manifest.csv) says what each one is and what ARGUS should do with it. Good ones to show that are not in the ten above:
 
 | Email | What it shows |

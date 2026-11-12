@@ -6,13 +6,18 @@
 #
 # With a command, this one run of the job uses it instead of the job's own command (#136). The
 # image, settings and secrets stay those of the job: they are read from the job and passed
-# along unchanged, so only the command differs.
+# along unchanged, so only the command differs. Of the resources only cpu and memory go back,
+# since the others Azure reports are read only (review of PR 140).
 #
 # Needs: RESOURCE_GROUP and a signed in az, plus jq when a command is given.
 set -euo pipefail
 
 job=$1
 timeout=${2:-600}
+if [[ ! "$timeout" =~ ^[0-9]+$ ]]; then
+  echo "::error::The timeout in seconds comes before the command: run_job.sh <job> <timeout> <command ...>" >&2
+  exit 2
+fi
 api=2024-03-01
 
 id=$(az resource show --resource-group "$RESOURCE_GROUP" --name "$job" \
@@ -24,7 +29,7 @@ if (($# > 2)); then
   body=$(az resource show --ids "$id" --query properties.template.containers --output json |
     jq -c --argjson command "$command" '
       if length != 1 then error("the job must have exactly one container") else . end
-      | {containers: [.[0] | {name, image, env, resources, command: $command}]}')
+      | {containers: [.[0] | {name, image, env, resources: (.resources | {cpu, memory}), command: $command}]}')
   start+=(--body "$body")
 fi
 execution=$("${start[@]}" --query name --output tsv)
