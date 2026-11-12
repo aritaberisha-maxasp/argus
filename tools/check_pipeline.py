@@ -14,8 +14,13 @@ and fails when one of the promises in the issue no longer holds:
 - The migrations run through ``tools/deploy.py migrate``, which keeps row data out of the
   log (NF-03). A firewall rule that cannot be closed fails the run.
 - The preview never changes anything in Azure.
-- Neither workflow nor its scripts touch the retention lock, the immutability policy, a
+- No workflow nor its scripts touch the retention lock, the immutability policy, a
   Complete mode deployment, Key Vault secrets or Wise (#65, NF-04).
+- The stand ins get their new image only with the new app version, never before the
+  migrations (#124).
+- The Demo workflow runs by hand on main only, refuses unless the running app is in demo mode,
+  resets only through ``python -m argus.demo reset``, which checks every target is demo data,
+  and never deploys or pushes anything (#124, ADR 0009).
 """
 
 import ast
@@ -28,6 +33,7 @@ import yaml
 
 DEPLOY = Path(".github/workflows/deploy.yml")
 PREVIEW = Path(".github/workflows/infra-preview.yml")
+DEMO = Path(".github/workflows/demo.yml")
 SCRIPTS = (Path("tools/azure"), Path("tools/deploy.py"))
 LOGIN_ACTION = "azure/login@"
 LOGIN_INPUTS = frozenset({"client-id", "tenant-id", "subscription-id"})
@@ -131,6 +137,11 @@ def deploy_problems(workflow: dict[str, Any]) -> list[str]:
     release_image = str(by_id.get("release", {}).get("env", {}).get("ARGUS_APP_IMAGE", ""))
     if "steps.image." not in release_image:
         problems.append("deploy.yml must deploy the image it just pushed")
+    if "ARGUS_DEMO_IMAGE" in by_id.get("infra", {}).get("env", {}):
+        problems.append("deploy.yml must not hand the stand ins a new image before the migrations")
+    demo_image = str(by_id.get("release", {}).get("env", {}).get("ARGUS_DEMO_IMAGE", ""))
+    if "steps.image." not in demo_image:
+        problems.append("deploy.yml must deploy the stand ins from the demo image it just pushed")
     if "tools/deploy.py migrate" not in str(by_id.get("migrate", {}).get("run", "")):
         problems.append("deploy.yml migrate step must run tools/deploy.py migrate")
     if "tools/deploy.py smoke" not in str(by_id.get("smoke", {}).get("run", "")):
@@ -167,6 +178,53 @@ def preview_problems(workflow: dict[str, Any], text: str) -> list[str]:
     return problems
 
 
+# The Demo workflow may restart apps, start the seed job and rebuild the demo database. It may
+# not deploy, push an image, or run SQL or migrations on its own.
+FORBIDDEN_IN_DEMO = {
+    "a deployment": re.compile(r"deployment\s+(group|sub)\s+create|apply_infra"),
+    "an image push": re.compile(r"docker\s+push|az\s+acr"),
+    "its own SQL or migrations": re.compile(r"\b(alembic|psql)\b|deploy\.py\s+migrate"),
+}
+
+
+def demo_problems(workflow: dict[str, Any], text: str) -> list[str]:
+    problems = []
+    triggers = workflow.get("on", {})
+    if not isinstance(triggers, dict) or set(triggers) != {"workflow_dispatch"}:
+        problems.append("demo.yml may only run by hand")
+    # Sharing the deploy's queue would cancel a deploy waiting in it (review of PR 130).
+    group = str((workflow.get("concurrency") or {}).get("group", ""))
+    if not group or "deploy" in group:
+        problems.append("demo.yml needs a concurrency group of its own, not the deploy's")
+    jobs = workflow.get("jobs", {})
+    for job_name, job in jobs.items():
+        if "github.ref == 'refs/heads/main'" not in str(job.get("if", "")):
+            problems.append(f"demo.yml job {job_name} must run on main only")
+        if job.get("continue-on-error"):
+            problems.append(f"demo.yml job {job_name} may not continue on error")
+        names = [str(step.get("run", "")) for step in steps(job)]
+        check = next((i for i, run in enumerate(names) if "demo=true" in run), None)
+        reset = next((i for i, run in enumerate(names) if "argus.demo reset" in run), None)
+        if reset is not None and (check is None or check > reset):
+            problems.append("demo.yml must check that the running app is in demo mode first")
+        if reset is not None:
+            given = str(steps(job)[reset].get("env", {}).get("ARGUS_DEMO", ""))
+            if "steps.target.outputs.demo" not in given or "ARGUS_DEMO=" in names[reset]:
+                problems.append(
+                    "demo.yml must hand the reset the running app's own ARGUS_DEMO, so the "
+                    "reset checks demo mode again"
+                )
+        for step in steps(job):
+            if step.get("continue-on-error"):
+                problems.append(f"demo.yml step {step.get('name')} may not continue on error")
+            if "firewall-rule delete" in str(step.get("run", "")) and "||" in str(step["run"]):
+                problems.append("demo.yml must fail when the database firewall cannot be closed")
+    for what, pattern in FORBIDDEN_IN_DEMO.items():
+        if pattern.search(code_only(text)):
+            problems.append(f"demo.yml must not make {what}")
+    return problems
+
+
 def forbidden_problems(name: str, text: str) -> list[str]:
     return [
         f"{name} mentions {what}"
@@ -198,13 +256,16 @@ def python_code(text: str) -> str:
 
 def check(root: Path) -> list[str]:
     problems: list[str] = []
-    deploy, preview = load(root / DEPLOY), load(root / PREVIEW)
+    deploy, preview, demo = load(root / DEPLOY), load(root / PREVIEW), load(root / DEMO)
     problems += sign_in_problems("deploy.yml", deploy, (root / DEPLOY).read_text("utf-8"))
     problems += sign_in_problems("infra-preview.yml", preview, (root / PREVIEW).read_text("utf-8"))
+    problems += sign_in_problems("demo.yml", demo, (root / DEMO).read_text("utf-8"))
     problems += deploy_problems(deploy)
     problems += preview_problems(preview, runs(preview))
+    problems += demo_problems(demo, runs(demo))
     problems += forbidden_problems("deploy.yml", runs(deploy))
     problems += forbidden_problems("infra-preview.yml", runs(preview))
+    problems += forbidden_problems("demo.yml", runs(demo))
     for entry in SCRIPTS:
         folder = root / entry
         files = sorted(p for p in folder.rglob("*") if p.is_file()) if folder.is_dir() else [folder]
@@ -221,7 +282,7 @@ def main(argv: list[str]) -> int:
     for problem in problems:
         print(f"::error::{problem}")
     if not problems:
-        print("The deploy and preview workflows keep the rules of #81.")
+        print("The deploy, preview and demo workflows keep the rules of #81 and #124.")
     return 1 if problems else 0
 
 

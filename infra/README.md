@@ -19,6 +19,8 @@ Everything sits in ARGUS's own resource group in Germany West Central.
 | Backup vault, geo redundant into Germany North | `modules/backup.bicep` | Long term backups of the database: every Sunday, the first of each month kept `databaseBackupYears` (10) years (#82, ADR 0007). |
 | Azure OpenAI with an EU model deployment | `modules/ai.bicep` | Sorting emails (ADR 0006). |
 | Azure AI Document Intelligence | `modules/ai.bicep` | Reading PDFs and scans (ADR 0006). |
+| Demo document store and stand in tokens, only while `demo` is on | `modules/demo.bicep` | A storage account without a lock for the demo's documents, and the tokens of the fake Graph and the Wise stand in in Key Vault (#124, ADR 0009). |
+| The stand ins and the seed job, only while `demo` is on | `modules/standins.bicep` | Fake mailbox, fake DATEV and Wise stand in from the `argus-demo` image, reachable only inside the environment. See [docs/runbooks/demo.md](../docs/runbooks/demo.md). |
 | Container Apps environment and the web app | `modules/apps.bicep` | Runs ARGUS. The app signs in to the database as its own Entra role and works as `argus_app`. The scheduled jobs from ADR 0001 join this environment as each job story adds its command. |
 | Azure Policy for the resource group | `policy/eu-only.bicep` | Refuses resources outside the allowed regions and any Global model deployment type. |
 

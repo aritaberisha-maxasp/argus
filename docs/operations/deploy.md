@@ -11,12 +11,12 @@ This runbook has three parts: what the pipeline does, the one time setup Arita d
 **After every merge to `main`**, once CI has passed on `main`, the workflow "Deploy" runs these steps in order:
 
 0. Checks that the commit is still the tip of `main`. A re-run of an old CI run, or two CI runs that finish out of order, are skipped with a notice, so old code or an old Azure setup never goes live again.
-1. Builds the app image from the [Dockerfile](../../Dockerfile), stamped with the commit.
+1. Builds the app image from the [Dockerfile](../../Dockerfile), stamped with the commit, and the `argus-demo` image with the stand ins ([docker/demo/Dockerfile](../../docker/demo/Dockerfile), #124).
 2. Signs in to Azure with OpenID Connect. GitHub hands the run a short lived token that Azure trusts for runs on `main` only. No Azure password, client secret or key is stored in GitHub.
 3. Applies `infra/main.bicep` with `infra/main.bicepparam`. The app keeps the image it runs right now.
-4. Pushes the new image to ARGUS's own Container Registry.
+4. Pushes the new images to ARGUS's own Container Registry.
 5. Opens the database firewall for the runner's address, runs the migrations (`tools/deploy.py migrate`, which runs `alembic upgrade head`) as the database admin with an Entra token, gives the app identity its database role, makes sure the database is not owned by `azure_pg_admin` (the long term backup would skip it, #82), and closes the firewall again. Leftover rules from a run that broke off are removed first, and a rule that cannot be removed fails the run before the new image goes out.
-6. Deploys the new image.
+6. Deploys the new image. In demo mode the stand ins get the new `argus-demo` image at the same time, and steps 5 to 7 work on the demo database `argus_demo` ([ADR 0009](../adr/0009-demo-mode-with-stand-ins.md)).
 7. Smoke test: waits until `/health` shows the new commit and `/health/database` shows that the app works as `argus_app` and the database is on the newest migration. If not, the run fails.
 
 If any step fails, the steps after it do not run. So when the migrations fail, the new image is never deployed and the running version keeps running.
@@ -235,6 +235,8 @@ These are the steps 4 and 5 from [infra/README.md](../../infra/README.md#one-tim
 - Delete locks on the storage account for originals, the database server and the backup vault.
 - The Microsoft Graph and Wise secrets into Key Vault, then a PR that adds them to `manualSecrets` in `main.bicepparam`.
 - The two roles for the backup vault, then a PR that switches `databaseBackupProtected` on, so the long term backup of the database starts ([backup-and-restore.md](backup-and-restore.md)).
+
+For the demo with the stand ins, see [docs/runbooks/demo.md](../runbooks/demo.md). Demo mode is on in `main.bicepparam` until go live, so the first deploy already brings up the stand ins (#124).
 
 The retention lock stays off until the tax advisor confirms the period. Switching it on is a separate PR by Arita (infra/README.md).
 

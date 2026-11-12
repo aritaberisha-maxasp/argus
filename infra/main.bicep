@@ -76,6 +76,12 @@ param appImage string = 'mcr.microsoft.com/k8se/quickstart:latest'
 @description('Port the app listens on. The placeholder uses 80, the ARGUS image 8000 (Dockerfile).')
 param appPort int = 80
 
+@description('Run ARGUS against the stand ins for the demo (#124, ADR 0009): its own database and document store, the fake mailbox, the fake DATEV and the Wise stand in. Off by default; main.bicepparam switches it.')
+param demo bool = false
+
+@description('The argus-demo image with the stand ins. The pipeline passes it when it deploys a new version; empty leaves the running stand ins as they are.')
+param demoImage string = ''
+
 @minValue(0)
 param appMinReplicas int = 0
 
@@ -93,6 +99,19 @@ var tags = {
 var documentsSecretName = 'argus-documents-connection-string'
 var openAiKeySecretName = 'azure-openai-api-key'
 var documentIntelligenceKeySecretName = 'azure-document-intelligence-api-key'
+
+// Demo mode (#124, ADR 0009). The real database and the locked document store stay empty
+// while ARGUS runs against the stand ins.
+var demoDocumentsSecretName = 'argus-demo-documents-connection-string'
+var graphStandinTokenSecretName = 'argus-graph-standin-token'
+var wiseStandinTokenSecretName = 'argus-wise-standin-token'
+var standinNames = {
+  graph: 'ca-${prefix}-standin-graph'
+  datev: 'ca-${prefix}-standin-datev'
+  wise: 'ca-${prefix}-standin-wise'
+  seed: 'caj-${prefix}-demo-seed'
+}
+var demoMailbox = 'accounts@maxasp.example'
 
 resource appIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
   name: 'id-${prefix}-app'
@@ -151,6 +170,20 @@ module database 'modules/database.bicep' = {
     adminObjectId: databaseAdminObjectId
     adminName: databaseAdminName
     adminType: databaseAdminType
+    demo: demo
+  }
+}
+
+module demoStore 'modules/demo.bicep' = if (demo) {
+  name: 'demo'
+  params: {
+    location: location
+    name: take('st${prefix}demo${suffix}', 24)
+    tags: tags
+    keyVaultName: keyVault.outputs.name
+    documentsSecretName: demoDocumentsSecretName
+    graphTokenSecretName: graphStandinTokenSecretName
+    wiseTokenSecretName: wiseStandinTokenSecretName
   }
 }
 
@@ -208,10 +241,40 @@ module apps 'modules/apps.bicep' = {
     openAiDeploymentName: modelDeployments[0].name
     documentIntelligenceEndpoint: ai.outputs.documentIntelligenceEndpoint
     manualSecrets: manualSecrets
+    demo: demo
+    demoDocumentsSecretName: demoDocumentsSecretName
+    graphStandinTokenSecretName: graphStandinTokenSecretName
+    wiseStandinTokenSecretName: wiseStandinTokenSecretName
+    standinNames: standinNames
+    demoMailbox: demoMailbox
   }
   // The secrets must exist in Key Vault before the app revision reads them.
   dependsOn: [
     documents
+    demoStore
+  ]
+}
+
+module standins 'modules/standins.bicep' = if (demo && !empty(demoImage)) {
+  name: 'standins'
+  params: {
+    location: location
+    tags: tags
+    environmentId: apps.outputs.environmentId
+    identityId: appIdentity.id
+    registryLoginServer: registry.outputs.loginServer
+    keyVaultUri: keyVault.outputs.uri
+    image: demoImage
+    graphName: standinNames.graph
+    datevName: standinNames.datev
+    wiseName: standinNames.wise
+    seedJobName: standinNames.seed
+    graphTokenSecretName: graphStandinTokenSecretName
+    wiseTokenSecretName: wiseStandinTokenSecretName
+    mailbox: demoMailbox
+  }
+  dependsOn: [
+    demoStore
   ]
 }
 
@@ -228,3 +291,6 @@ output documentsAccountName string = documents.outputs.name
 output backupVaultName string = backup.outputs.name
 output backupVaultPrincipalId string = backup.outputs.principalId
 output appUrl string = apps.outputs.appUrl
+output demo bool = demo
+output demoDocumentsAccountName string = demo ? demoStore.outputs.accountName : ''
+output demoSeedJobName string = standinNames.seed

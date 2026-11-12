@@ -46,6 +46,19 @@ param documentIntelligenceEndpoint string
 
 param manualSecrets manualSecret[]
 
+@description('Demo mode (#124, ADR 0009): ARGUS talks to the stand ins and keeps documents in the demo store.')
+param demo bool
+
+param demoDocumentsSecretName string
+param graphStandinTokenSecretName string
+param wiseStandinTokenSecretName string
+
+@description('Names of the stand in apps and the seed job, from main.bicep.')
+param standinNames object
+
+@description('The fake accounts mailbox, a reserved .example address (RFC 2606).')
+param demoMailbox string
+
 resource workspace 'Microsoft.OperationalInsights/workspaces@2023-09-01' existing = {
   name: logAnalyticsWorkspaceName
 }
@@ -74,11 +87,30 @@ resource environment 'Microsoft.App/managedEnvironments@2024-03-01' = {
 
 // Secrets that ARGUS's own infrastructure fills in, and the environment variable each one
 // becomes. The names on the left match what the code reads (src/argus/secrets.py callers).
-var generatedSecrets = [
+// In demo mode the documents go to the demo store, never to the locked one (ADR 0009).
+var generatedSecrets = concat(
+  [
+    {
+      secretName: demo ? demoDocumentsSecretName : documentsSecretName
+      envName: 'ARGUS_DOCUMENTS_CONNECTION_STRING'
+    }
+  ],
+  aiSecrets,
+  demo ? standinSecrets : []
+)
+
+var standinSecrets = [
   {
-    secretName: documentsSecretName
-    envName: 'ARGUS_DOCUMENTS_CONNECTION_STRING'
+    secretName: graphStandinTokenSecretName
+    envName: 'ARGUS_GRAPH_STANDIN_TOKEN'
   }
+  {
+    secretName: wiseStandinTokenSecretName
+    envName: 'ARGUS_WISE_STANDIN_TOKEN'
+  }
+]
+
+var aiSecrets = [
   {
     secretName: openAiKeySecretName
     envName: 'AZURE_OPENAI_API_KEY'
@@ -86,6 +118,42 @@ var generatedSecrets = [
   {
     secretName: documentIntelligenceKeySecretName
     envName: 'AZURE_DOCUMENT_INTELLIGENCE_API_KEY'
+  }
+]
+
+// Where ARGUS finds Microsoft 365, DATEV and Wise (src/argus/connections.py). In demo mode it is
+// the stand ins inside this environment, called by name over plain http. The app refuses to
+// start if a real address or secret is set next to them, and the other way round. The real
+// addresses come with go live (docs/runbooks/go-live.md).
+var demoSettings = [
+  {
+    name: 'ARGUS_GRAPH_URL'
+    value: 'http://${standinNames.graph}/v1.0'
+  }
+  {
+    name: 'ARGUS_MAILBOX'
+    value: demoMailbox
+  }
+  {
+    name: 'ARGUS_REMINDER_FORWARD_TO'
+    value: 'reminders@maxasp.example'
+  }
+  {
+    name: 'ARGUS_DATEV_URL'
+    value: 'http://${standinNames.datev}'
+  }
+  {
+    // The client the fake DATEV serves (docker/demo/Dockerfile).
+    name: 'ARGUS_DATEV_CLIENT'
+    value: 'muster-gmbh'
+  }
+  {
+    name: 'ARGUS_WISE_URL'
+    value: 'http://${standinNames.wise}'
+  }
+  {
+    name: 'ARGUS_WISE_PROFILE_ID'
+    value: '16000001'
   }
 ]
 
@@ -121,6 +189,10 @@ var plainSettings = [
   {
     name: 'AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT'
     value: documentIntelligenceEndpoint
+  }
+  {
+    name: 'ARGUS_DEMO'
+    value: demo ? 'true' : 'false'
   }
 ]
 
@@ -171,6 +243,7 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
           }
           env: concat(
             plainSettings,
+            demo ? demoSettings : [],
             map(allSecrets, secret => {
               name: secret.envName
               secretRef: toLower(secret.secretName)
