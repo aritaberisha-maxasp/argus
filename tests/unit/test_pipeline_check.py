@@ -311,6 +311,36 @@ def test_a_demo_reset_without_the_demo_mode_check_fails(tmp_path: Path) -> None:
 
 
 @pytest.mark.req("NF-04")
+def test_sending_an_email_before_the_demo_mode_check_fails(tmp_path: Path) -> None:
+    root = copy_repo(tmp_path)
+    send = '          tools/azure/run_job.sh "$SEED_JOB" 600 python -m argus.demo send "$EMAIL"\n'
+    early = "      - name: Send early\n        run: |\n" + send
+    edit(
+        root,
+        DEMO,
+        lambda s: s.replace(
+            "      - uses: actions/checkout@v4\n", early + "      - uses: actions/checkout@v4\n"
+        ),
+    )
+    assert check_pipeline.check(root) == [
+        "demo.yml must check that the running app is in demo mode first"
+    ]
+
+
+@pytest.mark.req("NF-04")
+def test_a_chosen_email_pasted_into_the_shell_fails(tmp_path: Path) -> None:
+    root = copy_repo(tmp_path)
+    edit(
+        root,
+        DEMO,
+        lambda s: s.replace('argus.demo send "$EMAIL"', "argus.demo send ${{ inputs.email }}"),
+    )
+    assert check_pipeline.check(root) == [
+        "demo.yml must hand the chosen email to the shell through env"
+    ]
+
+
+@pytest.mark.req("NF-04")
 def test_a_demo_workflow_that_runs_on_its_own_fails(tmp_path: Path) -> None:
     root = copy_repo(tmp_path)
     edit(

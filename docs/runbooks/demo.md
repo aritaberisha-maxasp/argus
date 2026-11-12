@@ -41,6 +41,26 @@ ARGUS picks the emails up on its own: the job `caj-argus-sweep` runs every 5 min
 
 Since shadow mode (#72), a fresh database starts in shadow mode: the sweep only proposes where each email should go and opens no cases. To show sorted emails and cases, a person switches the demo database to live mode before the demo, as #72 describes. A reset starts the demo database in shadow mode again.
 
+### Show an email arriving
+
+To show Benjamin an email coming in while you watch, drop one more test email into the fake mailbox (#136):
+
+1. GitHub, **Actions**, workflow **Demo**, **Run workflow**.
+2. Branch `main`, action **send one email**, and under **Email** pick the one to send, then **Run workflow**.
+3. Wait for the green tick, about 1 to 2 minutes. The run summary says which email went in.
+
+The email lands in the Inbox of the fake mailbox. The sweep picks it up within 5 minutes; start `caj-argus-sweep` by hand to show it at once. All 50 synthetic test emails in `tests/fixtures/emails/` can be picked. [manifest.csv](../../tests/fixtures/emails/manifest.csv) says what each one is and what ARGUS should do with it. Good ones to show that are not in the ten above:
+
+| Email | What it shows |
+|---|---|
+| E12 | Invoice from a vendor that is not in DATEV, so it goes to the exception queue (the default) |
+| E14 | Three invoices in one email, so three cases |
+| E05 | Incoming invoice over EUR 5,000 |
+| E04 | English invoice in GBP from a UK vendor |
+| E34 | Phishing email |
+
+Pick an email that is not in the mailbox yet. Sending the same email twice adds no second copy, the same as seeding twice. Sending only works in demo mode: the workflow checks first that ARGUS runs in demo mode, and the command itself refuses unless demo mode is on and the mailbox is the fake one. It never reaches the real accounts mailbox. The **Email** choice does nothing for the other actions.
+
 To show it again from the start, run the Demo workflow with **reset and seed** again. To add the demo emails once more without emptying anything, run it with **seed**. Seeding twice does no harm: the mailbox keeps one copy of each email.
 
 ## If something goes wrong
@@ -49,6 +69,7 @@ To show it again from the start, run the Demo workflow with **reset and seed** a
 - **"Check that Azure is set up" failed.** The one time setup is not finished. See step 1 above.
 - **"Check that ARGUS runs in demo mode" failed.** Either demo mode is off in `main.bicepparam`, or the deploy has not run since it was switched on. Merge a change or run the Deploy workflow by hand.
 - **"Empty the demo database" failed.** The log says why. "must end in _demo" means the app is not on the demo database, so nothing was changed.
+- **"Send the chosen email to the fake mailbox" failed.** Like the seed, its own log is in the Azure portal: job `caj-argus-demo-seed`, Execution history, Console logs. "refused" there means demo mode is off or the mailbox setting is not the fake one, so nothing was sent.
 - **"Put the demo emails into the fake mailbox" failed.** The seed job's own log is in the Azure portal: job `caj-argus-demo-seed`, Execution history, Console logs.
 
 ## After the demos: going live

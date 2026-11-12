@@ -20,7 +20,8 @@ and fails when one of the promises in the issue no longer holds:
   migrations (#124).
 - The Demo workflow runs by hand on main only, refuses unless the running app is in demo mode,
   resets only through ``python -m argus.demo reset``, which checks every target is demo data,
-  and never deploys or pushes anything (#124, ADR 0009).
+  drops a chosen test email only through the seed job, and never deploys or pushes anything
+  (#124, #136, ADR 0009).
 """
 
 import ast
@@ -205,8 +206,16 @@ def demo_problems(workflow: dict[str, Any], text: str) -> list[str]:
         names = [str(step.get("run", "")) for step in steps(job)]
         check = next((i for i, run in enumerate(names) if "demo=true" in run), None)
         reset = next((i for i, run in enumerate(names) if "argus.demo reset" in run), None)
-        if reset is not None and (check is None or check > reset):
+        # Every step that changes demo data: the reset, the seed and the chosen email (#136).
+        changes = [
+            i for i, run in enumerate(names) if "argus.demo reset" in run or "run_job.sh" in run
+        ]
+        if changes and (check is None or check > min(changes)):
             problems.append("demo.yml must check that the running app is in demo mode first")
+        for run in names:
+            # A person picks the email, so it reaches the shell as a setting, never pasted in.
+            if "argus.demo send" in run and "inputs." in run:
+                problems.append("demo.yml must hand the chosen email to the shell through env")
         if reset is not None:
             given = str(steps(job)[reset].get("env", {}).get("ARGUS_DEMO", ""))
             if "steps.target.outputs.demo" not in given or "ARGUS_DEMO=" in names[reset]:

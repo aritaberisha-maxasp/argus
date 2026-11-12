@@ -1,9 +1,14 @@
-"""``python -m argus.demo seed`` and ``python -m argus.demo reset`` (#124).
+"""``python -m argus.demo seed``, ``send`` and ``reset`` (#124, #136).
 
 seed
     Puts the demo emails into the fake mailbox at ``ARGUS_GRAPH_URL``. In Azure this runs as
     the Container Apps job ``caj-argus-demo-seed``, inside the environment, because the fake
     mailbox cannot be reached from outside.
+
+send <email>
+    Drops one chosen test email, for example ``E12``, into the Inbox of the fake mailbox, so
+    the demo can show an email arriving (#136). In Azure the Demo workflow runs this inside the
+    seed job, like ``seed``. The next sweep picks the email up.
 
 reset [--standins]
     Empties the demo database (``ARGUS_DATABASE_URL``, its name must end in ``_demo``) and
@@ -12,7 +17,7 @@ reset [--standins]
     ``--standins`` it also asks the stand ins to start over. In Azure the Demo workflow runs
     this as the database admin and restarts the stand ins itself.
 
-Both refuse to run unless ``ARGUS_DEMO=true`` and the settings keep the demo rule of
+All three refuse to run unless ``ARGUS_DEMO=true`` and the settings keep the demo rule of
 :mod:`argus.connections`. Messages name settings, never values or email content.
 """
 
@@ -35,7 +40,7 @@ from argus.demo.reset import (
     reset_documents,
     reset_standins,
 )
-from argus.demo.seed import seed
+from argus.demo.seed import seed, send_one
 from argus.documents.store import CONNECTION_STRING_SECRET, DEFAULT_CONTAINER
 
 
@@ -45,6 +50,13 @@ def run_seed(environ: Mapping[str, str], folder: str | None) -> int:
     for email in seeded:
         print(f"seeded {email.file}: {email.shows}")
     print(f"{len(seeded)} demo emails are in the fake mailbox.")
+    return 0
+
+
+def run_send(environ: Mapping[str, str], folder: str | None, email_id: str) -> int:
+    connections = connections_from_env(environ)
+    sent = send_one(connections, emails_folder(folder), email_id)
+    print(f"sent {sent.file} to the Inbox of the fake mailbox; the next sweep picks it up.")
     return 0
 
 
@@ -87,6 +99,11 @@ def main(argv: Sequence[str] | None = None, environ: Mapping[str, str] | None = 
     commands = parser.add_subparsers(dest="command", required=True)
     seed_command = commands.add_parser("seed", help="put the demo emails into the fake mailbox")
     seed_command.add_argument("--emails", help="folder with the fixture emails")
+    send_command = commands.add_parser(
+        "send", help="drop one chosen test email into the fake mailbox"
+    )
+    send_command.add_argument("email", help="the test email by its number, for example E12")
+    send_command.add_argument("--emails", help="folder with the fixture emails")
     reset_command = commands.add_parser("reset", help="empty the demo data")
     reset_command.add_argument(
         "--standins", action="store_true", help="also ask the stand ins to start over"
@@ -96,6 +113,8 @@ def main(argv: Sequence[str] | None = None, environ: Mapping[str, str] | None = 
     try:
         if args.command == "seed":
             return run_seed(environ, args.emails)
+        if args.command == "send":
+            return run_send(environ, args.emails, args.email)
         return run_reset(environ, args.standins)
     except (DemoRefused, ConnectionSettingsError) as refused:
         print(f"refused: {refused}", file=sys.stderr)
