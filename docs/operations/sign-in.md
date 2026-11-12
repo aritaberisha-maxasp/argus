@@ -22,7 +22,7 @@ A person may be in more than one group. Someone in none of them can sign in but 
 
 ## 3. Give ARGUS the IDs
 
-ARGUS reads these environment variables. In Azure they are plain app settings on the Container App (not Key Vault, nothing here is secret):
+ARGUS reads these environment variables. In Azure they are plain app settings on the Container App (not Key Vault, nothing here is secret). Do not set them by hand in the portal: put them in the GitHub variables of the same name, and the Deploy workflow passes them through `infra/main.bicepparam` to the app ([deploy.md](deploy.md), step 7, #133). A setting made in the portal is gone after the next deploy.
 
 | Variable | Value |
 | --- | --- |
