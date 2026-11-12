@@ -66,6 +66,10 @@ jobs:
         run: ruff format --check .
       - name: Type check
         run: mypy
+      # Two PRs whose migrations point at the same earlier one would give the database two
+      # "latest" versions (#123). Reads the files only, no database needed.
+      - name: Migration chain
+        run: python tools/check_migrations.py
       # The document store tests need Azurite. A service container cannot take the flag that
       # lets Azurite accept the newest storage API version, so it is started here instead.
       - name: Start Azurite
@@ -301,3 +305,134 @@ jobs:
       - name: App log
         if: always()
         run: docker logs argus || true
+
+  demo:
+    name: Demo rehearsal
+    runs-on: ubuntu-latest
+    # Rehearses the demo from #124 without Azure: the stand ins from the argus-demo image with
+    # the same commands as infra/modules/standins.bicep, the seed job, the start up guard of the
+    # app image and the reset against a local PostgreSQL.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: argus_owner
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_DB: argus_demo
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U argus_owner"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: pip install -e .
+      - name: Build the demo image and the app image
+        run: |
+          docker build --file docker/demo/Dockerfile --tag argus-demo:ci .
+          docker build --build-arg ARGUS_BUILD="$GITHUB_SHA" --tag argus:ci .
+      - name: The demo image does not run as root
+        run: test "$(docker run --rm argus-demo:ci id -u)" != "0"
+      # Same names, commands and settings as in Azure. Only the ports are published here so the
+      # runner can look at the stand ins; in Azure nothing outside the environment reaches them.
+      - name: Start the stand ins like Azure does
+        run: |
+          GRAPH_TOKEN=$(python -c "from standins.graph.app import fake_token; print(fake_token(['Mail.ReadWrite', 'Mail.Send']))")
+          PAY_TOKEN="standin-$(python -c 'import uuid; print(uuid.uuid4())')"
+          {
+            echo "ARGUS_GRAPH_STANDIN_TOKEN=$GRAPH_TOKEN"
+            echo "ARGUS_WISE_STANDIN_TOKEN=$PAY_TOKEN"
+          } >> "$GITHUB_ENV"
+          docker network create demo
+          docker run -d --name ca-argus-standin-graph --network demo -p 8081:8081 \
+            -e GRAPH_STANDIN_TOKEN="$GRAPH_TOKEN" -e GRAPH_STANDIN_START_EMPTY=true argus-demo:ci \
+            uvicorn standins.graph.app:app --host 0.0.0.0 --port 8081
+          docker run -d --name ca-argus-standin-datev --network demo -p 58452:58452 argus-demo:ci \
+            uvicorn argus.datev.fake:app_from_env --factory --host 0.0.0.0 --port 58452
+          docker run -d --name ca-argus-standin-wise --network demo -p 8080:8080 \
+            -e WISE_STANDIN_TOKEN="$PAY_TOKEN" argus-demo:ci \
+            uvicorn standins.wise.app:app --host 0.0.0.0 --port 8080
+          for url in http://localhost:8081/_standin/records http://localhost:58452/health http://localhost:8080/_standin/records; do
+            for _ in $(seq 1 30); do curl -sf "$url" > /dev/null && break; sleep 1; done
+            curl -sf "$url" > /dev/null || { docker ps -a; exit 1; }
+          done
+          test "$(curl -sf http://localhost:8081/_standin/records | jq .inbox)" = 0
+      - name: Run the seed job like Azure does
+        run: |
+          docker run --rm --network demo \
+            -e ARGUS_DEMO=true \
+            -e ARGUS_GRAPH_URL=http://ca-argus-standin-graph:8081/v1.0 \
+            -e ARGUS_MAILBOX=accounts@maxasp.example \
+            -e ARGUS_GRAPH_STANDIN_TOKEN \
+            argus-demo:ci python -m argus.demo seed
+          test "$(curl -sf http://localhost:8081/_standin/records | jq .inbox)" = 10
+      - name: The seed refuses when demo mode is off
+        run: |
+          if docker run --rm --network demo -e ARGUS_DEMO=false argus-demo:ci python -m argus.demo seed; then
+            echo "::error::seed ran with demo mode off"
+            exit 1
+          fi
+      - name: The app refuses to start when demo mode and real settings mix
+        run: |
+          set +e
+          docker run --rm -e ARGUS_DEMO=true -e ARGUS_WISE_URL=https://api.wise.com argus:ci > mixed.log 2>&1
+          first=$?
+          docker run --rm -e ARGUS_DEMO=false -e ARGUS_GRAPH_URL=http://ca-argus-standin-graph/v1.0 argus:ci >> mixed.log 2>&1
+          second=$?
+          set -e
+          cat mixed.log
+          test "$first" != 0 && test "$second" != 0
+          grep -q "demo mode is on but ARGUS_WISE_URL is not a stand in address" mixed.log
+          grep -q "demo mode is off but ARGUS_GRAPH_URL is not an https address" mixed.log
+      - name: The app starts in demo mode with the stand in settings
+        run: |
+          docker run -d --name argus --network demo -p 8000:8000 \
+            -e ARGUS_DEMO=true \
+            -e ARGUS_GRAPH_URL=http://ca-argus-standin-graph:8081/v1.0 \
+            -e ARGUS_MAILBOX=accounts@maxasp.example \
+            -e ARGUS_DATEV_URL=http://ca-argus-standin-datev:58452 \
+            -e ARGUS_DATEV_CLIENT=muster-gmbh \
+            -e ARGUS_WISE_URL=http://ca-argus-standin-wise:8080 \
+            -e ARGUS_WISE_PROFILE_ID=16000001 \
+            -e ARGUS_GRAPH_STANDIN_TOKEN -e ARGUS_WISE_STANDIN_TOKEN \
+            argus:ci
+          for _ in $(seq 1 30); do curl -sf http://localhost:8000/health && exit 0; sleep 1; done
+          docker logs argus
+          exit 1
+      # NF-04: the Wise stand in in the demo image still cannot fund or release anything.
+      - name: The Wise stand in cannot fund or release a batch
+        run: python tools/smoke_wise_standin.py http://localhost:8080 "$ARGUS_WISE_STANDIN_TOKEN"
+      - name: Reset the demo
+        env:
+          ARGUS_DATABASE_URL: postgresql+psycopg://argus_owner@localhost:5432/argus_demo
+          ARGUS_DEMO: "true"
+          ARGUS_GRAPH_URL: http://localhost:8081/v1.0
+          ARGUS_DATEV_URL: http://localhost:58452
+          ARGUS_WISE_URL: http://localhost:8080
+        run: |
+          python -m argus.demo reset --standins
+          test "$(curl -sf http://localhost:8081/_standin/records | jq .inbox)" = 0
+          test "$(curl -sf http://localhost:8080/_standin/records | jq '.transfers | length')" = 0
+          psql "postgresql://argus_owner@localhost:5432/argus_demo" -tAc "select version_num from alembic_version"
+      - name: The reset refuses the real database
+        env:
+          ARGUS_DATABASE_URL: postgresql+psycopg://argus_owner@localhost:5432/argus
+          ARGUS_DEMO: "true"
+        run: |
+          if python -m argus.demo reset; then
+            echo "::error::reset ran against a database whose name does not end in _demo"
+            exit 1
+          fi
+      - name: Stand in logs
+        if: always()
+        run: |
+          for name in ca-argus-standin-graph ca-argus-standin-datev ca-argus-standin-wise argus; do
+            echo "== $name"; docker logs "$name" 2>&1 | tail -n 50 || true
+          done

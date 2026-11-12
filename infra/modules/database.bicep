@@ -26,6 +26,11 @@ param adminType string
 @description('Name of the ARGUS database.')
 param databaseName string = 'argus'
 
+@description('Demo mode (#124, ADR 0009): ARGUS works in a database of its own, so the real one stays empty until go live.')
+param demo bool = false
+
+var demoDatabaseName = '${databaseName}_demo'
+
 resource server 'Microsoft.DBforPostgreSQL/flexibleServers@2023-12-01-preview' = {
   name: name
   location: location
@@ -83,6 +88,20 @@ resource database 'Microsoft.DBforPostgreSQL/flexibleServers/databases@2023-12-0
   ]
 }
 
+// Only demo data goes in here. `python -m argus.demo reset` refuses every database whose name
+// does not end in _demo.
+resource demoDatabase 'Microsoft.DBforPostgreSQL/flexibleServers/databases@2023-12-01-preview' = if (demo) {
+  parent: server
+  name: demoDatabaseName
+  properties: {
+    charset: 'UTF8'
+    collation: 'en_US.utf8'
+  }
+  dependsOn: [
+    database
+  ]
+}
+
 // Container Apps on the consumption plan have no fixed outgoing address, so the firewall lets
 // in Azure services only. Every connection still needs a valid Entra token and TLS.
 resource allowAzureServices 'Microsoft.DBforPostgreSQL/flexibleServers/firewallRules@2023-12-01-preview' = {
@@ -94,10 +113,12 @@ resource allowAzureServices 'Microsoft.DBforPostgreSQL/flexibleServers/firewallR
   }
   dependsOn: [
     database
+    demoDatabase
   ]
 }
 
 output id string = server.id
 output name string = server.name
 output fqdn string = server.properties.fullyQualifiedDomainName
-output databaseName string = database.name
+// The database the app, the migrations and the smoke test use: the demo one in demo mode.
+output databaseName string = demo ? demoDatabaseName : database.name

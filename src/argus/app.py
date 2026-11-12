@@ -28,6 +28,7 @@ from argus.auth import (
 )
 from argus.cases.model import CaseKind, CaseStatus
 from argus.cases.store import get_case
+from argus.connections import connections_from_env
 from argus.db import engine_from_env
 from argus.documents.store import AzureDocumentStore, DocumentStore
 from argus.intake.mode import IntakeMode, SwitchedBy, intake_mode, switch_intake_mode
@@ -120,6 +121,9 @@ def create_app(
     case_approvers: CaseApprovers | None = None,
     documents_factory: Callable[[], DocumentStore] = documents_from_env,
 ) -> FastAPI:
+    # Refuse to start when demo mode and the real Microsoft 365, DATEV or Wise settings mix
+    # (#124, ADR 0009). The error names the settings, never their values.
+    connections_from_env()
     # No generated API pages: they would be routes without sign in.
     app = FastAPI(
         title="ARGUS", version=__version__, docs_url=None, redoc_url=None, openapi_url=None

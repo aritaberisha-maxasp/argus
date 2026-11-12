@@ -31,6 +31,7 @@ def copy_repo(tmp_path: Path) -> Path:
     for relative in (
         ".github/workflows/deploy.yml",
         ".github/workflows/infra-preview.yml",
+        ".github/workflows/demo.yml",
         "tools/deploy.py",
     ):
         target = tmp_path / relative
@@ -50,6 +51,7 @@ def edit(root: Path, relative: str, change: Callable[[str], str]) -> None:
 
 DEPLOY = ".github/workflows/deploy.yml"
 PREVIEW = ".github/workflows/infra-preview.yml"
+DEMO = ".github/workflows/demo.yml"
 
 
 @pytest.mark.req("NF-04", "NF-06")
@@ -267,3 +269,145 @@ def test_a_smoke_step_that_does_not_run_the_smoke_test_fails(tmp_path: Path) -> 
         ),
     )
     assert "deploy.yml smoke step must run tools/deploy.py smoke" in check_pipeline.check(root)
+
+
+def test_new_stand_ins_before_the_migrations_fail(tmp_path: Path) -> None:
+    root = copy_repo(tmp_path)
+    edit(
+        root,
+        DEPLOY,
+        lambda s: s.replace(
+            "          ARGUS_APP_PORT: ${{ steps.current.outputs.port }}\n",
+            "          ARGUS_APP_PORT: ${{ steps.current.outputs.port }}\n"
+            "          ARGUS_DEMO_IMAGE: ${{ steps.image.outputs.demo_image }}\n",
+        ),
+    )
+    assert check_pipeline.check(root) == [
+        "deploy.yml must not hand the stand ins a new image before the migrations"
+    ]
+
+
+def test_a_release_without_the_new_stand_ins_fails(tmp_path: Path) -> None:
+    root = copy_repo(tmp_path)
+    edit(
+        root,
+        DEPLOY,
+        lambda s: s.replace(
+            "          ARGUS_DEMO_IMAGE: ${{ steps.image.outputs.demo_image }}\n", ""
+        ),
+    )
+    assert check_pipeline.check(root) == [
+        "deploy.yml must deploy the stand ins from the demo image it just pushed"
+    ]
+
+
+@pytest.mark.req("NF-04")
+def test_a_demo_reset_without_the_demo_mode_check_fails(tmp_path: Path) -> None:
+    root = copy_repo(tmp_path)
+    edit(root, DEMO, lambda s: s.replace('grep -qx "demo=true"', 'grep -qx "demo=.*"'))
+    assert check_pipeline.check(root) == [
+        "demo.yml must check that the running app is in demo mode first"
+    ]
+
+
+@pytest.mark.req("NF-04")
+def test_a_demo_workflow_that_runs_on_its_own_fails(tmp_path: Path) -> None:
+    root = copy_repo(tmp_path)
+    edit(
+        root,
+        DEMO,
+        lambda s: s.replace("on:\n  workflow_dispatch:", "on:\n  push:\n  workflow_dispatch:"),
+    )
+    assert check_pipeline.check(root) == ["demo.yml may only run by hand"]
+
+
+def test_a_demo_workflow_off_main_fails(tmp_path: Path) -> None:
+    root = copy_repo(tmp_path)
+    edit(root, DEMO, lambda s: s.replace("    if: github.ref == 'refs/heads/main'\n", ""))
+    assert check_pipeline.check(root) == ["demo.yml job demo must run on main only"]
+
+
+@pytest.mark.req("NF-06")
+def test_a_demo_workflow_with_a_stored_secret_fails(tmp_path: Path) -> None:
+    root = copy_repo(tmp_path)
+    edit(
+        root,
+        DEMO,
+        lambda s: s.replace(
+            "          PGUSER: ${{ vars.ARGUS_DATABASE_ADMIN_NAME }}\n",
+            "          PGUSER: ${{ vars.ARGUS_DATABASE_ADMIN_NAME }}\n"
+            "          PGPASSWORD: ${{ secrets.DATABASE_PASSWORD }}\n",
+        ),
+    )
+    assert check_pipeline.check(root) == [
+        "demo.yml reads a GitHub secret; Azure sign in must use OpenID Connect"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("line", "problem"),
+    [
+        ("          alembic upgrade head\n", "its own SQL or migrations"),
+        ('          psql --command "delete from audit_event"\n', "its own SQL or migrations"),
+        ("          docker push somewhere/argus:latest\n", "an image push"),
+        ("          tools/azure/apply_infra.sh demo\n", "a deployment"),
+    ],
+)
+def test_a_demo_workflow_that_does_more_than_seed_and_reset_fails(
+    tmp_path: Path, line: str, problem: str
+) -> None:
+    root = copy_repo(tmp_path)
+    edit(
+        root,
+        DEMO,
+        lambda s: s.replace(
+            "          python -m argus.demo reset\n",
+            "          python -m argus.demo reset\n" + line,
+        ),
+    )
+    assert check_pipeline.check(root) == [f"demo.yml must not make {problem}"]
+
+
+@pytest.mark.req("NF-04")
+def test_a_wise_call_in_the_demo_workflow_fails(tmp_path: Path) -> None:
+    root = copy_repo(tmp_path)
+    edit(
+        root,
+        DEMO,
+        lambda s: s.replace(
+            "          python -m argus.demo reset\n",
+            "          python -m argus.demo reset\n          curl https://api.wise.com/v1/me\n",
+        ),
+    )
+    assert check_pipeline.check(root) == ["demo.yml mentions Wise"]
+
+
+@pytest.mark.req("NF-04")
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        (
+            "          ARGUS_DEMO: ${{ steps.target.outputs.demo }}\n",
+            '          ARGUS_DEMO: "true"\n',
+        ),
+        (
+            "          python -m argus.demo reset\n",
+            "          ARGUS_DEMO=true python -m argus.demo reset\n",
+        ),
+    ],
+)
+def test_a_demo_reset_with_demo_mode_written_in_fails(tmp_path: Path, old: str, new: str) -> None:
+    root = copy_repo(tmp_path)
+    edit(root, DEMO, lambda s: s.replace(old, new))
+    assert check_pipeline.check(root) == [
+        "demo.yml must hand the reset the running app's own ARGUS_DEMO, so the reset checks "
+        "demo mode again"
+    ]
+
+
+def test_a_demo_workflow_in_the_deploy_queue_fails(tmp_path: Path) -> None:
+    root = copy_repo(tmp_path)
+    edit(root, DEMO, lambda s: s.replace("group: demo-production", "group: deploy-production"))
+    assert check_pipeline.check(root) == [
+        "demo.yml needs a concurrency group of its own, not the deploy's"
+    ]
