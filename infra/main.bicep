@@ -7,7 +7,7 @@
 
 targetScope = 'resourceGroup'
 
-import { intakeSettingValues, modelDeployment, manualSecret } from 'types.bicep'
+import { intakeSettingValues, modelDeployment, manualSecret, signInSettingValues } from 'types.bicep'
 
 @description('Every ARGUS resource runs in Germany West Central (ADR 0001, NF-03).')
 @allowed([
@@ -96,6 +96,15 @@ param intakeSettings intakeSettingValues = {
 
 @description('Where the operations alerts go, for example a failed sweep (#125). Comes from the GitHub variable ARGUS_ALERT_EMAIL, never from the repo. Empty: the alerts still fire in Azure but email nobody.')
 param alertEmail string = ''
+
+@description('The IDs for sign in with Microsoft (#23, #133). Come from GitHub variables, never from the repo. Empty: ARGUS answers 503 on every route with data until they are set.')
+param signInSettings signInSettingValues = {
+  tenantId: ''
+  apiClientId: ''
+  approverGroupId: ''
+  financeGroupId: ''
+  adminGroupId: ''
+}
 
 @minValue(0)
 param appMinReplicas int = 0
@@ -273,6 +282,7 @@ module apps 'modules/apps.bicep' = {
     runIntakeJobs: runIntakeJobs
     intakeJobNames: intakeJobNames
     intakeSettings: intakeSettings
+    signInSettings: signInSettings
   }
   // The secrets must exist in Key Vault before the app revision reads them.
   dependsOn: [

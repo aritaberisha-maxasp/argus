@@ -65,6 +65,18 @@ param intakeSettings = {
   customerDomains: readEnvironmentVariable('ARGUS_CUSTOMER_DOMAINS', '')
 }
 
+// Sign in with Microsoft (#23, #133): the IDs of the ARGUS app registration and its three groups
+// (docs/operations/sign-in.md). Not secret, but they come from GitHub variables
+// (docs/operations/deploy.md, step 7) so this file stays the same for any tenant. Until they are
+// set, ARGUS answers 503 on every route with data. ARGUS_ENTRA_AUTHORITY never goes to Azure.
+param signInSettings = {
+  tenantId: readEnvironmentVariable('ARGUS_ENTRA_TENANT_ID', '')
+  apiClientId: readEnvironmentVariable('ARGUS_ENTRA_API_CLIENT_ID', '')
+  approverGroupId: readEnvironmentVariable('ARGUS_ENTRA_GROUP_APPROVER', '')
+  financeGroupId: readEnvironmentVariable('ARGUS_ENTRA_GROUP_FINANCE', '')
+  adminGroupId: readEnvironmentVariable('ARGUS_ENTRA_GROUP_ADMIN', '')
+}
+
 // Where operations alerts go, for example a failed sweep (#125). Arita's address lives in the
 // GitHub variable ARGUS_ALERT_EMAIL, never in the repo.
 param alertEmail = readEnvironmentVariable('ARGUS_ALERT_EMAIL', '')
