@@ -249,8 +249,8 @@ def test_a_firewall_rule_left_open_quietly_fails(tmp_path: Path) -> None:
         root,
         DEPLOY,
         lambda s: s.replace(
-            '--rule-name "$RULE" --yes\n',
-            '--rule-name "$RULE" --yes \\\n            || echo "::warning::left open"\n',
+            '--name "$RULE" --yes\n',
+            '--name "$RULE" --yes \\\n            || echo "::warning::left open"\n',
         ),
     )
     assert "deploy.yml must fail when the database firewall cannot be closed" in (
