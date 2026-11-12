@@ -429,3 +429,26 @@ def test_the_workflows_pass_the_five_sign_in_variables() -> None:
         assert preview_yml.count(line) == 2, name
         assert f"readEnvironmentVariable('{name}', '')" in bicepparam, name
     assert "readEnvironmentVariable('ARGUS_ENTRA_AUTHORITY'" not in bicepparam
+
+
+@pytest.mark.req("NF-03")
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        ("ARGUS_ENTRA_GROUP_APPROVER", "ARGUS_ENTRA_GROUP_FINANCE"),
+        ("ARGUS_ENTRA_GROUP_APPROVER", "ARGUS_ENTRA_GROUP_ADMIN"),
+        ("ARGUS_ENTRA_GROUP_FINANCE", "ARGUS_ENTRA_GROUP_ADMIN"),
+    ],
+)
+def test_one_group_for_two_roles_fails(first: str, second: str) -> None:
+    config = {**full_config(), **SIGN_IN}
+    # Same group, written in capitals once: Entra IDs are not case sensitive.
+    config[second] = config[first].upper()
+
+    result = deploy.check_config("deploy", config)
+
+    assert not result.configured
+    assert result.problems == [
+        f"GitHub variables {first} and {second} name the same group; "
+        "each role needs its own Entra group"
+    ]

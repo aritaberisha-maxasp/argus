@@ -87,6 +87,7 @@ SIGN_IN = (
     "ARGUS_ENTRA_GROUP_FINANCE",
     "ARGUS_ENTRA_GROUP_ADMIN",
 )
+SIGN_IN_GROUPS = SIGN_IN[2:]
 APP_ROLE = "argus_app"
 # Azure Backup's long term backup leaves out every database these roles own (#82).
 SKIPPED_BY_BACKUP = ("azure_pg_admin", "azuresu")
@@ -133,6 +134,19 @@ def sign_in_check(environ: Mapping[str, str]) -> tuple[list[str], list[str]]:
         for name, value in values.items()
         if value and (not GUID.match(value) or value == ZERO_GUID)
     )
+    # ARGUS refuses one group for two roles (EntraSettings) and would answer 503 everywhere.
+    groups: dict[str, str] = {}
+    for name in SIGN_IN_GROUPS:
+        group = values[name].lower()
+        if not group:
+            continue
+        if group in groups:
+            problems.append(
+                f"GitHub variables {groups[group]} and {name} name the same group; "
+                "each role needs its own Entra group"
+            )
+        else:
+            groups[group] = name
     return problems, []
 
 

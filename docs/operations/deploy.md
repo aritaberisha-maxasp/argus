@@ -231,6 +231,8 @@ For sign in with Microsoft (#133), add the five IDs from step 7a. They are neede
 | `ARGUS_ENTRA_GROUP_FINANCE` | Object ID of the finance group |
 | `ARGUS_ENTRA_GROUP_ADMIN` | Object ID of the admins group |
 
+Each role needs its own group: the deploy fails if two of the three group variables are the same.
+
 The deploy passes them to the ARGUS web app as plain app settings. While all five are empty, the deploy still runs and warns, but ARGUS answers 503 on every route with data and the queue page cannot load. If only some are set, or one is not a real ID, the run fails and names it. Never add `ARGUS_ENTRA_AUTHORITY`: it is for the local fake only, and the CI check fails if it shows up in the infrastructure code.
 
 At go live, add who Max ASP is, for the sorting and the invoice reading (#125). While demo mode is on they are not used, so leave them out until then:
@@ -247,7 +249,7 @@ The deploy identity is also the database admin, because it runs the migrations. 
 
 ### 7a. Sign in with Microsoft
 
-Do steps 1 and 2 of [sign-in.md](sign-in.md) in Max ASP's Entra ID: register the ARGUS app, create the three groups (approvers, finance, admins), put the right people in them and assign the groups to the app. For the demo, Arita and Benjamin go in the finance group at least, because only finance and admin may see the exception queue. Then fill in the five `ARGUS_ENTRA_*` variables from step 7.
+Do steps 1 and 2 of [sign-in.md](sign-in.md) in Max ASP's Entra ID. Assigning groups to the app needs Entra ID P1 or higher in the tenant, so check that first. Then register the ARGUS app, create the three groups (approvers, finance, admins), put the right people in them and assign the groups to the app. For the demo, Arita and Benjamin go in the finance group at least, because only finance and admin may see the exception queue. Then fill in the five `ARGUS_ENTRA_*` variables from step 7.
 
 The single page app redirect for the queue page needs the ARGUS address, which only exists after the first deploy. Step 9 says when to add it.
 
@@ -259,7 +261,13 @@ A new app version can fail once right after its roles are handed out, while Azur
 
 ### 9. After the first deploy
 
-Add the queue page as a sign in address (#133): the run's summary and the smoke test step show the ARGUS address (`https://ca-argus-web.<...>.azurecontainerapps.io`). In the Entra admin center, App registrations, ARGUS, Authentication, add the platform **Single-page application** with the redirect address `https://<argus address>/queue`. Then open that address and sign in. A person in the finance group sees the queue. How to check `/me` from the command line is under "Check it" in [sign-in.md](sign-in.md).
+Add the queue page as a sign in address (#133): the smoke test step shows the ARGUS address (`https://ca-argus-web.<...>.azurecontainerapps.io`), or print it with:
+
+```bash
+echo "https://$(az containerapp show -g rg-argus -n ca-argus-web --query properties.configuration.ingress.fqdn -o tsv)"
+```
+
+ In the Entra admin center, App registrations, ARGUS, Authentication, add the platform **Single-page application** with the redirect address `https://<argus address>/queue`. Then open that address and sign in. A person in the finance group sees the queue. How to check `/me` from the command line is under "Check it" in [sign-in.md](sign-in.md).
 
 These are the steps 4 and 5 from [infra/README.md](../../infra/README.md#one-time-setup-arita):
 
