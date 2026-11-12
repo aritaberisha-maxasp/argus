@@ -184,18 +184,18 @@ jobs:
           SERVER: ${{ steps.infra.outputs.databaseServerName }}
         run: |
           az postgres flexible-server firewall-rule list \
-            --resource-group "$RESOURCE_GROUP" --name "$SERVER" \
+            --resource-group "$RESOURCE_GROUP" --server-name "$SERVER" \
             --query "[?starts_with(name, 'github-deploy-')].name" --output tsv \
           | while read -r old; do
               echo "Removing the leftover firewall rule $old."
               az postgres flexible-server firewall-rule delete \
-                --resource-group "$RESOURCE_GROUP" --name "$SERVER" --rule-name "$old" --yes
+                --resource-group "$RESOURCE_GROUP" --server-name "$SERVER" --name "$old" --yes
             done
           rule="github-deploy-$GITHUB_RUN_ID"
           echo "rule=$rule" >> "$GITHUB_OUTPUT"
           address=$(curl --silent --show-error --fail https://api.ipify.org)
           az postgres flexible-server firewall-rule create \
-            --resource-group "$RESOURCE_GROUP" --name "$SERVER" --rule-name "$rule" \
+            --resource-group "$RESOURCE_GROUP" --server-name "$SERVER" --name "$rule" \
             --start-ip-address "$address" --end-ip-address "$address" --output none
 
       # Signs in as the database admin (the deploy identity) with an Entra token, no password.
@@ -229,7 +229,7 @@ jobs:
           RULE: ${{ steps.firewall.outputs.rule }}
         run: |
           az postgres flexible-server firewall-rule delete \
-            --resource-group "$RESOURCE_GROUP" --name "$SERVER" --rule-name "$RULE" --yes
+            --resource-group "$RESOURCE_GROUP" --server-name "$SERVER" --name "$RULE" --yes
 
       # The migrations can take a while too, so sign in fresh before the second apply.
       - name: Sign in to Azure again for the new version

@@ -122,7 +122,7 @@ jobs:
           echo "rule=$rule" >> "$GITHUB_OUTPUT"
           address=$(curl --silent --show-error --fail https://api.ipify.org)
           az postgres flexible-server firewall-rule create \
-            --resource-group "$RESOURCE_GROUP" --name "$SERVER" --rule-name "$rule" \
+            --resource-group "$RESOURCE_GROUP" --server-name "$SERVER" --name "$rule" \
             --start-ip-address "$address" --end-ip-address "$address" --output none
 
       # Signs in as the database admin with an Entra token, like the migrations. The reset drops
@@ -156,7 +156,7 @@ jobs:
           RULE: ${{ steps.firewall.outputs.rule }}
         run: |
           az postgres flexible-server firewall-rule delete \
-            --resource-group "$RESOURCE_GROUP" --name "$SERVER" --rule-name "$RULE" --yes
+            --resource-group "$RESOURCE_GROUP" --server-name "$SERVER" --name "$RULE" --yes
 
       # The stand ins keep their data in memory, so a restart empties them. ARGUS restarts too,
       # so it opens fresh connections to the rebuilt database.
