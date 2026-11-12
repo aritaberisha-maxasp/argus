@@ -245,7 +245,9 @@ def protected_routes(app: FastAPI) -> list[APIRoute]:
 
 
 def call(client: TestClient, route: APIRoute, headers: dict[str, str] | None = None) -> Any:
-    path = route.path.replace("{case_id}", "1")
+    path = route.path
+    for name in ("case_id", "exception_id", "document_id"):
+        path = path.replace("{" + name + "}", "1")
     assert "{" not in path, f"give {route.path} a sample value in this test"
     return client.request(sorted(route.methods or {"GET"})[0], path, headers=headers)
 

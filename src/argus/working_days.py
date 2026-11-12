@@ -86,3 +86,21 @@ def add_working_days(start: date | datetime, days: int) -> date:
     for _ in range(days):
         d = _step_to_working_day(d + timedelta(days=1), timedelta(days=1))
     return d
+
+
+def working_days_between(start: date | datetime, end: date | datetime) -> int:
+    """How many working days lie after ``start`` up to and including ``end``.
+
+    The same counting as :func:`add_working_days`: ``start`` itself does not count, so
+    something opened today is 0 working days old, and something opened on a Friday is 1
+    working day old on Monday. An ``end`` before ``start`` gives 0. Used for the age of an
+    exception in the queue (EX-01).
+    """
+    first, last = berlin_date(start), berlin_date(end)
+    count = 0
+    d = first + timedelta(days=1)
+    while d <= last:
+        if is_working_day(d):
+            count += 1
+        d += timedelta(days=1)
+    return count
