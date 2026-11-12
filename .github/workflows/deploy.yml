@@ -143,6 +143,16 @@ jobs:
           ARGUS_APP_PORT: ${{ steps.current.outputs.port }}
         run: tools/azure/apply_infra.sh "argus-infra-$GITHUB_RUN_ID" >> "$GITHUB_OUTPUT"
 
+      # GitHub's sign in token is valid for 5 minutes only. Azure CLI needs it again for every new
+      # kind of token (registry, database), and the infrastructure step can take longer than that
+      # (11 minutes on the first deploy). So the steps below sign in again right before they need it.
+      - name: Sign in to Azure again for the registry
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
       - name: Push the images
         id: image
         env:
@@ -156,6 +166,14 @@ jobs:
           done
           echo "image=$REGISTRY/argus:$COMMIT" >> "$GITHUB_OUTPUT"
           echo "demo_image=$REGISTRY/argus-demo:$COMMIT" >> "$GITHUB_OUTPUT"
+
+      # A fresh sign in for the database token, see above.
+      - name: Sign in to Azure again for the database
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
       # The database only lets in Azure services. This runner gets a rule for its own address
       # for the length of the migrations, and the step after them takes it away again. Rules
@@ -212,6 +230,14 @@ jobs:
         run: |
           az postgres flexible-server firewall-rule delete \
             --resource-group "$RESOURCE_GROUP" --name "$SERVER" --rule-name "$RULE" --yes
+
+      # The migrations can take a while too, so sign in fresh before the second apply.
+      - name: Sign in to Azure again for the new version
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
       # In demo mode the stand ins get the new demo image here too. With demo off the templates
       # leave them out.
