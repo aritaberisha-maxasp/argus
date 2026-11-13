@@ -133,7 +133,7 @@ Sign in to the restored server from Cloud Shell. This is the same after A and B:
 restored=psql-argus-restore-<yyyymmdd>
 ip=$(curl -s https://api.ipify.org)
 az postgres flexible-server firewall-rule create --resource-group rg-argus \
-  --name "$restored" --rule-name cloud-shell --start-ip-address "$ip" --end-ip-address "$ip"
+  --server-name "$restored" --name cloud-shell --start-ip-address "$ip" --end-ip-address "$ip"
 export PGHOST=$restored.postgres.database.azure.com PGSSLMODE=require
 export PGUSER="<your sign in name>"
 export PGPASSWORD=$(az account get-access-token --resource-type oss-rdbms --query accessToken --output tsv)

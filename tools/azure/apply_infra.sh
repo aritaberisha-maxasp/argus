@@ -6,7 +6,7 @@
 # Needs: RESOURCE_GROUP, ARGUS_APP_IMAGE, ARGUS_APP_PORT, ARGUS_DATABASE_ADMIN_OBJECT_ID,
 # ARGUS_DATABASE_ADMIN_NAME, and a signed in az with Bicep. main.bicepparam reads the
 # ARGUS_* values from the environment, including the optional ARGUS_ALERT_EMAIL and the
-# intake settings (ARGUS_OWN_DOMAIN and so on, #125).
+# intake settings (ARGUS_OWN_DOMAIN and so on, #125) and the sign in IDs (ARGUS_ENTRA_*, #133).
 #
 # A new app revision can fail once while fresh role assignments spread through Azure
 # (Key Vault and registry access for the app identity). So a failed run is tried once more.
@@ -25,7 +25,8 @@ apply() {
 }
 
 if ! outputs=$(apply "$name"); then
-  echo "::warning::Deployment $name failed. A new app revision can fail once while role assignments spread, so it runs once more in ${retry_after} seconds."
+  # To the log, not to stdout: stdout becomes the step outputs.
+  echo "::warning::Deployment $name failed. A new app revision can fail once while role assignments spread, so it runs once more in ${retry_after} seconds." >&2
   sleep "$retry_after"
   outputs=$(apply "$name-retry")
 fi

@@ -33,6 +33,17 @@ if (($# > 2)); then
   start+=(--body "$body")
 fi
 execution=$("${start[@]}" --query name --output tsv)
+# Azure may answer the start with 202 and no body. Then take the newest execution instead.
+if [[ -z "$execution" ]]; then
+  sleep 5
+  execution=$(az rest --method get \
+    --url "https://management.azure.com$id/executions?api-version=$api" \
+    --query "sort_by(value, &properties.startTime)[-1].name" --output tsv)
+fi
+if [[ -z "$execution" ]]; then
+  echo "::error::$job was started, but Azure named no execution to follow." >&2
+  exit 1
+fi
 echo "Started $job, execution $execution."
 
 deadline=$((SECONDS + timeout))

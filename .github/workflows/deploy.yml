@@ -77,6 +77,11 @@ jobs:
           ARGUS_RESOURCE_GROUP: ${{ vars.ARGUS_RESOURCE_GROUP }}
           ARGUS_DATABASE_ADMIN_OBJECT_ID: ${{ vars.ARGUS_DATABASE_ADMIN_OBJECT_ID }}
           ARGUS_DATABASE_ADMIN_NAME: ${{ vars.ARGUS_DATABASE_ADMIN_NAME }}
+          ARGUS_ENTRA_TENANT_ID: ${{ vars.ARGUS_ENTRA_TENANT_ID }}
+          ARGUS_ENTRA_API_CLIENT_ID: ${{ vars.ARGUS_ENTRA_API_CLIENT_ID }}
+          ARGUS_ENTRA_GROUP_APPROVER: ${{ vars.ARGUS_ENTRA_GROUP_APPROVER }}
+          ARGUS_ENTRA_GROUP_FINANCE: ${{ vars.ARGUS_ENTRA_GROUP_FINANCE }}
+          ARGUS_ENTRA_GROUP_ADMIN: ${{ vars.ARGUS_ENTRA_GROUP_ADMIN }}
         run: |
           tip=$(git ls-remote origin refs/heads/main | cut -f1)
           python tools/deploy.py check-config --mode deploy --commit "$COMMIT" --main-tip "$tip"
@@ -103,6 +108,13 @@ jobs:
       ARGUS_OWN_VAT_IDS: ${{ vars.ARGUS_OWN_VAT_IDS }}
       ARGUS_VENDOR_DOMAINS: ${{ vars.ARGUS_VENDOR_DOMAINS }}
       ARGUS_CUSTOMER_DOMAINS: ${{ vars.ARGUS_CUSTOMER_DOMAINS }}
+      # Read by main.bicepparam (#133): the IDs for sign in with Microsoft. Not secrets. Empty
+      # deploys too, but ARGUS then answers 503 on every route with data.
+      ARGUS_ENTRA_TENANT_ID: ${{ vars.ARGUS_ENTRA_TENANT_ID }}
+      ARGUS_ENTRA_API_CLIENT_ID: ${{ vars.ARGUS_ENTRA_API_CLIENT_ID }}
+      ARGUS_ENTRA_GROUP_APPROVER: ${{ vars.ARGUS_ENTRA_GROUP_APPROVER }}
+      ARGUS_ENTRA_GROUP_FINANCE: ${{ vars.ARGUS_ENTRA_GROUP_FINANCE }}
+      ARGUS_ENTRA_GROUP_ADMIN: ${{ vars.ARGUS_ENTRA_GROUP_ADMIN }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -143,6 +155,16 @@ jobs:
           ARGUS_APP_PORT: ${{ steps.current.outputs.port }}
         run: tools/azure/apply_infra.sh "argus-infra-$GITHUB_RUN_ID" >> "$GITHUB_OUTPUT"
 
+      # GitHub's sign in token is valid for 5 minutes only. Azure CLI needs it again for every new
+      # kind of token (registry, database), and the infrastructure step can take longer than that
+      # (11 minutes on the first deploy). So the steps below sign in again right before they need it.
+      - name: Sign in to Azure again for the registry
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
       - name: Push the images
         id: image
         env:
@@ -157,6 +179,14 @@ jobs:
           echo "image=$REGISTRY/argus:$COMMIT" >> "$GITHUB_OUTPUT"
           echo "demo_image=$REGISTRY/argus-demo:$COMMIT" >> "$GITHUB_OUTPUT"
 
+      # A fresh sign in for the database token, see above.
+      - name: Sign in to Azure again for the database
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
       # The database only lets in Azure services. This runner gets a rule for its own address
       # for the length of the migrations, and the step after them takes it away again. Rules
       # left behind by an earlier run that broke off are removed first.
@@ -166,18 +196,18 @@ jobs:
           SERVER: ${{ steps.infra.outputs.databaseServerName }}
         run: |
           az postgres flexible-server firewall-rule list \
-            --resource-group "$RESOURCE_GROUP" --name "$SERVER" \
+            --resource-group "$RESOURCE_GROUP" --server-name "$SERVER" \
             --query "[?starts_with(name, 'github-deploy-')].name" --output tsv \
           | while read -r old; do
               echo "Removing the leftover firewall rule $old."
               az postgres flexible-server firewall-rule delete \
-                --resource-group "$RESOURCE_GROUP" --name "$SERVER" --rule-name "$old" --yes
+                --resource-group "$RESOURCE_GROUP" --server-name "$SERVER" --name "$old" --yes
             done
           rule="github-deploy-$GITHUB_RUN_ID"
           echo "rule=$rule" >> "$GITHUB_OUTPUT"
           address=$(curl --silent --show-error --fail https://api.ipify.org)
           az postgres flexible-server firewall-rule create \
-            --resource-group "$RESOURCE_GROUP" --name "$SERVER" --rule-name "$rule" \
+            --resource-group "$RESOURCE_GROUP" --server-name "$SERVER" --name "$rule" \
             --start-ip-address "$address" --end-ip-address "$address" --output none
 
       # Signs in as the database admin (the deploy identity) with an Entra token, no password.
@@ -211,7 +241,15 @@ jobs:
           RULE: ${{ steps.firewall.outputs.rule }}
         run: |
           az postgres flexible-server firewall-rule delete \
-            --resource-group "$RESOURCE_GROUP" --name "$SERVER" --rule-name "$RULE" --yes
+            --resource-group "$RESOURCE_GROUP" --server-name "$SERVER" --name "$RULE" --yes
+
+      # The migrations can take a while too, so sign in fresh before the second apply.
+      - name: Sign in to Azure again for the new version
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
       # In demo mode the stand ins get the new demo image here too. With demo off the templates
       # leave them out.

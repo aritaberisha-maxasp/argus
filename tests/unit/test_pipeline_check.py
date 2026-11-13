@@ -249,8 +249,8 @@ def test_a_firewall_rule_left_open_quietly_fails(tmp_path: Path) -> None:
         root,
         DEPLOY,
         lambda s: s.replace(
-            '--rule-name "$RULE" --yes\n',
-            '--rule-name "$RULE" --yes \\\n            || echo "::warning::left open"\n',
+            '--name "$RULE" --yes\n',
+            '--name "$RULE" --yes \\\n            || echo "::warning::left open"\n',
         ),
     )
     assert "deploy.yml must fail when the database firewall cannot be closed" in (
@@ -441,3 +441,18 @@ def test_a_demo_workflow_in_the_deploy_queue_fails(tmp_path: Path) -> None:
     assert check_pipeline.check(root) == [
         "demo.yml needs a concurrency group of its own, not the deploy's"
     ]
+
+
+def test_a_demo_reset_that_splits_a_tsv_list_fails(tmp_path: Path) -> None:
+    root = copy_repo(tmp_path)
+    edit(
+        root,
+        DEMO,
+        lambda s: s.replace(
+            "--query principalId --output tsv",
+            "--query '[name, principalId]' --output tsv",
+        ),
+    )
+    assert "demo.yml must read the app identity's object ID with --query principalId" in (
+        check_pipeline.check(root)
+    )

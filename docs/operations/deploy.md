@@ -221,6 +221,20 @@ In the repository: Settings, Secrets and variables, Actions, tab **Variables** (
 | `ARGUS_DATABASE_ADMIN_NAME` | `id-argus-deploy` |
 | `ARGUS_ALERT_EMAIL` | The address that gets operations alerts, for example a failed mailbox sweep (#125). Optional, but without it the alerts reach nobody. |
 
+For sign in with Microsoft (#133), add the five IDs from step 7a. They are needed for the demo too, because the people who look at the queue page sign in with their own Max ASP accounts:
+
+| Variable | Value |
+| --- | --- |
+| `ARGUS_ENTRA_TENANT_ID` | Directory (tenant) ID of Max ASP, usually the same as `AZURE_TENANT_ID` |
+| `ARGUS_ENTRA_API_CLIENT_ID` | Application (client) ID of the ARGUS app registration |
+| `ARGUS_ENTRA_GROUP_APPROVER` | Object ID of the approvers group |
+| `ARGUS_ENTRA_GROUP_FINANCE` | Object ID of the finance group |
+| `ARGUS_ENTRA_GROUP_ADMIN` | Object ID of the admins group |
+
+Each role needs its own group: the deploy fails if two of the three group variables are the same.
+
+The deploy passes them to the ARGUS web app as plain app settings. While all five are empty, the deploy still runs and warns, but ARGUS answers 503 on every route with data and the queue page cannot load. If only some are set, or one is not a real ID, the run fails and names it. Never add `ARGUS_ENTRA_AUTHORITY`: it is for the local fake only, and the CI check fails if it shows up in the infrastructure code.
+
 At go live, add who Max ASP is, for the sorting and the invoice reading (#125). While demo mode is on they are not used, so leave them out until then:
 
 | Variable | Value |
@@ -233,6 +247,12 @@ At go live, add who Max ASP is, for the sorting and the invoice reading (#125). 
 
 The deploy identity is also the database admin, because it runs the migrations. The app never uses it: the app signs in with its own identity and works as `argus_app`.
 
+### 7a. Sign in with Microsoft
+
+Do steps 1 and 2 of [sign-in.md](sign-in.md) in Max ASP's Entra ID. Assigning groups to the app needs Entra ID P1 or higher in the tenant, so check that first. Then register the ARGUS app, create the three groups (approvers, finance, admins), put the right people in them and assign the groups to the app. For the demo, Arita and Benjamin go in the finance group at least, because only finance and admin may see the exception queue. Then fill in the five `ARGUS_ENTRA_*` variables from step 7.
+
+The single page app redirect for the queue page needs the ARGUS address, which only exists after the first deploy. Step 9 says when to add it.
+
 ### 8. First deploy
 
 Actions, Deploy, Run workflow, branch `main`. The first run takes longer, about 20 to 30 minutes, mostly for the database server. It starts the app with a public placeholder image and then replaces it with ARGUS once the migrations have run.
@@ -240,6 +260,14 @@ Actions, Deploy, Run workflow, branch `main`. The first run takes longer, about 
 A new app version can fail once right after its roles are handed out, while Azure spreads them. The pipeline then waits 90 seconds and tries once more on its own.
 
 ### 9. After the first deploy
+
+Add the queue page as a sign in address (#133): the smoke test step shows the ARGUS address (`https://ca-argus-web.<...>.azurecontainerapps.io`), or print it with:
+
+```bash
+echo "https://$(az containerapp show -g rg-argus -n ca-argus-web --query properties.configuration.ingress.fqdn -o tsv)"
+```
+
+ In the Entra admin center, App registrations, ARGUS, Authentication, add the platform **Single-page application** with the redirect address `https://<argus address>/queue`. Then open that address and sign in. A person in the finance group sees the queue. How to check `/me` from the command line is under "Check it" in [sign-in.md](sign-in.md).
 
 These are the steps 4 and 5 from [infra/README.md](../../infra/README.md#one-time-setup-arita):
 
@@ -268,11 +296,13 @@ Each alert clears by itself once the runs are clean again.
 Open the failed run under Actions, Deploy. The step that failed says what happened.
 
 - **"Check the GitHub variables" failed.** A variable from step 7 is missing or not a real ID. The error names it.
+- **The queue page or `/me` answers 503.** The sign in IDs are missing in the app. The deploy run shows a warning that names the five `ARGUS_ENTRA_*` variables. Fill them in (step 7) and run the Deploy workflow again.
+- **The queue page shows a Microsoft error about the redirect address.** The single page app redirect from step 9 is missing or has a typo. It must end in `/queue`.
 - **"Sign in to Azure" failed.** The federated credential in step 4 does not match. Check the subject is exactly `repo:aritaberisha-maxasp/argus:ref:refs/heads/main` and the run was on `main`.
 - **"Apply the infrastructure code" failed.** The error text comes from Azure. A "RoleAssignmentUpdateNotPermitted" or "AuthorizationFailed" usually means step 5 is incomplete. The running version is not changed by a failed infrastructure step except for the parts Azure already applied.
 - **"Check the GitHub variables and that this is the tip of main" says nothing was deployed.** A newer commit is on `main`, and its own run deploys it. Nothing to do.
 - **"Run the database migrations" failed.** The new version was not deployed and the old one keeps running. The log names the error code, the table and the constraint. To read the full error, run the migration against a copy of the database inside Azure, never in GitHub. Fix the migration in a new PR. A migration that stopped halfway is rolled back by PostgreSQL, since each migration runs in its own transaction.
-- **"Close the database to this runner again" failed.** The new version was not deployed. The next deploy removes the leftover rule on its own. To remove it at once: `az postgres flexible-server firewall-rule delete --resource-group rg-argus --name <server> --rule-name <rule> --yes`.
+- **"Close the database to this runner again" failed.** The new version was not deployed. The next deploy removes the leftover rule on its own. To remove it at once: `az postgres flexible-server firewall-rule delete --resource-group rg-argus --server-name <server> --name <rule> --yes`.
 - **"Deploy the new version" failed twice.** Look at the app's revisions in the portal (Container App, Revisions and replicas) and its log in Log Analytics.
 - **"Smoke test" failed.** The log lists what each try saw. "still shows build" means the new version never started. "works as" a role other than `argus_app` means the app's database settings are wrong. "behind" means the database is not on the newest migration.
 

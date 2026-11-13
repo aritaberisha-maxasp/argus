@@ -7,7 +7,8 @@ The steps of the pipeline that need logic live here, so they can be tested witho
         pipeline skips the deploy with a notice. Some set, or a value that is not a real ID,
         fails the run with a list of what is missing. With --commit and --main-tip, a commit
         that is no longer the tip of main is skipped, so a re-run of an old CI run can never
-        put old code or old infrastructure live.
+        put old code or old infrastructure live. The five ARGUS_ENTRA_* variables for sign in
+        (#133) may all be empty, which only warns; half set or not real IDs fails the run.
 
     python tools/deploy.py migrate
         Runs ``alembic upgrade head``. On a failure it prints only the SQLSTATE, the table,
@@ -40,7 +41,7 @@ import re
 import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -76,6 +77,17 @@ IDS = frozenset(
         "ARGUS_DATABASE_ADMIN_OBJECT_ID",
     }
 )
+# Sign in with Microsoft (#23, #133, docs/operations/sign-in.md). The deploy goes ahead without
+# them, because Azure can be ready before the Entra app registration is, but ARGUS then answers
+# 503 on every route with data. Half set, or not real IDs, fails the run.
+SIGN_IN = (
+    "ARGUS_ENTRA_TENANT_ID",
+    "ARGUS_ENTRA_API_CLIENT_ID",
+    "ARGUS_ENTRA_GROUP_APPROVER",
+    "ARGUS_ENTRA_GROUP_FINANCE",
+    "ARGUS_ENTRA_GROUP_ADMIN",
+)
+SIGN_IN_GROUPS = SIGN_IN[2:]
 APP_ROLE = "argus_app"
 # Azure Backup's long term backup leaves out every database these roles own (#82).
 SKIPPED_BY_BACKUP = ("azure_pg_admin", "azuresu")
@@ -90,6 +102,7 @@ HELD_BACK = (
 class Config:
     configured: bool
     problems: list[str]
+    warnings: list[str] = field(default_factory=list)
 
 
 def check_config(mode: str, environ: Mapping[str, str]) -> Config:
@@ -101,7 +114,40 @@ def check_config(mode: str, environ: Mapping[str, str]) -> Config:
     for name, value in values.items():
         if value and name in IDS and (not GUID.match(value) or value == ZERO_GUID):
             problems.append(f"GitHub variable {name} is not a real Azure ID")
-    return Config(configured=not problems, problems=problems)
+    sign_in_problems, warnings = sign_in_check(environ)
+    problems.extend(sign_in_problems)
+    return Config(configured=not problems, problems=problems, warnings=warnings)
+
+
+def sign_in_check(environ: Mapping[str, str]) -> tuple[list[str], list[str]]:
+    """Problems and warnings for the five sign in variables (#133)."""
+    values = {name: environ.get(name, "").strip() for name in SIGN_IN}
+    if not any(values.values()):
+        return [], [
+            "Sign in with Microsoft is not set up: the GitHub variables "
+            f"{', '.join(SIGN_IN)} are empty, so ARGUS answers 503 on every route with data. "
+            "docs/operations/deploy.md, step 7, says how to fill them in."
+        ]
+    problems = [f"GitHub variable {name} is not set" for name, value in values.items() if not value]
+    problems.extend(
+        f"GitHub variable {name} is not a real Entra ID"
+        for name, value in values.items()
+        if value and (not GUID.match(value) or value == ZERO_GUID)
+    )
+    # ARGUS refuses one group for two roles (EntraSettings) and would answer 503 everywhere.
+    groups: dict[str, str] = {}
+    for name in SIGN_IN_GROUPS:
+        group = values[name].lower()
+        if not group:
+            continue
+        if group in groups:
+            problems.append(
+                f"GitHub variables {groups[group]} and {name} name the same group; "
+                "each role needs its own Entra group"
+            )
+        else:
+            groups[group] = name
+    return problems, []
 
 
 def latest_problem(commit: str, main_tip: str) -> str | None:
@@ -308,6 +354,9 @@ def run_check_config(
     for problem in result.problems:
         print(f"::error::{problem}")
     ready = result.configured
+    if ready:
+        for warning in result.warnings:
+            print(f"::warning::{warning}")
     failed = bool(result.problems)
     if not ready and not failed:
         print(

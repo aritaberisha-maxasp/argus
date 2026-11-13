@@ -8,7 +8,8 @@ Everything in the demo is synthetic. ARGUS cannot reach the real mailbox, DATEV 
 
 1. **The one time Azure setup.** Follow [docs/operations/deploy.md](../operations/deploy.md) up to a first green run of the Deploy workflow. Nothing shows up in Azure before that.
 2. **Check demo mode is on.** In [infra/main.bicepparam](../../infra/main.bicepparam) the line `param demo = true` switches it on. It is on today. A merge to `main` deploys ARGUS, the stand ins and the seed job.
-3. **Check the stand ins are there.** In the Azure portal, resource group `rg-argus`, you should see the container apps `ca-argus-standin-graph`, `ca-argus-standin-datev` and `ca-argus-standin-wise`, and the job `caj-argus-demo-seed`. They have no public address, on purpose.
+3. **Check that sign in works** (#133). Open `https://<argus address>/queue` and sign in with your Max ASP account. You should see the exception queue (empty before the first seed). If the page answers 503 or Microsoft shows an error about the redirect address, see "When a deploy fails" in [deploy.md](../operations/deploy.md). Benjamin needs to be in the finance or admins group to see the queue ([sign-in.md](../operations/sign-in.md), step 2).
+4. **Check the stand ins are there.** In the Azure portal, resource group `rg-argus`, you should see the container apps `ca-argus-standin-graph`, `ca-argus-standin-datev` and `ca-argus-standin-wise`, and the job `caj-argus-demo-seed`. They have no public address, on purpose.
 
 ## Before each demo
 

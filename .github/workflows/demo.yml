@@ -139,10 +139,17 @@ jobs:
           ARGUS_RESOURCE_GROUP: ${{ vars.ARGUS_RESOURCE_GROUP }}
           ARGUS_DATABASE_ADMIN_OBJECT_ID: ${{ vars.ARGUS_DATABASE_ADMIN_OBJECT_ID }}
           ARGUS_DATABASE_ADMIN_NAME: ${{ vars.ARGUS_DATABASE_ADMIN_NAME }}
+          ARGUS_ENTRA_TENANT_ID: ${{ vars.ARGUS_ENTRA_TENANT_ID }}
+          ARGUS_ENTRA_API_CLIENT_ID: ${{ vars.ARGUS_ENTRA_API_CLIENT_ID }}
+          ARGUS_ENTRA_GROUP_APPROVER: ${{ vars.ARGUS_ENTRA_GROUP_APPROVER }}
+          ARGUS_ENTRA_GROUP_FINANCE: ${{ vars.ARGUS_ENTRA_GROUP_FINANCE }}
+          ARGUS_ENTRA_GROUP_ADMIN: ${{ vars.ARGUS_ENTRA_GROUP_ADMIN }}
+        # Look for the exact notice. Other lines, such as the sign in warning, can also say
+        # "not set up" and must not stop the demo.
         run: |
           python tools/deploy.py check-config --mode deploy > config.txt
           cat config.txt
-          if grep -q "not set up" config.txt; then
+          if grep -q "Azure is not set up" config.txt; then
             echo "::error::Azure is not set up for ARGUS yet, so there is no demo to run. See docs/operations/deploy.md."
             exit 1
           fi
@@ -180,7 +187,7 @@ jobs:
           echo "rule=$rule" >> "$GITHUB_OUTPUT"
           address=$(curl --silent --show-error --fail https://api.ipify.org)
           az postgres flexible-server firewall-rule create \
-            --resource-group "$RESOURCE_GROUP" --name "$SERVER" --rule-name "$rule" \
+            --resource-group "$RESOURCE_GROUP" --server-name "$SERVER" --name "$rule" \
             --start-ip-address "$address" --end-ip-address "$address" --output none
 
       # Signs in as the database admin with an Entra token, like the migrations. The reset drops
@@ -202,10 +209,10 @@ jobs:
           echo "::add-mask::$ARGUS_DOCUMENTS_CONNECTION_STRING"
           export ARGUS_DOCUMENTS_CONNECTION_STRING
           python -m argus.demo reset
-          identity=$(az identity list --resource-group "$RESOURCE_GROUP" \
-            --query "[?name=='id-argus-app'] | [0].[name, principalId]" --output tsv)
-          python tools/deploy.py app-db-role \
-            --identity-name "$(cut -f1 <<<"$identity")" --object-id "$(cut -f2 <<<"$identity")"
+          # One value per query: az prints a list in tsv as one value per line, not per column.
+          principal=$(az identity show --resource-group "$RESOURCE_GROUP" --name id-argus-app \
+            --query principalId --output tsv)
+          python tools/deploy.py app-db-role --identity-name id-argus-app --object-id "$principal"
 
       - name: Close the database to this runner again
         if: always() && steps.firewall.outputs.rule != ''
@@ -214,7 +221,7 @@ jobs:
           RULE: ${{ steps.firewall.outputs.rule }}
         run: |
           az postgres flexible-server firewall-rule delete \
-            --resource-group "$RESOURCE_GROUP" --name "$SERVER" --rule-name "$RULE" --yes
+            --resource-group "$RESOURCE_GROUP" --server-name "$SERVER" --name "$RULE" --yes
 
       # The stand ins keep their data in memory, so a restart empties them. ARGUS restarts too,
       # so it opens fresh connections to the rebuilt database.
