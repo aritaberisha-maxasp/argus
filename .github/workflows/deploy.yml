@@ -77,6 +77,11 @@ jobs:
           ARGUS_RESOURCE_GROUP: ${{ vars.ARGUS_RESOURCE_GROUP }}
           ARGUS_DATABASE_ADMIN_OBJECT_ID: ${{ vars.ARGUS_DATABASE_ADMIN_OBJECT_ID }}
           ARGUS_DATABASE_ADMIN_NAME: ${{ vars.ARGUS_DATABASE_ADMIN_NAME }}
+          ARGUS_ENTRA_TENANT_ID: ${{ vars.ARGUS_ENTRA_TENANT_ID }}
+          ARGUS_ENTRA_API_CLIENT_ID: ${{ vars.ARGUS_ENTRA_API_CLIENT_ID }}
+          ARGUS_ENTRA_GROUP_APPROVER: ${{ vars.ARGUS_ENTRA_GROUP_APPROVER }}
+          ARGUS_ENTRA_GROUP_FINANCE: ${{ vars.ARGUS_ENTRA_GROUP_FINANCE }}
+          ARGUS_ENTRA_GROUP_ADMIN: ${{ vars.ARGUS_ENTRA_GROUP_ADMIN }}
         run: |
           tip=$(git ls-remote origin refs/heads/main | cut -f1)
           python tools/deploy.py check-config --mode deploy --commit "$COMMIT" --main-tip "$tip"
@@ -103,6 +108,13 @@ jobs:
       ARGUS_OWN_VAT_IDS: ${{ vars.ARGUS_OWN_VAT_IDS }}
       ARGUS_VENDOR_DOMAINS: ${{ vars.ARGUS_VENDOR_DOMAINS }}
       ARGUS_CUSTOMER_DOMAINS: ${{ vars.ARGUS_CUSTOMER_DOMAINS }}
+      # Read by main.bicepparam (#133): the IDs for sign in with Microsoft. Not secrets. Empty
+      # deploys too, but ARGUS then answers 503 on every route with data.
+      ARGUS_ENTRA_TENANT_ID: ${{ vars.ARGUS_ENTRA_TENANT_ID }}
+      ARGUS_ENTRA_API_CLIENT_ID: ${{ vars.ARGUS_ENTRA_API_CLIENT_ID }}
+      ARGUS_ENTRA_GROUP_APPROVER: ${{ vars.ARGUS_ENTRA_GROUP_APPROVER }}
+      ARGUS_ENTRA_GROUP_FINANCE: ${{ vars.ARGUS_ENTRA_GROUP_FINANCE }}
+      ARGUS_ENTRA_GROUP_ADMIN: ${{ vars.ARGUS_ENTRA_GROUP_ADMIN }}
     steps:
       - uses: actions/checkout@v4
         with:

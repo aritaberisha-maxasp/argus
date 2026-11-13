@@ -336,3 +336,119 @@ def test_a_page_that_is_not_json_is_one_more_try(
 
     assert not passed
     assert said == [message] * 4  # kept trying until the deadline, no crash
+
+
+# Sign in with Microsoft (#133, NF-03).
+
+SIGN_IN = {
+    "ARGUS_ENTRA_TENANT_ID": TENANT,
+    "ARGUS_ENTRA_API_CLIENT_ID": "55555555-6666-7777-8888-999999999999",
+    "ARGUS_ENTRA_GROUP_APPROVER": "66666666-7777-8888-9999-aaaaaaaaaaaa",
+    "ARGUS_ENTRA_GROUP_FINANCE": "77777777-8888-9999-aaaa-bbbbbbbbbbbb",
+    "ARGUS_ENTRA_GROUP_ADMIN": "88888888-9999-aaaa-bbbb-cccccccccccc",
+}
+
+
+@pytest.mark.req("NF-03")
+@pytest.mark.parametrize("mode", ["deploy", "preview"])
+def test_all_five_sign_in_ids_set_is_ready_without_a_warning(mode: str) -> None:
+    client = "AZURE_CLIENT_ID" if mode == "deploy" else "AZURE_PREVIEW_CLIENT_ID"
+    result = deploy.check_config(mode, {**full_config(client), **SIGN_IN})
+
+    assert result.configured
+    assert result.problems == []
+    assert result.warnings == []
+
+
+@pytest.mark.req("NF-03")
+def test_no_sign_in_ids_still_deploys_but_warns() -> None:
+    result = deploy.check_config("deploy", full_config())
+
+    assert result.configured
+    assert result.problems == []
+    assert len(result.warnings) == 1
+    assert "503" in result.warnings[0]
+    assert all(name in result.warnings[0] for name in SIGN_IN)
+
+
+@pytest.mark.req("NF-03")
+@pytest.mark.parametrize("missing", list(SIGN_IN))
+def test_half_set_sign_in_ids_fail_and_name_what_is_missing(missing: str) -> None:
+    config = {**full_config(), **SIGN_IN}
+    config[missing] = " "
+
+    result = deploy.check_config("deploy", config)
+
+    assert not result.configured
+    assert result.problems == [f"GitHub variable {missing} is not set"]
+
+
+@pytest.mark.req("NF-03")
+@pytest.mark.parametrize("value", ["ARGUS finance", "00000000-0000-0000-0000-000000000000"])
+def test_a_sign_in_id_that_is_not_a_real_id_fails(value: str) -> None:
+    config = {**full_config(), **SIGN_IN, "ARGUS_ENTRA_GROUP_FINANCE": value}
+
+    result = deploy.check_config("deploy", config)
+
+    assert not result.configured
+    assert result.problems == ["GitHub variable ARGUS_ENTRA_GROUP_FINANCE is not a real Entra ID"]
+
+
+def test_the_sign_in_warning_shows_in_the_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "output"))
+    for name in SIGN_IN:
+        monkeypatch.delenv(name, raising=False)
+    for name, value in full_config().items():
+        monkeypatch.setenv(name, value)
+
+    assert deploy.main(["check-config", "--mode", "deploy"]) == 0
+    assert "::warning::Sign in with Microsoft is not set up" in capsys.readouterr().out
+
+
+def test_no_sign_in_warning_while_azure_is_not_set_up(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "output"))
+    for name in [*full_config(), *SIGN_IN]:
+        monkeypatch.delenv(name, raising=False)
+
+    assert deploy.main(["check-config", "--mode", "deploy"]) == 0
+    assert "::warning::" not in capsys.readouterr().out
+
+
+def test_the_workflows_pass_the_five_sign_in_variables() -> None:
+    deploy_yml = (REPO / ".github" / "workflows" / "deploy.yml").read_text(encoding="utf-8")
+    preview_yml = (REPO / ".github" / "workflows" / "infra-preview.yml").read_text(encoding="utf-8")
+    bicepparam = (REPO / "infra" / "main.bicepparam").read_text(encoding="utf-8")
+    for name in SIGN_IN:
+        line = f"{name}: ${{{{ vars.{name} }}}}"
+        # Once for the check of the variables, once for main.bicepparam.
+        assert deploy_yml.count(line) == 2, name
+        assert preview_yml.count(line) == 2, name
+        assert f"readEnvironmentVariable('{name}', '')" in bicepparam, name
+    assert "readEnvironmentVariable('ARGUS_ENTRA_AUTHORITY'" not in bicepparam
+
+
+@pytest.mark.req("NF-03")
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        ("ARGUS_ENTRA_GROUP_APPROVER", "ARGUS_ENTRA_GROUP_FINANCE"),
+        ("ARGUS_ENTRA_GROUP_APPROVER", "ARGUS_ENTRA_GROUP_ADMIN"),
+        ("ARGUS_ENTRA_GROUP_FINANCE", "ARGUS_ENTRA_GROUP_ADMIN"),
+    ],
+)
+def test_one_group_for_two_roles_fails(first: str, second: str) -> None:
+    config = {**full_config(), **SIGN_IN}
+    # Same group, written in capitals once: Entra IDs are not case sensitive.
+    config[second] = config[first].upper()
+
+    result = deploy.check_config("deploy", config)
+
+    assert not result.configured
+    assert result.problems == [
+        f"GitHub variables {first} and {second} name the same group; "
+        "each role needs its own Entra group"
+    ]

@@ -7,7 +7,7 @@ How ARGUS learns who is signed in and what they may see ([ADR 0008](../adr/0008-
 In the Entra admin center, App registrations, New registration:
 
 - Name: `ARGUS`, single tenant (only Max ASP's accounts).
-- Expose an API: set the Application ID URI and add the delegated scope `access_as_user` ("Use ARGUS as the signed in person"), admins and users may consent.
+- Expose an API: set the Application ID URI and keep the suggested default `api://<application (client) ID>`. The queue page asks Microsoft for the scope `api://<client id>/access_as_user`, so any other URI (for example one with a custom domain) makes sign in on the page fail. Then add the delegated scope `access_as_user` ("Use ARGUS as the signed in person"), admins and users may consent.
 - Manifest: set `accessTokenAcceptedVersion` to `2`. ARGUS only accepts v2 tokens.
 - Token configuration: add the groups claim, **Groups assigned to the application**, as Group ID, for access tokens. This keeps the token small; with all groups, someone in many groups would get no role at all.
 - No client secret and no certificate. ARGUS only checks tokens and never asks Entra for one with this registration.
@@ -16,13 +16,17 @@ In the Entra admin center, App registrations, New registration:
 
 ## 2. Create three groups and assign them
 
+Assigning groups to an app needs Microsoft Entra ID P1 or higher in Max ASP's tenant (included in Microsoft 365 Business Premium and E3/E5). Check this first: without it the groups never reach the token and everyone gets 403.
+
 Create three security groups, for example `ARGUS approvers`, `ARGUS finance` and `ARGUS admins`. Add the approvers, Benjamin and Arita. Then, under Enterprise applications, ARGUS, Users and groups, assign all three groups to the app. Only assigned groups appear in tokens. Under Properties, set **Assignment required** to Yes, so people outside the three groups cannot get a token for ARGUS at all.
+
+Each role needs its own group. If two of the three variables below point at the same group, ARGUS answers 503 on every route with data, and the deploy fails and says so.
 
 A person may be in more than one group. Someone in none of them can sign in but sees nothing.
 
 ## 3. Give ARGUS the IDs
 
-ARGUS reads these environment variables. In Azure they are plain app settings on the Container App (not Key Vault, nothing here is secret):
+ARGUS reads these environment variables. In Azure they are plain app settings on the Container App (not Key Vault, nothing here is secret). Do not set them by hand in the portal: put them in the GitHub variables of the same name, and the Deploy workflow passes them through `infra/main.bicepparam` to the app ([deploy.md](deploy.md), step 7, #133). A setting made in the portal is gone after the next deploy.
 
 | Variable | Value |
 | --- | --- |
@@ -40,9 +44,13 @@ Until all five are set, ARGUS answers 503 on every route with data and logs whic
 
 Open `https://<argus address>/queue` as Benjamin or Arita: it asks for the Microsoft sign in and then lists the open exceptions. Or ask Entra for a token with the Azure CLI and call `/me`. For the CLI to get a token, add it under Expose an API as an authorized client application (Microsoft's Azure CLI app ID `04b07795-8ddb-461a-bbee-02f9e1bf7b46`); remove it again afterwards if you like.
 
+Every line below can be pasted as it is (Azure CLI, signed in to Max ASP's tenant):
+
 ```bash
-TOKEN=$(az account get-access-token --scope "api://<application id>/access_as_user" --query accessToken -o tsv)
-curl -s https://<argus address>/me -H "Authorization: Bearer $TOKEN"
+APP_ID=$(az ad app list --display-name ARGUS --query "[0].appId" -o tsv)
+ARGUS_URL="https://$(az containerapp show -g rg-argus -n ca-argus-web --query properties.configuration.ingress.fqdn -o tsv)"
+TOKEN=$(az account get-access-token --scope "api://$APP_ID/access_as_user" --query accessToken -o tsv)
+curl -s "$ARGUS_URL/me" -H "Authorization: Bearer $TOKEN"
 ```
 
 It answers with your object ID and roles. 401 means the token was refused (the app log says why, never the token), 403 means you are in none of the three groups.

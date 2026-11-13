@@ -123,6 +123,39 @@ def alerts() -> dict[str, Any]:
     }
 
 
+# How Bicep compiles the env list of the web app in infra/modules/apps.bicep (#133).
+WEB_APP_ENV = (
+    "[concat(variables('plainSettings'), variables('signInEnv'), if(parameters('demo'), "
+    "variables('demoSettings'), createArray()), map(variables('allSecrets'), lambda('secret', "
+    "createObject('name', lambdaVariables('secret').envName, 'secretRef', "
+    "toLower(lambdaVariables('secret').secretName)))))]"
+)
+SIGN_IN_FIELDS = {
+    "ARGUS_ENTRA_TENANT_ID": "tenantId",
+    "ARGUS_ENTRA_API_CLIENT_ID": "apiClientId",
+    "ARGUS_ENTRA_GROUP_APPROVER": "approverGroupId",
+    "ARGUS_ENTRA_GROUP_FINANCE": "financeGroupId",
+    "ARGUS_ENTRA_GROUP_ADMIN": "adminGroupId",
+}
+
+
+def sign_in_env() -> list[dict[str, str]]:
+    return [
+        {"name": name, "value": f"[parameters('signInSettings').{field}]"}
+        for name, field in SIGN_IN_FIELDS.items()
+    ]
+
+
+def web_app(main: dict[str, Any]) -> dict[str, Any]:
+    app: dict[str, Any] = main["resources"]["apps"]["properties"]["template"]["resources"][1]
+    return app
+
+
+def apps_variables(main: dict[str, Any]) -> dict[str, Any]:
+    variables: dict[str, Any] = main["resources"]["apps"]["properties"]["template"]["variables"]
+    return variables
+
+
 def good_main() -> dict[str, Any]:
     documents = {
         "parameters": {
@@ -175,7 +208,12 @@ def good_main() -> dict[str, Any]:
             "intakeJobList": [
                 {"job": "sweep", "cron": "*/5 * * * *"},
                 {"job": "removal", "cron": "30 2 * * *"},
-            ]
+            ],
+            "plainSettings": [
+                {"name": "ARGUS_DEMO", "value": "[if(parameters('demo'), 'true', 'false')]"}
+            ],
+            "signInEnv": sign_in_env(),
+            "demoSettings": [{"name": "ARGUS_MAILBOX", "value": "accounts@maxasp.example"}],
         },
         "resources": [
             intake_jobs(),
@@ -184,6 +222,7 @@ def good_main() -> dict[str, Any]:
                 "name": "ca-argus-web",
                 "location": "[parameters('location')]",
                 "properties": {
+                    "template": {"containers": [{"name": "argus", "env": WEB_APP_ENV}]},
                     "configuration": {
                         "secrets": [
                             {
@@ -192,7 +231,7 @@ def good_main() -> dict[str, Any]:
                                 "identity": "[parameters('identityId')]",
                             }
                         ]
-                    }
+                    },
                 },
             },
         ],
@@ -961,3 +1000,87 @@ def test_only_an_action_group_may_be_global(tmp_path: Path) -> None:
         "resource [format('alert-{0}', variables('intakeRules')"
         "[copyIndex()].kind)] has a fixed location 'global'"
     ]
+
+
+# Sign in with Microsoft in Azure (#133, NF-03).
+
+
+def test_the_check_knows_the_five_sign_in_settings() -> None:
+    assert set(check_infra.SIGN_IN_SETTINGS) == set(SIGN_IN_FIELDS)
+
+
+@pytest.mark.req("NF-03")
+@pytest.mark.parametrize("setting", list(SIGN_IN_FIELDS))
+def test_a_sign_in_setting_missing_from_the_web_app_fails(tmp_path: Path, setting: str) -> None:
+    main = good_main()
+    variables = apps_variables(main)
+    variables["signInEnv"] = [e for e in variables["signInEnv"] if e["name"] != setting]
+
+    assert run(tmp_path, main) == [
+        f"app ca-argus-web does not always get the sign in setting {setting}"
+    ]
+
+
+@pytest.mark.req("NF-03")
+def test_sign_in_settings_left_out_of_the_web_app_env_fail(tmp_path: Path) -> None:
+    main = good_main()
+    container = web_app(main)["properties"]["template"]["containers"][0]
+    container["env"] = WEB_APP_ENV.replace("variables('signInEnv'), ", "")
+
+    problems = run(tmp_path, main)
+
+    assert len(problems) == 5
+    assert all("does not always get the sign in setting" in problem for problem in problems)
+
+
+@pytest.mark.req("NF-03")
+def test_sign_in_settings_only_in_demo_mode_fail(tmp_path: Path) -> None:
+    main = good_main()
+    container = web_app(main)["properties"]["template"]["containers"][0]
+    container["env"] = WEB_APP_ENV.replace(
+        "variables('signInEnv'), if(parameters('demo'), variables('demoSettings'), createArray())",
+        "if(parameters('demo'), variables('signInEnv'), createArray())",
+    )
+
+    problems = run(tmp_path, main)
+
+    assert len(problems) == 5
+    assert all("does not always get the sign in setting" in problem for problem in problems)
+
+
+@pytest.mark.req("NF-03")
+def test_sign_in_settings_written_straight_into_the_env_list_pass(tmp_path: Path) -> None:
+    main = good_main()
+    web_app(main)["properties"]["template"]["containers"][0]["env"] = sign_in_env()
+
+    assert run(tmp_path, main) == []
+
+
+@pytest.mark.req("NF-03")
+def test_a_sign_in_setting_with_a_fixed_value_fails(tmp_path: Path) -> None:
+    main = good_main()
+    apps_variables(main)["signInEnv"][3]["value"] = "11111111-2222-3333-4444-555555555555"
+
+    assert run(tmp_path, main) == [
+        "app ca-argus-web gets the sign in setting ARGUS_ENTRA_GROUP_FINANCE as a fixed value; "
+        "it must come from a parameter (GitHub variables)"
+    ]
+
+
+@pytest.mark.req("NF-03")
+def test_the_fake_sign_in_service_setting_in_azure_fails(tmp_path: Path) -> None:
+    main = good_main()
+    apps_variables(main)["signInEnv"].append(
+        {"name": "ARGUS_ENTRA_AUTHORITY", "value": "http://localhost:9000"}
+    )
+
+    assert run(tmp_path, main) == [
+        "ARGUS_ENTRA_AUTHORITY is for the local fake only and must stay unset in Azure"
+    ]
+
+
+def test_no_web_app_fails(tmp_path: Path) -> None:
+    main = good_main()
+    del main["resources"]["apps"]["properties"]["template"]["resources"][1]
+
+    assert run(tmp_path, main) == ["no ARGUS web app found in the apps module"]

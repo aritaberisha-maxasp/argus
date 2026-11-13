@@ -55,3 +55,24 @@ type intakeSettingValues = {
   @description('Email domains the customers in DATEV send from, comma separated (ARGUS_CUSTOMER_DOMAINS).')
   customerDomains: string
 }
+
+// Sign in with Microsoft (#23, ADR 0008, #133). The IDs of the ARGUS app registration and its
+// three groups in Max ASP's Entra ID. None of them is secret. The pipeline passes them from
+// GitHub variables (docs/operations/deploy.md, step 7); apps.bicep hands them to the web app.
+@export()
+type signInSettingValues = {
+  @description('Directory (tenant) ID of Max ASP (ARGUS_ENTRA_TENANT_ID).')
+  tenantId: string
+
+  @description('Application (client) ID of the ARGUS app registration (ARGUS_ENTRA_API_CLIENT_ID).')
+  apiClientId: string
+
+  @description('Object ID of the approvers group (ARGUS_ENTRA_GROUP_APPROVER).')
+  approverGroupId: string
+
+  @description('Object ID of the finance group (ARGUS_ENTRA_GROUP_FINANCE).')
+  financeGroupId: string
+
+  @description('Object ID of the admins group (ARGUS_ENTRA_GROUP_ADMIN).')
+  adminGroupId: string
+}

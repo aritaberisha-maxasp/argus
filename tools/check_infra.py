@@ -23,7 +23,10 @@ Azure sign in is needed. The script fails when:
   mode (#124, ADR 0009);
 - the mailbox sweep does not run every 5 minutes or the removal not once a day as scheduled
   jobs, a job retries or runs twice at once, either job can run with no alert watching it, an
-  alert has no action group, or an alert email address is written in the code (#125).
+  alert has no action group, or an alert email address is written in the code (#125);
+- the ARGUS web app does not always get the five sign in settings, or gets one as a fixed value
+  instead of from a parameter, or ``ARGUS_ENTRA_AUTHORITY`` (the local fake only) shows up
+  anywhere (#23, #133, NF-03).
 
 Run from the repository root: ``python tools/check_infra.py build/infra``
 """
@@ -75,6 +78,16 @@ STANDINS_MODULE = "standins"
 INTAKE_COMMAND = "argus.intake"
 INTAKE_SCHEDULES = {"sweep": "*/5 * * * *"}
 INTAKE_DAILY = ("removal",)
+# Sign in with Microsoft (#23, ADR 0008, #133). The web app needs all five, from a parameter.
+SIGN_IN_SETTINGS = (
+    "ARGUS_ENTRA_TENANT_ID",
+    "ARGUS_ENTRA_API_CLIENT_ID",
+    "ARGUS_ENTRA_GROUP_APPROVER",
+    "ARGUS_ENTRA_GROUP_FINANCE",
+    "ARGUS_ENTRA_GROUP_ADMIN",
+)
+# Points ARGUS at another sign in service. Only for the local fake (standins/entra).
+FAKE_AUTHORITY_SETTING = "ARGUS_ENTRA_AUTHORITY"
 ACTION_GROUP = "Microsoft.Insights/actionGroups"
 LOG_ALERT = "Microsoft.Insights/scheduledQueryRules"
 # Action groups exist only as global resources; they hold the address and send the email.
@@ -529,6 +542,90 @@ def deployment_type_problems(
     return problems
 
 
+def _unconditional_variables(expression: str) -> list[str]:
+    """The variables an ARM expression always uses, leaving out those inside an ``if(...)``."""
+    found = []
+    calls: list[str] = []
+    word = ""
+    index = 0
+    while index < len(expression):
+        char = expression[index]
+        if char == "'":
+            end = expression.find("'", index + 1)
+            literal = expression[index + 1 : end if end != -1 else len(expression)]
+            if calls and calls[-1] == "variables" and "if" not in calls:
+                found.append(literal)
+            index = len(expression) if end == -1 else end + 1
+            word = ""
+            continue
+        if char.isalnum() or char == "_":
+            word += char
+        elif char == "(":
+            calls.append(word.lower())
+            word = ""
+        elif char == ")":
+            if calls:
+                calls.pop()
+            word = ""
+        else:
+            word = ""
+        index += 1
+    return found
+
+
+def _env_entries(template: dict[str, Any], env: Any) -> list[dict[str, Any]]:
+    """The name and value entries a container always gets, as far as they can be read."""
+    if isinstance(env, list):
+        return [entry for entry in env if isinstance(entry, dict)]
+    if not isinstance(env, str):
+        return []
+    variables = template.get("variables", {})
+    entries: list[dict[str, Any]] = []
+    for name in _unconditional_variables(env):
+        value = variables.get(name)
+        if isinstance(value, list):
+            entries.extend(entry for entry in value if isinstance(entry, dict))
+    return entries
+
+
+def sign_in_problems(main: dict[str, Any]) -> list[str]:
+    """The web app always gets the five sign in settings from a parameter, and the setting for
+    the local fake sign in service is never set in Azure (#23, #133, NF-03)."""
+    problems = []
+    if any(FAKE_AUTHORITY_SETTING in text for text in strings(main)):
+        problems.append(
+            f"{FAKE_AUTHORITY_SETTING} is for the local fake only and must stay unset in Azure"
+        )
+    web_apps = 0
+    for name, _deployment, template in modules(main):
+        if name != PUBLIC_APP_MODULE:
+            continue
+        for resource in resources(template):
+            if resource.get("type") != CONTAINER_APP:
+                continue
+            web_apps += 1
+            app = resource.get("name", "?")
+            containers = resource.get("properties", {}).get("template", {}).get("containers", [])
+            entries = [
+                entry
+                for container in containers
+                if isinstance(container, dict)
+                for entry in _env_entries(template, container.get("env"))
+            ]
+            given = {entry.get("name"): entry.get("value") for entry in entries}
+            for setting in SIGN_IN_SETTINGS:
+                if setting not in given:
+                    problems.append(f"app {app} does not always get the sign in setting {setting}")
+                elif "parameters(" not in str(given[setting]):
+                    problems.append(
+                        f"app {app} gets the sign in setting {setting} as a fixed value; it must "
+                        "come from a parameter (GitHub variables)"
+                    )
+    if web_apps == 0:
+        problems.append(f"no ARGUS web app found in the {PUBLIC_APP_MODULE} module")
+    return problems
+
+
 def check(folder: Path) -> list[str]:
     main = json.loads((folder / "main.json").read_text(encoding="utf-8"))
     policy = json.loads((folder / "eu-only.json").read_text(encoding="utf-8"))
@@ -546,6 +643,7 @@ def check(folder: Path) -> list[str]:
         *deployment_type_problems(main, policy, parameters),
         *demo_problems(main, parameters),
         *intake_job_problems(main),
+        *sign_in_problems(main),
     ]
 
 
@@ -559,7 +657,8 @@ def main(argv: list[str]) -> int:
     if problems:
         return 1
     print(
-        "Infrastructure code keeps to the rules of #65, #82, #124 and #125 (NF-01, NF-03, NF-06)."
+        "Infrastructure code keeps to the rules of #65, #82, #124, #125 and #133 "
+        "(NF-01, NF-03, NF-06)."
     )
     return 0
 

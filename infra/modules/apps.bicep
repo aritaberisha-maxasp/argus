@@ -9,7 +9,7 @@
 // builds the ARGUS image and passes it in. The very first deploy starts with a public
 // placeholder, because the registry for the real image does not exist yet.
 
-import { intakeSettingValues, manualSecret } from '../types.bicep'
+import { intakeSettingValues, manualSecret, signInSettingValues } from '../types.bicep'
 
 param location string
 param environmentName string
@@ -68,6 +68,9 @@ param intakeJobNames object
 
 @description('Who Max ASP is, for the sorting and the invoice reading. Used only with demo off.')
 param intakeSettings intakeSettingValues
+
+@description('The IDs for sign in with Microsoft (#23, #133). Plain app settings, none is secret.')
+param signInSettings signInSettingValues
 
 resource workspace 'Microsoft.OperationalInsights/workspaces@2023-09-01' existing = {
   name: logAnalyticsWorkspaceName
@@ -225,6 +228,33 @@ var intakeEnv = [
   }
 ]
 
+// Sign in with Microsoft (#23, ADR 0008, docs/operations/sign-in.md). Real Entra ID in demo mode
+// too, because the people who look at the demo sign in with their own Max ASP accounts. Only the
+// web app checks tokens, so the jobs do not get these. ARGUS_ENTRA_AUTHORITY is for the local
+// fake only and is never set here; tools/check_infra.py fails if it shows up.
+var signInEnv = [
+  {
+    name: 'ARGUS_ENTRA_TENANT_ID'
+    value: signInSettings.tenantId
+  }
+  {
+    name: 'ARGUS_ENTRA_API_CLIENT_ID'
+    value: signInSettings.apiClientId
+  }
+  {
+    name: 'ARGUS_ENTRA_GROUP_APPROVER'
+    value: signInSettings.approverGroupId
+  }
+  {
+    name: 'ARGUS_ENTRA_GROUP_FINANCE'
+    value: signInSettings.financeGroupId
+  }
+  {
+    name: 'ARGUS_ENTRA_GROUP_ADMIN'
+    value: signInSettings.adminGroupId
+  }
+]
+
 var plainSettings = [
   {
     name: 'AZURE_CLIENT_ID'
@@ -309,6 +339,7 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
           }
           env: concat(
             plainSettings,
+            signInEnv,
             demo ? demoSettings : [],
             map(allSecrets, secret => {
               name: secret.envName
