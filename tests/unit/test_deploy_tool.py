@@ -2,6 +2,7 @@
 
 import importlib.util
 import json
+import re
 from pathlib import Path
 from types import ModuleType
 
@@ -452,3 +453,35 @@ def test_one_group_for_two_roles_fails(first: str, second: str) -> None:
         f"GitHub variables {first} and {second} name the same group; "
         "each role needs its own Entra group"
     ]
+
+
+def demo_not_set_up_pattern() -> str:
+    """The text the Demo workflow looks for to tell that Azure is not set up."""
+    text = (REPO / ".github" / "workflows" / "demo.yml").read_text(encoding="utf-8")
+    found = re.search(r'grep -q "([^"]+)" config\.txt', text)
+    assert found, "demo.yml no longer checks config.txt"
+    return found.group(1)
+
+
+def test_demo_runs_when_only_sign_in_is_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "output"))
+    for name in SIGN_IN:
+        monkeypatch.delenv(name, raising=False)
+    for name, value in full_config().items():
+        monkeypatch.setenv(name, value)
+
+    assert deploy.main(["check-config", "--mode", "deploy"]) == 0
+    assert demo_not_set_up_pattern() not in capsys.readouterr().out
+
+
+def test_demo_stops_when_azure_is_not_set_up(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "output"))
+    for name in [*full_config(), *SIGN_IN]:
+        monkeypatch.delenv(name, raising=False)
+
+    deploy.main(["check-config", "--mode", "deploy"])
+    assert demo_not_set_up_pattern() in capsys.readouterr().out

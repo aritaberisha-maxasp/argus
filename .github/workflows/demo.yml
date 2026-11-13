@@ -81,10 +81,17 @@ jobs:
           ARGUS_RESOURCE_GROUP: ${{ vars.ARGUS_RESOURCE_GROUP }}
           ARGUS_DATABASE_ADMIN_OBJECT_ID: ${{ vars.ARGUS_DATABASE_ADMIN_OBJECT_ID }}
           ARGUS_DATABASE_ADMIN_NAME: ${{ vars.ARGUS_DATABASE_ADMIN_NAME }}
+          ARGUS_ENTRA_TENANT_ID: ${{ vars.ARGUS_ENTRA_TENANT_ID }}
+          ARGUS_ENTRA_API_CLIENT_ID: ${{ vars.ARGUS_ENTRA_API_CLIENT_ID }}
+          ARGUS_ENTRA_GROUP_APPROVER: ${{ vars.ARGUS_ENTRA_GROUP_APPROVER }}
+          ARGUS_ENTRA_GROUP_FINANCE: ${{ vars.ARGUS_ENTRA_GROUP_FINANCE }}
+          ARGUS_ENTRA_GROUP_ADMIN: ${{ vars.ARGUS_ENTRA_GROUP_ADMIN }}
+        # Look for the exact notice. Other lines, such as the sign in warning, can also say
+        # "not set up" and must not stop the demo.
         run: |
           python tools/deploy.py check-config --mode deploy > config.txt
           cat config.txt
-          if grep -q "not set up" config.txt; then
+          if grep -q "Azure is not set up" config.txt; then
             echo "::error::Azure is not set up for ARGUS yet, so there is no demo to run. See docs/operations/deploy.md."
             exit 1
           fi
