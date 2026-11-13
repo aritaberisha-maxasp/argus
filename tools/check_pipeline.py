@@ -219,6 +219,13 @@ def demo_problems(workflow: dict[str, Any], text: str) -> list[str]:
                 problems.append(f"demo.yml step {step.get('name')} may not continue on error")
             if "firewall-rule delete" in str(step.get("run", "")) and "||" in str(step["run"]):
                 problems.append("demo.yml must fail when the database firewall cannot be closed")
+            # az prints a list in tsv as one value per line, so splitting it into columns
+            # handed app-db-role both values as the object ID (#148).
+            run = str(step.get("run", ""))
+            if "app-db-role" in run and "--query principalId" not in run:
+                problems.append(
+                    "demo.yml must read the app identity's object ID with --query principalId"
+                )
     for what, pattern in FORBIDDEN_IN_DEMO.items():
         if pattern.search(code_only(text)):
             problems.append(f"demo.yml must not make {what}")
