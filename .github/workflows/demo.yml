@@ -5,6 +5,8 @@
 #   seed            puts the demo emails into the fake mailbox
 #   reset           empties the demo database, the demo document store and the stand ins
 #   reset and seed  both, so the demo starts from the beginning
+#   send one email  drops the one test email picked under "Email" into the fake mailbox, to
+#                   show an email arriving during the demo (#136). The other actions ignore it.
 #
 # It refuses unless the running app is in demo mode, and python -m argus.demo checks once more
 # that the database name ends in _demo and the document store is the demo one. Like the deploy
@@ -22,7 +24,63 @@ on:
           - seed
           - reset
           - reset and seed
+          - send one email
         default: reset and seed
+      email:
+        description: 'Email, only for "send one email" (tests/fixtures/emails, for example E12 from an unknown vendor)'
+        type: choice
+        options:
+          - E01
+          - E02
+          - E03
+          - E04
+          - E05
+          - E06
+          - E07
+          - E08
+          - E09
+          - E10
+          - E11
+          - E12
+          - E13
+          - E14
+          - E15
+          - E16
+          - E17
+          - E18
+          - E19
+          - E20
+          - E21
+          - E22
+          - E23
+          - E24
+          - E25
+          - E26
+          - E27
+          - E28
+          - E29
+          - E30
+          - E31
+          - E32
+          - E33
+          - E34
+          - E35
+          - E36
+          - E37
+          - E38
+          - E39
+          - E40
+          - E41
+          - E42
+          - E43
+          - E44
+          - E45
+          - E46
+          - E47
+          - E48
+          - E49
+          - E50
+        default: E12
 
 permissions:
   contents: read
@@ -39,7 +97,7 @@ env:
 
 jobs:
   demo:
-    name: Demo (${{ inputs.action }})
+    name: Demo (${{ inputs.action == 'send one email' && format('send {0}', inputs.email) || inputs.action }})
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
@@ -113,7 +171,7 @@ jobs:
             echo "::error::The running ARGUS is not in demo mode, so this workflow does nothing. Switch demo on in infra/main.bicepparam first."
             exit 1
           fi
-          if [[ "$ACTION" != "seed" ]] && ! grep -q "^standins=." target.txt; then
+          if [[ "$ACTION" == reset* ]] && ! grep -q "^standins=." target.txt; then
             echo "::error::No stand ins found. Has the deploy run since demo mode was switched on?"
             exit 1
           fi
@@ -121,7 +179,7 @@ jobs:
       # Same as the deploy: a firewall rule for this runner only while the reset runs.
       - name: Let this runner reach the database
         id: firewall
-        if: inputs.action != 'seed'
+        if: startsWith(inputs.action, 'reset')
         env:
           SERVER: ${{ steps.target.outputs.database_server }}
         run: |
@@ -135,7 +193,7 @@ jobs:
       # Signs in as the database admin with an Entra token, like the migrations. The reset drops
       # and rebuilds the demo database only; it refuses any name that does not end in _demo.
       - name: Empty the demo database and the demo document store
-        if: inputs.action != 'seed'
+        if: startsWith(inputs.action, 'reset')
         env:
           ARGUS_DATABASE_URL: postgresql+psycopg://${{ steps.target.outputs.database_host }}:5432/${{ steps.target.outputs.database_name }}?sslmode=require
           PGUSER: ${{ vars.ARGUS_DATABASE_ADMIN_NAME }}
@@ -168,7 +226,7 @@ jobs:
       # The stand ins keep their data in memory, so a restart empties them. ARGUS restarts too,
       # so it opens fresh connections to the rebuilt database.
       - name: Restart the stand ins and ARGUS
-        if: inputs.action != 'seed'
+        if: startsWith(inputs.action, 'reset')
         env:
           STANDINS: ${{ steps.target.outputs.standins }}
         run: |
@@ -176,5 +234,20 @@ jobs:
           tools/azure/restart_apps.sh "${apps[@]}" "$APP_NAME"
 
       - name: Put the demo emails into the fake mailbox
-        if: inputs.action != 'reset'
+        if: inputs.action == 'seed' || inputs.action == 'reset and seed'
         run: tools/azure/run_job.sh "$SEED_JOB"
+
+      # Runs the seed job once with another command, so the email goes in from inside the
+      # environment, with the job's own settings: python -m argus.demo send refuses unless demo
+      # mode is on and the mailbox is the fake one. The next sweep picks the email up (#125).
+      - name: Send the chosen email to the fake mailbox
+        if: inputs.action == 'send one email'
+        env:
+          EMAIL: ${{ inputs.email }}
+        run: |
+          if [[ ! "$EMAIL" =~ ^E[0-9]{2}$ ]]; then
+            echo "::error::Pick a test email like E12."
+            exit 1
+          fi
+          tools/azure/run_job.sh "$SEED_JOB" 600 python -m argus.demo send "$EMAIL"
+          echo "$EMAIL is in the Inbox of the fake mailbox. The sweep picks it up within 5 minutes." >> "$GITHUB_STEP_SUMMARY"

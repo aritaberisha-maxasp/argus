@@ -10,7 +10,7 @@ import httpx
 
 from argus.connections import GRAPH_URL_ENV, Connections, is_standin_address
 from argus.demo.common import DemoRefused, control_root
-from argus.demo.data import DEMO_EMAILS, DemoEmail
+from argus.demo.data import DEMO_EMAILS, DemoEmail, chosen_email
 
 # How long seed waits for the fake mailbox to answer, for example right after the Demo
 # workflow restarted it or Azure pulled the image anew (review of PR 130).
@@ -64,6 +64,29 @@ def seed(
         if http is None:
             client.close()
     return seeded
+
+
+def send_one(
+    connections: Connections,
+    folder: Path,
+    email_id: str,
+    http: httpx.Client | None = None,
+    *,
+    timeout: float = READY_TIMEOUT,
+    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+) -> SeededEmail:
+    """Drop one chosen test email into the Inbox of the fake mailbox, so the demo can show an
+    email arriving while people watch (#136). The same checks as :func:`seed` apply: demo mode
+    on, the fake Graph as target and a synthetic email. The next sweep picks it up."""
+    if not connections.demo:
+        raise DemoRefused("demo mode is off, so there is no fake mailbox to send to")
+    try:
+        email = chosen_email(folder, email_id)
+    except (ValueError, LookupError) as wrong:
+        raise DemoRefused(str(wrong)) from None
+    (sent,) = seed(connections, folder, http, (email,), timeout=timeout, clock=clock, sleep=sleep)
+    return sent
 
 
 def wait_until_ready(

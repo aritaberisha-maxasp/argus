@@ -1,6 +1,7 @@
 """The emails the demo starts with (#124). Every one is a synthetic fixture."""
 
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -34,3 +35,18 @@ DEMO_EMAILS: tuple[DemoEmail, ...] = (
 
 def emails_folder(given: str | None = None) -> Path:
     return Path(given or os.environ.get(EMAILS_ENV) or DEFAULT_EMAILS)
+
+
+# The test emails are named E01_<slug>.eml to E50_<slug>.eml. A person picks one by its number.
+EMAIL_ID = re.compile(r"E\d{2}")
+
+
+def chosen_email(folder: Path, email_id: str) -> DemoEmail:
+    """The one test email a person picked by its number, for example ``E12`` (#136)."""
+    wanted = email_id.strip().upper()
+    if not EMAIL_ID.fullmatch(wanted):
+        raise ValueError(f"{email_id!r} is not a test email number like E12")
+    found = sorted(path.name for path in folder.glob(f"{wanted}_*.eml") if path.is_file())
+    if len(found) != 1:
+        raise LookupError(f"no single test email {wanted} in {folder}")
+    return DemoEmail(found[0], "chosen test email")

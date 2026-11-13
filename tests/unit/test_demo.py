@@ -1,4 +1,5 @@
-"""The demo commands: seed the fake mailbox, reset the demo data (#124, ADR 0009).
+"""The demo commands: seed the fake mailbox, send one chosen email, reset the demo data
+(#124, #136, ADR 0009).
 
 Covers: IN-01, NF-04
 """
@@ -10,6 +11,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+import yaml
 from fastapi.testclient import TestClient
 
 from argus.connections import connections_from_env
@@ -22,6 +24,7 @@ from argus.demo import (
     documents_account,
     reset_standins,
     seed,
+    send_one,
 )
 from argus.demo.__main__ import main
 from argus.wise import WiseCallRefused
@@ -33,6 +36,7 @@ from tests.unit.test_connections import DEMO, LIVE
 REPO = Path(__file__).resolve().parents[2]
 EMAILS = REPO / "tests" / "fixtures" / "emails"
 MANIFEST = EMAILS / "manifest.csv"
+DEMO_WORKFLOW = REPO / ".github" / "workflows" / "demo.yml"
 STANDINS_BICEP = REPO / "infra" / "modules" / "standins.bicep"
 PROFILE_ID = 16_000_001
 
@@ -122,6 +126,75 @@ def test_seed_refuses_an_email_that_is_not_synthetic(tmp_path: Path) -> None:
     with pytest.raises(DemoRefused, match="not addressed to the synthetic test mailbox"):
         seed(connections_from_env(DEMO), tmp_path, http)
     assert http.get("/_standin/records").json()["inbox"] == 0
+
+
+@pytest.mark.req("IN-01")
+def test_send_drops_the_chosen_email_into_the_fake_inbox() -> None:
+    http, token = demo_graph()
+    connections = connections_from_env({**DEMO, "ARGUS_GRAPH_STANDIN_TOKEN": token})
+    seed(connections, EMAILS, http)
+    sent = send_one(connections, EMAILS, "e12", http)
+    assert sent.file == "E12_unbekannter-lieferant.eml"
+    assert http.get("/_standin/records").json()["inbox"] == len(DEMO_EMAILS) + 1
+
+    # The sweep reads it through the same Graph client as every other email (#125).
+    graph = connections.graph_client(transport=standin_transport(http.app))  # type: ignore[arg-type]
+    assert sent.graph_id in {message.id for message in graph.list_inbox()}
+
+
+@pytest.mark.req("IN-01")
+def test_the_command_sends_one_email(capsys: pytest.CaptureFixture[str]) -> None:
+    http, token = demo_graph()
+    environ = {**DEMO, "ARGUS_GRAPH_STANDIN_TOKEN": token}
+    sent = send_one(connections_from_env(environ), EMAILS, "E43", http)
+    assert sent.file.startswith("E43_")
+    # The command itself, as the seed job runs it, refuses a wrong number before any call.
+    assert main(["send", "E99"], environ) == 2
+    assert "no single test email E99" in capsys.readouterr().err
+    assert main(["send", "E12; rm -rf /"], environ) == 2
+    assert "not a test email number" in capsys.readouterr().err
+
+
+@pytest.mark.req("NF-04")
+def test_send_refuses_when_demo_mode_is_off() -> None:
+    http, _ = demo_graph()
+    with pytest.raises(DemoRefused, match="demo mode is off"):
+        send_one(connections_from_env(LIVE), EMAILS, "E12", http)
+    assert http.get("/_standin/records").json()["inbox"] == 0
+
+
+@pytest.mark.req("NF-04")
+def test_the_command_refuses_to_send_to_a_real_mailbox(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # Live settings: demo mode is off and the mailbox is the real Microsoft Graph.
+    assert main(["send", "E12"], LIVE) == 2
+    assert "demo mode is off" in capsys.readouterr().err
+    # Demo mode on, but pointed at the real Microsoft Graph: refused before anything is sent.
+    real_graph = {**DEMO, "ARGUS_GRAPH_URL": "https://graph.microsoft.com/v1.0"}
+    assert main(["send", "E12"], real_graph) == 2
+    assert "ARGUS_GRAPH_URL" in capsys.readouterr().err
+
+
+def test_send_refuses_an_email_that_is_not_synthetic(tmp_path: Path) -> None:
+    original = (EMAILS / "E12_unbekannter-lieferant.eml").read_bytes()
+    changed = original.replace(b"accounts@maxasp.example", b"someone@gmail.com")
+    assert changed != original
+    (tmp_path / "E12_unbekannter-lieferant.eml").write_bytes(changed)
+    http, _ = demo_graph()
+    with pytest.raises(DemoRefused, match="not addressed to the synthetic test mailbox"):
+        send_one(connections_from_env(DEMO), tmp_path, "E12", http)
+    assert http.get("/_standin/records").json()["inbox"] == 0
+
+
+def test_the_demo_workflow_offers_every_test_email() -> None:
+    workflow = yaml.safe_load(DEMO_WORKFLOW.read_text(encoding="utf-8"))
+    inputs = workflow[True]["workflow_dispatch"]["inputs"]  # YAML reads "on" as True
+    assert "send one email" in inputs["action"]["options"]
+    offered = inputs["email"]["options"]
+    files = sorted(path.name.split("_")[0] for path in EMAILS.glob("E*_*.eml"))
+    assert offered == files
+    assert inputs["email"]["default"] == "E12"
 
 
 def test_the_control_calls_sit_at_the_root_of_the_stand_in() -> None:
