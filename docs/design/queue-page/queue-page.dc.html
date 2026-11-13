@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ARGUS exception queue</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&amp;family=Geist+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0C0D0F}
+a{color:#7C9CFF}a:hover{color:#B3C5FF}
+.q-row:hover{background:#15171B}
+.q-btn:hover{filter:brightness(1.08)}
+</style>
+</helmet>
+<div style="min-height: 100vh; background: #0C0D0F; color: #ECEEF1; font-family: 'Geist', system-ui, sans-serif; -webkit-font-smoothing: antialiased">
+
+  <header style="border-bottom: 1px solid #1E2126">
+    <div style="max-width: 1320px; margin: 0 auto; padding: 0 28px; height: 60px; display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap">
+      <div style="display: flex; align-items: center; gap: 12px">
+        <svg width="28" height="28" viewBox="0 0 64 64" aria-hidden="true"><rect x="0.5" y="0.5" width="63" height="63" rx="14" fill="#16181C" stroke="#2A2E35"></rect><path d="M17 48L32 17L47 48" fill="none" stroke="#ECEEF1" stroke-width="7" stroke-linejoin="miter"></path><circle cx="32" cy="38" r="4.5" fill="#7C9CFF"></circle></svg>
+        <span style="font-weight: 600; font-size: 15px; letter-spacing: 0.14em">ARGUS</span>
+      </div>
+      <nav style="display: flex; align-items: center; gap: 4px; font-size: 14px" aria-label="Main">
+        <a href="#" style="color: #ECEEF1; text-decoration: none; padding: 8px 12px; border-radius: 8px; background: #1A1D22">Exceptions</a>
+      </nav>
+      <div style="display: flex; align-items: center; gap: 10px; font-size: 13px; color: #9BA1AB">
+        <span>Max ASP</span>
+        <span style="width: 30px; height: 30px; border-radius: 50%; background: #1E2126; color: #ECEEF1; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600">AB</span>
+      </div>
+    </div>
+  </header>
+
+  <main style="max-width: 1320px; margin: 0 auto; padding: 48px 28px 72px; display: flex; flex-direction: column; gap: 36px">
+
+    <div style="display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; flex-wrap: wrap">
+      <div style="display: flex; flex-direction: column; gap: 10px">
+        <span style="font-family: 'Geist Mono', monospace; font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: #9BA1AB">Exception queue · 13.11.2026</span>
+        <h1 style="margin: 0; font-size: 44px; line-height: 1.05; font-weight: 500; letter-spacing: -0.03em"><span style="color: #7C9CFF">3</span> items need a human</h1>
+      </div>
+      <div style="display: flex; gap: 28px; flex-wrap: wrap">
+        <div style="display: flex; flex-direction: column; gap: 4px">
+          <span style="font-family: 'Geist Mono', monospace; font-size: 22px; font-weight: 500">2</span>
+          <span style="font-size: 13px; color: #9BA1AB">Unsorted emails</span>
+        </div>
+        <div style="width: 1px; background: #1E2126"></div>
+        <div style="display: flex; flex-direction: column; gap: 4px">
+          <span style="font-family: 'Geist Mono', monospace; font-size: 22px; font-weight: 500">1</span>
+          <span style="font-size: 13px; color: #9BA1AB">Possible duplicate</span>
+        </div>
+        <div style="width: 1px; background: #1E2126"></div>
+        <div style="display: flex; flex-direction: column; gap: 4px">
+          <span style="font-family: 'Geist Mono', monospace; font-size: 22px; font-weight: 500">0d</span>
+          <span style="font-size: 13px; color: #9BA1AB">Oldest, working days</span>
+        </div>
+      </div>
+    </div>
+
+    <div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start">
+
+      <section style="flex: 1 1 360px; min-width: 0; background: #111316; border: 1px solid #1E2126; border-radius: 16px; overflow: hidden" aria-label="Queue">
+        <div style="display: flex; gap: 6px; padding: 12px; border-bottom: 1px solid #1E2126; flex-wrap: wrap">
+          <sc-for list="{{tabs}}" as="tab" hint-placeholder-count="3">
+            <button type="button" class="q-btn" onClick="{{tab.pick}}" style="{{tab.style}}">{{tab.label}}<span style="font-family: 'Geist Mono', monospace; margin-left: 8px; opacity: 0.7">{{tab.count}}</span></button>
+          </sc-for>
+        </div>
+        <sc-for list="{{rows}}" as="row" hint-placeholder-count="3">
+          <button type="button" class="q-row" onClick="{{row.pick}}" style="{{row.style}}">
+            <span style="display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%">
+              <span style="display: flex; align-items: center; gap: 10px">
+                <span style="{{row.dotStyle}}"></span>
+                <span style="font-size: 15px; font-weight: 600; color: #ECEEF1">{{row.case}}</span>
+                <sc-if value="{{row.hasType}}" hint-placeholder-val="{{ false }}">
+                  <span style="font-size: 12px; color: #C3C8D0; border: 1px solid #2A2E35; border-radius: 6px; padding: 1px 7px">{{row.type}}</span>
+                </sc-if>
+              </span>
+              <span style="font-family: 'Geist Mono', monospace; font-size: 12px; color: #9BA1AB">{{row.time}}</span>
+            </span>
+            <span style="font-size: 14px; color: #C3C8D0; text-align: left">{{row.reason}}</span>
+            <span style="font-family: 'Geist Mono', monospace; font-size: 12px; color: #9BA1AB; text-align: left">{{row.sender}}</span>
+          </button>
+        </sc-for>
+      </section>
+
+      <section style="flex: 999 1 520px; min-width: 0; background: #111316; border: 1px solid #1E2126; border-radius: 16px; padding: 32px; display: flex; flex-direction: column; gap: 28px" aria-label="Selected exception">
+        <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap">
+          <div style="display: flex; flex-direction: column; gap: 12px">
+            <span style="{{sel.pillStyle}}">{{sel.pill}}</span>
+            <h2 style="margin: 0; font-size: 30px; font-weight: 500; letter-spacing: -0.02em">{{sel.case}}</h2>
+          </div>
+          <a href="#" style="display: inline-flex; align-items: center; gap: 6px; min-height: 44px; font-size: 14px; text-decoration: none">Open source email<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7M9 7h8v8"></path></svg></a>
+        </div>
+
+        <p style="margin: 0; font-size: 20px; line-height: 1.45; color: #ECEEF1; max-width: 640px">{{sel.reason}}.</p>
+
+        <dl style="margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 1px; background: #1E2126; border: 1px solid #1E2126; border-radius: 12px; overflow: hidden">
+          <div style="background: #111316; padding: 16px 18px; display: flex; flex-direction: column; gap: 6px">
+            <dt style="font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: #9BA1AB">Sender</dt>
+            <dd style="margin: 0; font-family: 'Geist Mono', monospace; font-size: 13px; color: #ECEEF1; word-break: break-all">{{sel.sender}}</dd>
+          </div>
+          <div style="background: #111316; padding: 16px 18px; display: flex; flex-direction: column; gap: 6px">
+            <dt style="font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: #9BA1AB">Opened</dt>
+            <dd style="margin: 0; font-family: 'Geist Mono', monospace; font-size: 13px; color: #ECEEF1">{{sel.date}}, {{sel.time}}</dd>
+          </div>
+          <div style="background: #111316; padding: 16px 18px; display: flex; flex-direction: column; gap: 6px">
+            <dt style="font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: #9BA1AB">Age</dt>
+            <dd style="margin: 0; font-family: 'Geist Mono', monospace; font-size: 13px; color: #ECEEF1">{{sel.age}} working days</dd>
+          </div>
+          <div style="background: #111316; padding: 16px 18px; display: flex; flex-direction: column; gap: 6px">
+            <dt style="font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: #9BA1AB">Type</dt>
+            <dd style="margin: 0; font-size: 14px; color: #ECEEF1">{{sel.typeLabel}}</dd>
+          </div>
+        </dl>
+
+        <div style="display: flex; flex-direction: column; gap: 14px; padding-top: 4px">
+          <span style="font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: #9BA1AB">Resolve</span>
+          <div style="display: flex; gap: 10px; flex-wrap: wrap">
+            <button type="button" class="q-btn" style="min-height: 44px; padding: 0 18px; border: 0; border-radius: 10px; background: #7C9CFF; color: #0C0D0F; font-family: inherit; font-size: 14px; font-weight: 600; cursor: pointer">{{sel.primary}}</button>
+            <button type="button" class="q-btn" style="min-height: 44px; padding: 0 18px; border: 1px solid #2A2E35; border-radius: 10px; background: transparent; color: #ECEEF1; font-family: inherit; font-size: 14px; font-weight: 500; cursor: pointer">{{sel.secondary}}</button>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { filter: 'all', selected: 'Email 8' };
+  }
+  renderVals() {
+    var self = this;
+    var filter = this.state.filter;
+    var kinds = {
+      unsorted: {
+        label: 'Unsorted',
+        color: '#C3C8D0',
+        primary: 'Classify email',
+        secondary: 'Not bookkeeping'
+      },
+      duplicate: {
+        label: 'Possible duplicate',
+        color: '#F5B759',
+        primary: 'Compare with original',
+        secondary: 'Not a duplicate'
+      }
+    };
+    var data = [
+      { case: 'Email 8', type: '', kind: 'unsorted', reason: 'ARGUS could not sort the email with certainty', age: '0', sender: 'pay-invoice-now.invalid', date: '13.11.2026', time: '17:11' },
+      { case: 'Case 5', type: 'incoming invoice', kind: 'duplicate', reason: 'This may be a duplicate invoice', age: '0', sender: 'muster-buerobedarf.example', date: '13.11.2026', time: '17:11' },
+      { case: 'Email 10', type: '', kind: 'unsorted', reason: 'ARGUS could not sort the email with certainty', age: '0', sender: 'beispiel-reinigung.example', date: '13.11.2026', time: '17:12' }
+    ];
+    var visible = data.filter(function (r) { return filter === 'all' || r.kind === filter; });
+    var selCase = this.state.selected;
+    if (!visible.some(function (r) { return r.case === selCase; }) && visible.length) selCase = visible[0].case;
+    var rowBase = 'display: flex; flex-direction: column; align-items: flex-start; gap: 8px; width: 100%; padding: 18px 20px; border: 0; border-bottom: 1px solid #1E2126; font-family: inherit; cursor: pointer; ';
+    var rows = visible.map(function (r) {
+      var k = kinds[r.kind];
+      var on = r.case === selCase;
+      return Object.assign({}, r, {
+        hasType: !!r.type,
+        style: rowBase + (on ? 'background: #181B20; box-shadow: inset 3px 0 0 #7C9CFF' : 'background: transparent'),
+        dotStyle: 'width: 8px; height: 8px; border-radius: 50%; flex: none; background: ' + k.color,
+        pick: function () { self.setState({ selected: r.case }); }
+      });
+    });
+    var s = data.filter(function (r) { return r.case === selCase; })[0] || data[0];
+    var sk = kinds[s.kind];
+    var sel = Object.assign({}, s, {
+      pill: sk.label,
+      pillStyle: 'align-self: flex-start; font-size: 12px; font-weight: 500; letter-spacing: 0.04em; color: ' + sk.color + '; border: 1px solid ' + sk.color + '; border-radius: 999px; padding: 3px 10px',
+      typeLabel: s.type ? s.type.charAt(0).toUpperCase() + s.type.slice(1) : 'Email, not yet a case',
+      primary: sk.primary,
+      secondary: sk.secondary
+    });
+    var tabBase = 'display: inline-flex; align-items: center; min-height: 36px; padding: 0 12px; border-radius: 8px; font-family: inherit; font-size: 13px; font-weight: 500; cursor: pointer; ';
+    var tabs = [
+      { id: 'all', label: 'All', count: 3 },
+      { id: 'unsorted', label: 'Unsorted', count: 2 },
+      { id: 'duplicate', label: 'Duplicates', count: 1 }
+    ].map(function (t) {
+      var on = t.id === filter;
+      return Object.assign({}, t, {
+        style: tabBase + (on ? 'background: #ECEEF1; color: #0C0D0F; border: 1px solid #ECEEF1' : 'background: transparent; color: #C3C8D0; border: 1px solid #2A2E35'),
+        pick: function () { self.setState({ filter: t.id }); }
+      });
+    });
+    return { rows: rows, tabs: tabs, sel: sel };
+  }
+}
+</script>
+</body>
+</html>

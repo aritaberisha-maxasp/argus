@@ -32,18 +32,21 @@ Arita approved the planning list on 10 Nov and asked to put the live demo first.
 | 6 | [#134](https://github.com/aritaberisha-maxasp/argus/issues/134) | Let an admin switch the demo between shadow and live mode on the page | IN-01, NF-01, NF-03 | S | #126 done, #133 |  |
 | 7 | [#62](https://github.com/aritaberisha-maxasp/argus/issues/62) | Show the status of every invoice at any time (list part first) | NF-05, NF-03, EX-01 | M | #23 done, #21 done, #126 done, #133 |  |
 | 8 | [#135](https://github.com/aritaberisha-maxasp/argus/issues/135) | Show the fake mailbox folders on a page during the demo | IN-04, IN-06, NF-03 | S | #126 done, #133 |  |
-| 9 | [#136](https://github.com/aritaberisha-maxasp/argus/issues/136) | Drop one chosen test email into the demo inbox during the demo | IN-01 | S | #124 done, #125 done |  |
-| 10 | [#63](https://github.com/aritaberisha-maxasp/argus/issues/63) | Show the full trail of a case from receipt to payment | NF-01, AP-08 | S | #62 |  |
-| 11 | [#112](https://github.com/aritaberisha-maxasp/argus/issues/112) | Let Benjamin correct number, amount or currency of a flagged invoice | EX-01, IN-10, PR-01 | M | #31, #23, #126 |  |
-| 12 | [#103](https://github.com/aritaberisha-maxasp/argus/issues/103) | Run the nightly audit copy as a scheduled job in Azure | NF-01, NF-05 | S | #81 done, #83 done |  |
-| 13 | [#115](https://github.com/aritaberisha-maxasp/argus/issues/115) | Tell Arita when a weekly database backup fails | NF-01, NF-03 | S | #82 |  |
-| 14 | [#61](https://github.com/aritaberisha-maxasp/argus/issues/61) | Send Benjamin a daily digest of open exceptions | EX-03 | S | #21 done | yes |
-| 15 | [#56](https://github.com/aritaberisha-maxasp/argus/issues/56) | Import the monthly Wise statement safely, once, with balances that add up | BA-01, BA-07, BA-08, NF-01 | M | #19, #20, #21 done | yes |
-| 16 | [#64](https://github.com/aritaberisha-maxasp/argus/issues/64) | Measure how many invoices go through without manual work | NF-07 | S | #62 | yes |
-| 17 | [#116](https://github.com/aritaberisha-maxasp/argus/issues/116) | Bring lost audit events back from the nightly copies after a restore | NF-01, NF-05 | M | #82, #103 | yes |
-| 18 | [#34](https://github.com/aritaberisha-maxasp/argus/issues/34) | Keep the approver, deputy and direct debit flag for each vendor | AP-01, AP-06, PY-13, VM-02 | M | #23, #33 done | yes |
+| 9 | [#152](https://github.com/aritaberisha-maxasp/argus/issues/152) | Give the exception queue page Arita's new design | EX-01, EX-02, NF-03 | M | #126 done, #133 done, after #134 and #135 |  |
+| 10 | [#136](https://github.com/aritaberisha-maxasp/argus/issues/136) | Drop one chosen test email into the demo inbox during the demo | IN-01 | S | #124 done, #125 done |  |
+| 11 | [#63](https://github.com/aritaberisha-maxasp/argus/issues/63) | Show the full trail of a case from receipt to payment | NF-01, AP-08 | S | #62 |  |
+| 12 | [#112](https://github.com/aritaberisha-maxasp/argus/issues/112) | Let Benjamin correct number, amount or currency of a flagged invoice | EX-01, IN-10, PR-01 | M | #31, #23, #126 |  |
+| 13 | [#103](https://github.com/aritaberisha-maxasp/argus/issues/103) | Run the nightly audit copy as a scheduled job in Azure | NF-01, NF-05 | S | #81 done, #83 done |  |
+| 14 | [#115](https://github.com/aritaberisha-maxasp/argus/issues/115) | Tell Arita when a weekly database backup fails | NF-01, NF-03 | S | #82 |  |
+| 15 | [#61](https://github.com/aritaberisha-maxasp/argus/issues/61) | Send Benjamin a daily digest of open exceptions | EX-03 | S | #21 done | yes |
+| 16 | [#56](https://github.com/aritaberisha-maxasp/argus/issues/56) | Import the monthly Wise statement safely, once, with balances that add up | BA-01, BA-07, BA-08, NF-01 | M | #19, #20, #21 done | yes |
+| 17 | [#64](https://github.com/aritaberisha-maxasp/argus/issues/64) | Measure how many invoices go through without manual work | NF-07 | S | #62 | yes |
+| 18 | [#116](https://github.com/aritaberisha-maxasp/argus/issues/116) | Bring lost audit events back from the nightly copies after a restore | NF-01, NF-05 | M | #82, #103 | yes |
+| 19 | [#34](https://github.com/aritaberisha-maxasp/argus/issues/34) | Keep the approver, deputy and direct debit flag for each vendor | AP-01, AP-06, PY-13, VM-02 | M | #23, #33 done | yes |
 
 On 12 Nov Arita approved the plan for a demo that can be seen after deploy. Four new stories went in at ranks 5, 6, 8 and 9, ahead of #112, #103, #115 and the stretch stories: #133 makes sign in work in Azure, #134 puts the shadow and live switch on the page, #135 shows the fake mailbox (demo mode only) and #136 drops one chosen test email into the demo inbox. For the demo, #62 builds its list of cases first. #133 and #136 can start right away; #134, #135 and #62 need #133 before they can be seen in Azure.
+
+On 13 Nov Arita redesigned the exception queue page in Claude Design and asked to put it in the sprint. #152 went in at rank 9, right after #134 and #135, so it can land before the demo on 17 Nov if the night shift has room. It builds on the page after #134 and #135 so their parts get the new look too. A copy of the design is in [docs/design/queue-page/](../design/queue-page/).
 
 Carry over: the Sprint 2 stories that wait only for Arita's merge (#23, #31, #71, #106, #90, #72) and the DATEV spike #2. Next in line, refinement only: #117, #118, #84.
 
