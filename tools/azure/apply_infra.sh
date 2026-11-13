@@ -24,10 +24,34 @@ apply() {
     --output json
 }
 
+# An Azure OpenAI account can stay busy for many minutes after a change, for example a model
+# deployment, and refuses any new change until then ("provisioning state is not terminal").
+# So wait for the AI accounts first. Everything goes to the log: stdout is the step outputs.
+wait_for_ai() {
+  local deadline=$((SECONDS + ${AI_WAIT_SECONDS:-1800})) busy
+  while true; do
+    busy=$(az resource list --resource-group "$RESOURCE_GROUP" \
+      --resource-type Microsoft.CognitiveServices/accounts \
+      --query "[?provisioningState!='Succeeded' && provisioningState!='Failed' && provisioningState!='Canceled'].name" \
+      --output tsv)
+    if [[ -z "$busy" ]]; then
+      return 0
+    fi
+    if ((SECONDS > deadline)); then
+      echo "::warning::$(tr '\n' ' ' <<<"$busy")is still busy, the deployment tries anyway." >&2
+      return 0
+    fi
+    echo "Waiting for $(tr '\n' ' ' <<<"$busy")to finish its last change." >&2
+    sleep "${AI_POLL_SECONDS:-30}"
+  done
+}
+
+wait_for_ai
 if ! outputs=$(apply "$name"); then
   # To the log, not to stdout: stdout becomes the step outputs.
   echo "::warning::Deployment $name failed. A new app revision can fail once while role assignments spread, so it runs once more in ${retry_after} seconds." >&2
   sleep "$retry_after"
+  wait_for_ai
   outputs=$(apply "$name-retry")
 fi
 

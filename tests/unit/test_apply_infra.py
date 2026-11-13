@@ -15,11 +15,20 @@ import pytest
 SCRIPT = Path(__file__).resolve().parents[2] / "tools" / "azure" / "apply_infra.sh"
 OUTPUT_LINE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*=.*$")
 
-# A stand in for the Azure CLI: fails the first deployment, succeeds on the retry.
+# A stand in for the Azure CLI. The AI account is busy at the first look and free after. The
+# first deployment fails, the retry succeeds.
 FAKE_AZ = """#!/usr/bin/env bash
-count_file="$(dirname "$0")/calls"
-calls=$(cat "$count_file" 2>/dev/null || echo 0)
-echo $((calls + 1)) > "$count_file"
+dir="$(dirname "$0")"
+if [ "$1 $2" = "resource list" ]; then
+  looks=$(cat "$dir/looks" 2>/dev/null || echo 0)
+  echo $((looks + 1)) > "$dir/looks"
+  if [ "$looks" = 0 ]; then
+    echo oai-argus-test
+  fi
+  exit 0
+fi
+calls=$(cat "$dir/calls" 2>/dev/null || echo 0)
+echo $((calls + 1)) > "$dir/calls"
 if [ "$calls" = 0 ]; then
   echo "first try fails" >&2
   exit 1
@@ -37,6 +46,7 @@ def test_retry_keeps_stdout_to_step_outputs(tmp_path: Path) -> None:
         **os.environ,
         "PATH": f"{tmp_path}{os.pathsep}{os.environ['PATH']}",
         "RETRY_AFTER_SECONDS": "0",
+        "AI_POLL_SECONDS": "0",
         "RESOURCE_GROUP": "rg-test",
     }
 
@@ -53,3 +63,6 @@ def test_retry_keeps_stdout_to_step_outputs(tmp_path: Path) -> None:
     assert lines == ["registryName=crargus", "appUrl=https://app.example"]
     assert all(OUTPUT_LINE.match(line) for line in lines)
     assert "runs once more" in result.stderr
+    # It waited for the busy AI account before the first try, and looked again before the retry.
+    assert "Waiting for oai-argus-test" in result.stderr
+    assert (tmp_path / "looks").read_text(encoding="utf-8").strip() == "3"
