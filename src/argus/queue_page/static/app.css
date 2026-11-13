@@ -80,3 +80,13 @@ textarea { width: 100%; min-height: 120px; font: 13px ui-monospace, Menlo, Conso
   border-radius: 4px;
   color: var(--muted);
 }
+
+/* Shadow or live mode, above the queue (#134). */
+.mode { border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; margin: 8px 0 16px; }
+.mode p { margin: 4px 0; }
+.mode.shadow { background: var(--soft); }
+.mode.live { border-color: var(--accent); }
+.mode form.switch label { display: block; margin: 8px 0 4px; }
+.mode form.switch input { width: 100%; max-width: 480px; font: inherit; padding: 4px 8px; }
+button.primary { background: var(--accent); color: #ffffff; border-color: var(--accent); }
+button.primary:hover { background: var(--accent); opacity: 0.9; }
