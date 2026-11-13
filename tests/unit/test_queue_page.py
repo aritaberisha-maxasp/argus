@@ -7,6 +7,7 @@ email is shown. The tests with real exceptions are in tests/integration/test_que
 import hashlib
 from datetime import UTC, date, datetime
 from email.message import EmailMessage
+from importlib.resources import files
 from pathlib import Path
 
 import pytest
@@ -146,6 +147,10 @@ def test_the_page_needs_no_inline_style() -> None:
     assert "<style" not in page
     assert ".style" not in script
     assert "cssText" not in script
+    # The demo mailbox page (#135) shares the look and the same CSP.
+    mailbox = files("argus.mailbox_page") / "static"
+    assert "style=" not in (mailbox / "mailbox.html").read_text(encoding="utf-8")
+    assert ".style" not in (mailbox / "mailbox.js").read_text(encoding="utf-8")
 
 
 def test_the_page_never_puts_server_text_into_html() -> None:
@@ -262,3 +267,30 @@ def test_the_static_files_ship_with_the_package() -> None:
         "geist.LICENSE",
         *FONT_SHA256,
     } <= names
+
+
+# Shadow or live mode on the page (#134)
+
+
+@pytest.mark.req("IN-01", "NF-01")
+def test_the_page_switches_the_mode_only_through_the_existing_route() -> None:
+    script = (STATIC / "app.js").read_text(encoding="utf-8")
+
+    assert '"/intake/mode"' in script
+    assert 'call(token, "/intake/mode", "PUT", { mode: target, reason: why })' in script
+    # The switch is shown only when ARGUS says this person may switch (the admin).
+    assert "if (data.may_switch)" in script
+    # No other route that writes: every other call is a GET.
+    assert script.count('"PUT"') == 1
+    for other in ('"POST"', '"PATCH"', '"DELETE"'):
+        assert other not in script
+
+
+@pytest.mark.req("NF-03")
+@pytest.mark.parametrize("role", [Role.APPROVER, None])
+def test_an_approver_or_a_person_without_a_role_sees_no_mode(
+    entra: FakeEntra, client: TestClient, role: Role | None
+) -> None:
+    token = entra.token(ALICE, roles=[role] if role else [])
+    assert client.get("/intake/mode", headers=bearer(token)).status_code == 403
+    assert client.get("/intake/mode").status_code == 401

@@ -244,11 +244,15 @@
 
   // --- talking to ARGUS -----------------------------------------------------------------
 
-  async function call(token, path) {
-    const response = await fetch(path, {
-      headers: { Authorization: "Bearer " + (await token()) },
-      cache: "no-store",
-    });
+  // A GET by default. ``body`` is sent as JSON with ``method`` (the mode switch uses PUT).
+  async function call(token, path, method, body) {
+    const headers = { Authorization: "Bearer " + (await token()) };
+    const options = { method: method || "GET", headers, cache: "no-store" };
+    if (body !== undefined) {
+      headers["Content-Type"] = "application/json";
+      options.body = JSON.stringify(body);
+    }
+    const response = await fetch(path, options);
     if (response.ok) return response;
     if (response.status === 401) {
       sessionStorage.removeItem(DEV_TOKEN_KEY);
@@ -258,6 +262,7 @@
       throw new Error("Your account has no access to the exception queue. Ask Arita if you need it.");
     }
     if (response.status === 404) throw new Error("This exception is not open any more, or it does not exist.");
+    if (response.status === 422) throw new Error("ARGUS did not accept this. Check what you typed and try again.");
     throw new Error("ARGUS could not answer right now (" + response.status + "). Try again in a moment.");
   }
 
@@ -282,7 +287,10 @@
   }
 
   async function showQueue(token) {
-    const data = await (await call(token, "/exceptions")).json();
+    const [data, mode] = await Promise.all([
+      call(token, "/exceptions").then((r) => r.json()),
+      modePanel(token),
+    ]);
     state.token = token;
     state.rows = data.exceptions;
 
@@ -295,7 +303,7 @@
       const text = el("div", null, "intro-text");
       text.append(eyebrow, el("h1", "No items need a human"));
       intro.append(text);
-      show(intro, el("p", "Nothing waits for you. ARGUS handled everything on its own.", "state"));
+      show(intro, mode, el("p", "Nothing waits for you. ARGUS handled everything on its own.", "state"));
       return;
     }
 
@@ -329,7 +337,7 @@
 
     const panels = el("div", null, "panels");
     panels.append(list, view.detail);
-    show(intro, panels);
+    show(intro, mode, panels);
 
     renderTabs();
     const wanted = idFromAddress();
@@ -421,6 +429,112 @@
     const target = id !== null ? id : state.rows[0].exception_id;
     if (target !== state.selected) select(target, "none");
   });
+
+  // --- shadow or live mode (#72, #134) -------------------------------------------------
+
+  const MODE_TEXT = {
+    shadow: ["Shadow mode", "ARGUS only suggests where each email should go. It moves nothing and opens no cases, a person sorts the Inbox."],
+    live: ["Live mode", "ARGUS sorts and files every email on its own and opens cases for invoices."],
+  };
+
+  // The mode for finance and admin. Only the admin gets the switch; the server checks the
+  // role again on every switch, so hiding the button is for clarity, not for safety.
+  async function modePanel(token) {
+    const panel = el("section", null, "panel mode");
+    panel.setAttribute("aria-label", "Mode");
+    let data;
+    try {
+      data = await (await call(token, "/intake/mode")).json();
+    } catch (e) {
+      panel.append(el("p", "ARGUS could not say right now whether it runs in shadow or live mode.", "muted"));
+      return panel;
+    }
+    const [title, text] = MODE_TEXT[data.mode] || [capital(words(data.mode)), ""];
+    panel.classList.add(data.mode === "live" ? "live" : "shadow");
+    const about = el("div", null, "mode-about");
+    about.append(el("span", title, "mode-pill"), el("p", text, "mode-text"));
+    panel.append(about);
+    if (data.may_switch) panel.append(switchForm(token, data.mode));
+    return panel;
+  }
+
+  function switchForm(token, current) {
+    const target = current === "live" ? "shadow" : "live";
+    const targetName = MODE_TEXT[target][0].toLowerCase();
+    const open = el("button", "Switch to " + targetName, "button");
+    open.type = "button";
+    const form = el("form", null, "switch");
+    form.hidden = true;
+    const id = "mode-reason";
+    const label = el("label", "Why do you switch? This goes into the audit log with your name.");
+    label.htmlFor = id;
+    const reason = el("input");
+    reason.id = id;
+    reason.type = "text";
+    reason.required = true;
+    reason.minLength = 3;
+    reason.maxLength = 500;
+    reason.placeholder = target === "live" ? "For example: demo for Benjamin" : "For example: demo is over";
+    const confirm = el("button", "Switch to " + targetName, "button primary");
+    confirm.type = "submit";
+    const cancel = el("button", "Cancel", "button");
+    cancel.type = "button";
+    const problem = el("p", null, "problem");
+    problem.setAttribute("role", "alert");
+    const actions = el("div", null, "switch-actions");
+    actions.append(confirm, cancel);
+    form.append(label, reason, actions, problem);
+    open.addEventListener("click", () => {
+      open.hidden = true;
+      form.hidden = false;
+      reason.focus();
+    });
+    cancel.addEventListener("click", () => {
+      form.hidden = true;
+      open.hidden = false;
+      problem.textContent = "";
+    });
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const why = reason.value.trim();
+      if (why.length < 3) {
+        problem.textContent = "Please give a reason of at least 3 characters.";
+        return;
+      }
+      confirm.disabled = true;
+      problem.textContent = "";
+      try {
+        await call(token, "/intake/mode", "PUT", { mode: target, reason: why });
+      } catch (e) {
+        problem.textContent = e && e.message ? e.message : "The switch did not work. Try again.";
+        confirm.disabled = false;
+        return;
+      }
+      // The switch is done. If only the reload fails, say so, so nobody switches twice.
+      try {
+        await showQueue(token);
+      } catch (e) {
+        message("ARGUS switched to " + targetName + ", but the page could not load again. " +
+          "Reload the page.", "problem");
+      }
+    });
+    const wrap = el("div", null, "mode-switch");
+    wrap.append(open, form);
+    return wrap;
+  }
+
+  // The fake mailbox page exists only in demo mode (#135). Its stylesheet is a fixed public
+  // file, so asking for it says whether to show the nav item without touching any data.
+  async function showMailboxLink() {
+    const link = document.getElementById("nav-mailbox");
+    if (!link) return;
+    try {
+      const response = await fetch("/mailbox/app.css", { method: "GET", cache: "no-store" });
+      if (response.ok) link.hidden = false;
+    } catch (e) {
+      // no demo mailbox here
+    }
+  }
 
   // --- one exception --------------------------------------------------------------------
 
@@ -580,6 +694,7 @@
     try {
       const token = await signIn();
       if (!token) return;
+      showMailboxLink();
       message("Loading…");
       await showQueue(token);
     } catch (e) {
