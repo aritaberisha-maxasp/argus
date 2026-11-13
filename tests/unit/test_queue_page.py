@@ -31,6 +31,16 @@ ALICE = "11111111-1111-4111-8111-111111111111"  # approver, made up
 # change to the file must be on purpose: update the version in static/README.md and this hash.
 MSAL_SHA256 = "2b580165064a6a4ec041ebd44832299172688a23a42c3b81d65314799dba04eb"
 
+# The Geist fonts (SIL Open Font License) are kept here too, from the npm package geist 1.9.2
+# (#152). Same rule: update static/README.md and these hashes together.
+FONT_SHA256 = {
+    "Geist-Regular.woff2": "9b2554b1bab7a16b7e592f24a2928776ee337c1038739f6d09be95e16afcd5aa",
+    "Geist-Medium.woff2": "5f0af5c55a6853b550e5b70bac054fb70aca977a1d7a3195f5c6953b6b19d553",
+    "Geist-SemiBold.woff2": "adde6a779fb07a4fd4b52bc93d61cdcc8e3a466e6216de8ba7a84ff93fe02068",
+    "GeistMono-Regular.woff2": "9f1fb60a7c2b9320990c8703c347508e814e010a5958cc610be4b020d18bb0c8",
+    "GeistMono-Medium.woff2": "247179b5a0a8baca5f46fd0e031bb7af475a5293ccbaeee21920ecab29806846",
+}
+
 
 def no_database() -> Engine:
     raise RuntimeError("these tests have no database")
@@ -97,6 +107,45 @@ def test_the_page_runs_only_its_own_scripts(client: TestClient) -> None:
     assert "unsafe-inline" not in policy
     assert response.headers["cache-control"] == "no-store"
     assert "<script>" not in response.text  # no inline script, only the two files
+
+
+def test_the_page_loads_its_fonts_and_icons_only_from_here(client: TestClient) -> None:
+    page = client.get("/queue")
+    policy = page.headers["content-security-policy"]
+
+    assert "font-src 'self';" in policy
+    assert "fonts.googleapis.com" not in page.text
+    assert 'href="/queue/favicon.svg"' in page.text
+    assert 'href="/queue/favicon-16.svg"' in page.text
+    for name, media_type in [
+        ("favicon.svg", "image/svg+xml"),
+        ("favicon-16.svg", "image/svg+xml"),
+        ("Geist-Regular.woff2", "font/woff2"),
+        ("geist.LICENSE", "text/plain; charset=utf-8"),
+    ]:
+        response = client.get(f"/queue/{name}")
+        assert response.status_code == 200, name
+        assert response.headers["content-type"] == media_type, name
+
+
+def test_the_fonts_are_the_pinned_ones_with_their_license() -> None:
+    for name, digest in FONT_SHA256.items():
+        assert hashlib.sha256((STATIC / name).read_bytes()).hexdigest() == digest, name
+    license_text = (STATIC / "geist.LICENSE").read_text(encoding="utf-8")
+    assert "SIL Open Font License" in license_text
+    style = (STATIC / "app.css").read_text(encoding="utf-8")
+    for name in FONT_SHA256:
+        assert f'url("/queue/{name}")' in style, name
+
+
+def test_the_page_needs_no_inline_style() -> None:
+    page = (STATIC / "queue.html").read_text(encoding="utf-8")
+    script = (STATIC / "app.js").read_text(encoding="utf-8")
+
+    assert "style=" not in page
+    assert "<style" not in page
+    assert ".style" not in script
+    assert "cssText" not in script
 
 
 def test_the_page_never_puts_server_text_into_html() -> None:
@@ -203,4 +252,13 @@ def test_a_download_name_cannot_break_the_response() -> None:
 def test_the_static_files_ship_with_the_package() -> None:
     names = {p.name for p in Path(str(STATIC)).iterdir()}
 
-    assert {"queue.html", "app.js", "app.css", "msal-browser.min.js"} <= names
+    assert {
+        "queue.html",
+        "app.js",
+        "app.css",
+        "msal-browser.min.js",
+        "favicon.svg",
+        "favicon-16.svg",
+        "geist.LICENSE",
+        *FONT_SHA256,
+    } <= names

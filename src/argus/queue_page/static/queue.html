@@ -4,19 +4,33 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex">
+  <meta name="color-scheme" content="dark">
   <title>ARGUS exception queue</title>
   <!-- sign in settings -->
+  <link rel="icon" href="/queue/favicon-16.svg" type="image/svg+xml" sizes="16x16">
+  <link rel="icon" href="/queue/favicon.svg" type="image/svg+xml" sizes="any">
   <link rel="stylesheet" href="/queue/app.css">
   <script src="/queue/msal-browser.min.js" defer></script>
   <script src="/queue/app.js" defer></script>
 </head>
 <body>
-  <header>
-    <a class="home" href="/queue">ARGUS exception queue</a>
-    <span id="who"></span>
+  <header class="top">
+    <div class="top-inner">
+      <a class="brand" href="/queue">
+        <svg class="mark" width="28" height="28" viewBox="0 0 64 64" aria-hidden="true"><rect x="0.5" y="0.5" width="63" height="63" rx="14" fill="#16181C" stroke="#2A2E35"/><path d="M17 48L32 17L47 48" fill="none" stroke="#ECEEF1" stroke-width="7" stroke-linejoin="miter"/><circle cx="32" cy="38" r="4.5" fill="#7C9CFF"/></svg>
+        <span class="brand-name">ARGUS</span>
+      </a>
+      <nav class="nav" aria-label="Main">
+        <a href="/queue" aria-current="page">Exceptions</a>
+      </nav>
+      <div class="account">
+        <span>Max ASP</span>
+        <span id="who" class="badge" role="img" aria-label="Not signed in"></span>
+      </div>
+    </div>
   </header>
   <main id="main">
-    <p id="status">Loading…</p>
+    <p id="status" class="state">Loading…</p>
   </main>
 </body>
 </html>
