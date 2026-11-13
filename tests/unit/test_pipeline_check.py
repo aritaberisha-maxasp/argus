@@ -411,3 +411,18 @@ def test_a_demo_workflow_in_the_deploy_queue_fails(tmp_path: Path) -> None:
     assert check_pipeline.check(root) == [
         "demo.yml needs a concurrency group of its own, not the deploy's"
     ]
+
+
+def test_a_demo_reset_that_splits_a_tsv_list_fails(tmp_path: Path) -> None:
+    root = copy_repo(tmp_path)
+    edit(
+        root,
+        DEMO,
+        lambda s: s.replace(
+            "--query principalId --output tsv",
+            "--query '[name, principalId]' --output tsv",
+        ),
+    )
+    assert "demo.yml must read the app identity's object ID with --query principalId" in (
+        check_pipeline.check(root)
+    )

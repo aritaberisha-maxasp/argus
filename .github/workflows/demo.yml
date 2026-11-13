@@ -151,10 +151,10 @@ jobs:
           echo "::add-mask::$ARGUS_DOCUMENTS_CONNECTION_STRING"
           export ARGUS_DOCUMENTS_CONNECTION_STRING
           python -m argus.demo reset
-          identity=$(az identity list --resource-group "$RESOURCE_GROUP" \
-            --query "[?name=='id-argus-app'] | [0].[name, principalId]" --output tsv)
-          python tools/deploy.py app-db-role \
-            --identity-name "$(cut -f1 <<<"$identity")" --object-id "$(cut -f2 <<<"$identity")"
+          # One value per query: az prints a list in tsv as one value per line, not per column.
+          principal=$(az identity show --resource-group "$RESOURCE_GROUP" --name id-argus-app \
+            --query principalId --output tsv)
+          python tools/deploy.py app-db-role --identity-name id-argus-app --object-id "$principal"
 
       - name: Close the database to this runner again
         if: always() && steps.firewall.outputs.rule != ''
