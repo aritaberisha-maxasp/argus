@@ -32,18 +32,17 @@ fi
 host=$(sed -E 's|^[^@]*@([^:/]+).*$|\1|' <<<"$url")
 database=$(sed -E 's|^[^@]*@[^/]+/([^?]+).*$|\1|' <<<"$url")
 
+# az refuses --tag together with --resource-group, so the tag is filtered in the query.
 account=$(az resource list \
   --resource-group "$RESOURCE_GROUP" \
   --resource-type Microsoft.Storage/storageAccounts \
-  --tag role=demo \
-  --query "[0].name" \
+  --query "[?tags.role=='demo'].name | [0]" \
   --output tsv)
 
 standins=$(az resource list \
   --resource-group "$RESOURCE_GROUP" \
   --resource-type Microsoft.App/containerApps \
-  --tag role=demo-standin \
-  --query "[].name" \
+  --query "[?tags.role=='demo-standin'].name" \
   --output tsv | tr '\n' ' ')
 
 echo "demo=${demo:-false}"
