@@ -31,12 +31,12 @@ from contextlib import ExitStack
 from dataclasses import dataclass, field
 from typing import Final
 
-from sqlalchemy import Engine, make_url
-from sqlalchemy.exc import ArgumentError
+from sqlalchemy import Engine
 
 from argus.connections import connections_from_env
-from argus.db import DATABASE_URL_ENV, engine_from_env
-from argus.demo.reset import DEMO_SUFFIX
+from argus.db import engine_from_env
+from argus.db.mode import DatabaseModeError
+from argus.db.mode import check_database_for_mode as _check_database_for_mode
 from argus.documents.store import AzureDocumentStore
 from argus.intake.email_text import EmailReader
 from argus.intake.filing import Folders, remove_due
@@ -163,21 +163,11 @@ def _setting(environ: Mapping[str, str], name: str) -> str:
 
 def check_database_for_mode(environ: Mapping[str, str], *, demo: bool) -> None:
     """Demo data only in the demo database, real data never in it (#124, ADR 0009, QA on PR
-    130): in demo mode the database name must end in ``_demo``, otherwise it must not. Names
-    the setting, never the URL, which can hold a user name."""
-    url = _setting(environ, DATABASE_URL_ENV)
+    130). The rule lives in :mod:`argus.db.mode`, shared with the nightly audit copy."""
     try:
-        name = make_url(url).database or ""
-    except ArgumentError:
-        raise JobSettingsError(f"{DATABASE_URL_ENV} is not a database URL") from None
-    if demo and not name.endswith(DEMO_SUFFIX):
-        raise JobSettingsError(
-            f"demo mode is on but the database in {DATABASE_URL_ENV} does not end in {DEMO_SUFFIX}"
-        )
-    if not demo and name.endswith(DEMO_SUFFIX):
-        raise JobSettingsError(
-            f"demo mode is off but the database in {DATABASE_URL_ENV} ends in {DEMO_SUFFIX}"
-        )
+        _check_database_for_mode(environ, demo=demo)
+    except DatabaseModeError as error:
+        raise JobSettingsError(str(error).replace("the job", "the intake jobs")) from None
 
 
 def services_from_env(environ: Mapping[str, str]) -> Services:

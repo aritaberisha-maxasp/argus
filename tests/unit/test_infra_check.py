@@ -1302,10 +1302,20 @@ def test_a_key_written_straight_into_a_job_env_fails(tmp_path: Path) -> None:
 
 
 @pytest.mark.req("NF-06")
-def test_secrets_handed_over_as_values_by_a_loop_fail(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "env",
+    [
+        AUDIT_JOB_ENV.replace("'secretRef'", "'value'"),
+        # The same with the keys the other way round, as Bicep compiles { value: .., name: .. }.
+        "[concat(variables('plainSettings'), map(variables('auditSecrets'), lambda('secret', "
+        "createObject('value', toLower(lambdaVariables('secret').secretName), 'name', "
+        "lambdaVariables('secret').envName))))]",
+    ],
+)
+def test_secrets_handed_over_as_values_by_a_loop_fail(tmp_path: Path, env: str) -> None:
     main = good_main()
     container = audit_copy_job(main)["properties"]["template"]["containers"][0]
-    container["env"] = AUDIT_JOB_ENV.replace("'secretRef'", "'value'")
+    container["env"] = env
     assert run(tmp_path, main) == [
         "app [parameters('auditJobName')] hands secrets over as plain settings"
     ]

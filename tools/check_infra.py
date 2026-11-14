@@ -88,8 +88,10 @@ AUDIT_JOB = "audit-copy"
 AUDIT_SCHEDULE = "0 1 * * *"
 # Settings whose value is a secret. They may only come from a Key Vault reference (NF-06).
 SECRET_SETTING = re.compile(r"(CONNECTION_STRING|API_KEY|KEY|TOKEN|SECRET|PASSWORD)$")
-# A loop over secrets that hands their value over as a plain setting instead of a secretRef.
-_PLAIN_SECRET_MAP = re.compile(r"\.envName,\s*'value'")
+# A loop over secrets that hands their value over as a plain setting instead of a secretRef:
+# an env expression that names a secret's envName and also sets a 'value', in either order
+# (compliance review of PR 157).
+_PLAIN_SECRET_MAP = re.compile(r"\.envName\b.*'value'|'value'.*\.envName\b")
 # Sign in with Microsoft (#23, ADR 0008, #133). The web app needs all five, from a parameter.
 SIGN_IN_SETTINGS = (
     "ARGUS_ENTRA_TENANT_ID",

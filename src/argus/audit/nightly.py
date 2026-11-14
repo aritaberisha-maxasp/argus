@@ -13,6 +13,7 @@ import argparse
 import hashlib
 import json
 import logging
+import os
 import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -38,7 +39,9 @@ from argus.audit.copies import (
 )
 from argus.cases.model import Actor, ExceptionReason
 from argus.cases.store import DuplicateRefused, open_exception, unit_of_work, verify_chain
+from argus.connections import demo_from_env
 from argus.db import engine_from_env
+from argus.db.mode import check_database_for_mode
 from argus.logsafe import log_outcome, use_safe_logging
 from argus.secrets import EnvironmentSecretStore
 from argus.working_days import BERLIN, berlin_date
@@ -550,6 +553,10 @@ def main(argv: list[str] | None = None, store: CopyStore | None = None) -> int:
     night: date = args.night or berlin_date(datetime.now().astimezone())
     ok = False
     try:
+        # Before anything is written: demo audit events must never reach the locked store,
+        # and real ones never the demo store that every reset empties (ADR 0009, compliance
+        # review of PR 157). A mismatch fails the run like any other error.
+        check_database_for_mode(os.environ, demo=demo_from_env(os.environ))
         engine = engine_from_env()
         try:
             store = store or AzureCopyStore.from_secrets(EnvironmentSecretStore())

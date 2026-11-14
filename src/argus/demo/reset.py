@@ -22,9 +22,9 @@ from sqlalchemy import Engine, make_url, text
 
 import argus.db
 from argus.connections import Connections, is_standin_address
+from argus.db.mode import DEMO_SUFFIX as DEMO_SUFFIX
 from argus.demo.common import DemoRefused, control_root
 
-DEMO_SUFFIX = "_demo"
 # The account name of the local Azurite emulator (UseDevelopmentStorage=true).
 EMULATOR_ACCOUNT = "devstoreaccount1"
 MIGRATIONS = Path(argus.db.__file__).resolve().parent / "migrations"

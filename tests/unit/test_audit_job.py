@@ -69,6 +69,17 @@ def fake_run(result: NightlyResult | BaseException) -> Any:
 COPY = CopyResult("audit-log/2026-11-03.jsonl", 1, 5, written=True)
 
 
+LIVE_URL = "postgresql+psycopg://argus_app@localhost:5432/argus"
+DEMO_URL = "postgresql+psycopg://argus_app@localhost:5432/argus_demo"
+
+
+@pytest.fixture(autouse=True)
+def live_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Demo mode off and the live database, as the job gets them in Azure."""
+    monkeypatch.setenv("ARGUS_DATABASE_URL", LIVE_URL)
+    monkeypatch.setenv("ARGUS_DEMO", "false")
+
+
 @pytest.fixture
 def engine(monkeypatch: pytest.MonkeyPatch) -> FakeEngine:
     fake = FakeEngine()
@@ -153,3 +164,54 @@ def test_an_unreachable_database_logs_failed_and_exits_1(
     assert "error: OperationalError" in text
     assert "s3cret-pw" not in text
     assert "Traceback" not in text
+
+
+@pytest.mark.req("NF-01")
+def test_demo_mode_with_its_own_database_runs(
+    engine: FakeEngine, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setenv("ARGUS_DEMO", "true")
+    monkeypatch.setenv("ARGUS_DATABASE_URL", DEMO_URL)
+    clean = NightlyResult(COPY, CheckReport(copies=1, events_checked=5), [])
+    monkeypatch.setattr(nightly, "run_nightly", fake_run(clean))
+    with caplog.at_level(logging.INFO):
+        assert main(["--night", NIGHT], store=MemoryStore()) == 0
+    assert outcome_lines(caplog) == [f"{OK_MARK} audit-copy"]
+
+
+@pytest.mark.req("NF-01", "NF-03")
+@pytest.mark.parametrize(
+    ("demo", "url", "problem"),
+    [
+        # Demo audit events would land in the locked store for ten years.
+        ("false", DEMO_URL, "demo mode is off but the database"),
+        # Real audit events would land in the demo store that every reset empties.
+        ("true", LIVE_URL, "demo mode is on but the database"),
+        ("maybe", LIVE_URL, "ARGUS_DEMO must be true or false"),
+    ],
+)
+def test_demo_mode_and_database_that_disagree_copy_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    demo: str,
+    url: str,
+    problem: str,
+) -> None:
+    monkeypatch.setenv("ARGUS_DEMO", demo)
+    monkeypatch.setenv("ARGUS_DATABASE_URL", url)
+
+    def must_not_run(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("the job went on although the database does not fit the mode")
+
+    monkeypatch.setattr(nightly, "engine_from_env", must_not_run)
+    monkeypatch.setattr(nightly, "run_nightly", must_not_run)
+    store = MemoryStore()
+    with caplog.at_level(logging.INFO):
+        assert main(["--night", NIGHT], store=store) == 1
+    assert store.files == {}
+    assert outcome_lines(caplog) == [f"{FAILED_MARK} audit-copy"]
+    # The reason is in the exception summary only as its type, never the URL (NF-03).
+    assert "argus_app@" not in safe_text(caplog)
+    assert any(
+        problem in str(r.exc_info[1]) for r in caplog.records if r.exc_info and r.exc_info[1]
+    )
