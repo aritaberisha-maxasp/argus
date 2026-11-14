@@ -145,6 +145,11 @@ var intakeJobNames = {
   removal: 'caj-${prefix}-removal'
 }
 
+// The nightly audit copy (#103). It needs only the database and the document store, so it runs
+// whenever the ARGUS image does: live, and in demo mode against the demo database and store.
+var runAuditJob = appImage != 'mcr.microsoft.com/k8se/quickstart:latest'
+var auditJobName = 'caj-${prefix}-audit-copy'
+
 resource appIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
   name: 'id-${prefix}-app'
   location: location
@@ -281,6 +286,8 @@ module apps 'modules/apps.bicep' = {
     demoMailbox: demoMailbox
     runIntakeJobs: runIntakeJobs
     intakeJobNames: intakeJobNames
+    runAuditJob: runAuditJob
+    auditJobName: auditJobName
     intakeSettings: intakeSettings
     signInSettings: signInSettings
   }
@@ -324,6 +331,8 @@ module alerts 'modules/alerts.bicep' = {
     workspaceId: monitoring.outputs.id
     watchIntakeJobs: runIntakeJobs
     intakeJobNames: intakeJobNames
+    watchAuditJob: runAuditJob
+    auditJobName: auditJobName
   }
   // The rules watch the logs of the jobs, so the jobs come first.
   dependsOn: [
@@ -348,3 +357,4 @@ output demo bool = demo
 output demoDocumentsAccountName string = demo ? demoStore.outputs.accountName : ''
 output demoSeedJobName string = standinNames.seed
 output intakeJobs bool = runIntakeJobs
+output auditJob bool = runAuditJob

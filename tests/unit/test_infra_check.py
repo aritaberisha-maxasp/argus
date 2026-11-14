@@ -86,6 +86,59 @@ def intake_jobs() -> dict[str, Any]:
     }
 
 
+# How Bicep compiles the env list of the audit copy job in infra/modules/apps.bicep (#103).
+AUDIT_JOB_ENV = (
+    "[concat(variables('plainSettings'), map(variables('auditSecrets'), lambda('secret', "
+    "createObject('name', lambdaVariables('secret').envName, 'secretRef', "
+    "toLower(lambdaVariables('secret').secretName)))))]"
+)
+
+
+def audit_job() -> dict[str, Any]:
+    """The nightly audit copy job as Bicep compiles it from infra/modules/apps.bicep, with its
+    secrets written as a loop (#103)."""
+    return {
+        "condition": "[parameters('runAuditJob')]",
+        "type": "Microsoft.App/jobs",
+        "name": "[parameters('auditJobName')]",
+        "location": "[parameters('location')]",
+        "properties": {
+            "configuration": {
+                "copy": [
+                    {
+                        "name": "secrets",
+                        "count": "[length(variables('auditSecrets'))]",
+                        "input": {
+                            "name": "[toLower(variables('auditSecrets')[copyIndex('secrets')]"
+                            ".secretName)]",
+                            "keyVaultUrl": "[format('{0}secrets/{1}', parameters('keyVaultUri'),"
+                            " variables('auditSecrets')[copyIndex('secrets')].secretName)]",
+                            "identity": "[parameters('identityId')]",
+                        },
+                    }
+                ],
+                "triggerType": "Schedule",
+                "replicaTimeout": 3600,
+                "replicaRetryLimit": 0,
+                "scheduleTriggerConfig": {
+                    "cronExpression": "[variables('auditJob').cron]",
+                    "parallelism": 1,
+                    "replicaCompletionCount": 1,
+                },
+            },
+            "template": {
+                "containers": [
+                    {
+                        "name": "[variables('auditJob').job]",
+                        "command": ["python", "-m", "argus.audit"],
+                        "env": AUDIT_JOB_ENV,
+                    }
+                ]
+            },
+        },
+    }
+
+
 def alerts() -> dict[str, Any]:
     """The action group and the log alert loop as compiled from infra/modules/alerts.bicep."""
     rules = [
@@ -93,9 +146,13 @@ def alerts() -> dict[str, Any]:
         for job in ("sweep", "removal")
         for kind, mark in (("failed", "failed"), ("silent", "ok"))
     ]
+    audit_rules = [
+        {"kind": kind, "query": f'Logs | where Log_s contains "argus-job {mark} audit-copy"'}
+        for kind, mark in (("failed", "failed"), ("silent", "ok"))
+    ]
     return {
         "parameters": {"location": {"type": "string"}, "alertEmail": {"type": "string"}},
-        "variables": {"intakeRules": rules},
+        "variables": {"intakeRules": rules, "auditRules": audit_rules},
         "resources": {
             "actionGroup": {
                 "type": "Microsoft.Insights/actionGroups",
@@ -115,6 +172,19 @@ def alerts() -> dict[str, Any]:
                 "properties": {
                     "criteria": {
                         "allOf": [{"query": "[variables('intakeRules')[copyIndex()].query]"}]
+                    },
+                    "actions": {"actionGroups": ["[resourceId('x', 'ag-argus-ops')]"]},
+                },
+            },
+            "auditAlerts": {
+                "copy": {"name": "auditAlerts", "count": "[length(variables('auditRules'))]"},
+                "condition": "[parameters('watchAuditJob')]",
+                "type": "Microsoft.Insights/scheduledQueryRules",
+                "name": "[format('alert-audit-{0}', variables('auditRules')[copyIndex()].kind)]",
+                "location": "[parameters('location')]",
+                "properties": {
+                    "criteria": {
+                        "allOf": [{"query": "[variables('auditRules')[copyIndex()].query]"}]
                     },
                     "actions": {"actionGroups": ["[resourceId('x', 'ag-argus-ops')]"]},
                 },
@@ -214,6 +284,8 @@ def good_main() -> dict[str, Any]:
             ],
             "signInEnv": sign_in_env(),
             "demoSettings": [{"name": "ARGUS_MAILBOX", "value": "accounts@maxasp.example"}],
+            "auditJob": {"job": "audit-copy", "cron": "0 1 * * *"},
+            "auditSecrets": ["[variables('generatedSecrets')[0]]"],
         },
         "resources": [
             intake_jobs(),
@@ -234,6 +306,7 @@ def good_main() -> dict[str, Any]:
                     },
                 },
             },
+            audit_job(),
         ],
     }
     # Each stand in reachable only inside the Container Apps environment (#124).
@@ -1084,3 +1157,163 @@ def test_no_web_app_fails(tmp_path: Path) -> None:
     del main["resources"]["apps"]["properties"]["template"]["resources"][1]
 
     assert run(tmp_path, main) == ["no ARGUS web app found in the apps module"]
+
+
+# --- The nightly audit copy job (#103) ---
+
+
+def audit_copy_job(main: dict[str, Any]) -> dict[str, Any]:
+    job: dict[str, Any] = apps_module(main)["resources"][2]
+    return job
+
+
+@pytest.mark.req("NF-01", "NF-05")
+@pytest.mark.parametrize("cron", ["0 2 * * *", "*/5 * * * *", "0 1 * * 0", ""])
+def test_an_audit_copy_off_its_nightly_schedule_fails(tmp_path: Path, cron: str) -> None:
+    main = good_main()
+    apps_module(main)["variables"]["auditJob"]["cron"] = cron
+    assert run(tmp_path, main) == [
+        "audit copy job [parameters('auditJobName')] must run on the schedule '0 1 * * *'"
+    ]
+
+
+@pytest.mark.req("NF-01")
+def test_no_audit_copy_job_fails(tmp_path: Path) -> None:
+    main = good_main()
+    del apps_module(main)["resources"][2]
+    assert run(tmp_path, main) == ["no job runs the nightly audit copy (python -m argus.audit)"]
+
+
+@pytest.mark.req("NF-01")
+def test_two_audit_copy_jobs_fail(tmp_path: Path) -> None:
+    main = good_main()
+    apps_module(main)["resources"].append(audit_job())
+    problems = run(tmp_path, main)
+    assert len(problems) == 1
+    assert "more than one job runs the nightly audit copy" in problems[0]
+
+
+@pytest.mark.req("NF-01")
+@pytest.mark.parametrize(
+    ("change", "problem"),
+    [
+        (("triggerType", "Manual"), "must run on a schedule"),
+        (("replicaRetryLimit", 1), "must not retry"),
+        (("replicaTimeout", None), "needs a time limit per run"),
+    ],
+)
+def test_an_audit_copy_job_that_retries_or_has_no_schedule_fails(
+    tmp_path: Path, change: tuple[str, Any], problem: str
+) -> None:
+    main = good_main()
+    key, value = change
+    audit_copy_job(main)["properties"]["configuration"][key] = value
+    problems = run(tmp_path, main)
+    assert len(problems) == 1
+    assert problems[0].startswith("audit copy job ")
+    assert problem in problems[0]
+
+
+@pytest.mark.req("NF-01")
+def test_two_audit_copies_at_once_fail(tmp_path: Path) -> None:
+    main = good_main()
+    trigger = audit_copy_job(main)["properties"]["configuration"]["scheduleTriggerConfig"]
+    trigger["parallelism"] = 2
+    problems = run(tmp_path, main)
+    assert len(problems) == 1
+    assert "one replica at a time" in problems[0]
+
+
+@pytest.mark.req("NF-01")
+def test_an_audit_copy_job_that_runs_with_the_placeholder_image_fails(tmp_path: Path) -> None:
+    main = good_main()
+    del audit_copy_job(main)["condition"]
+    assert run(tmp_path, main) == [
+        "audit copy job [parameters('auditJobName')] must not run with the placeholder image"
+    ]
+
+
+@pytest.mark.req("NF-01")
+@pytest.mark.parametrize("index", range(2))
+def test_an_audit_copy_outcome_no_alert_watches_fails(tmp_path: Path, index: int) -> None:
+    main = good_main()
+    rule = alerts_module(main)["variables"]["auditRules"][index]
+    mark = rule["query"].split('"')[1]
+    rule["query"] = "Logs | take 1"
+    assert run(tmp_path, main) == [f"no alert watches the log line {mark!r}"]
+
+
+@pytest.mark.req("NF-01")
+def test_an_audit_alert_without_an_action_group_fails(tmp_path: Path) -> None:
+    main = good_main()
+    alerts_module(main)["resources"]["auditAlerts"]["properties"]["actions"]["actionGroups"] = []
+    problems = run(tmp_path, main)
+    assert len(problems) == 1
+    assert "sends to no action group" in problems[0]
+
+
+# --- Secrets of every app and job only as Key Vault references (#103, NF-06) ---
+
+
+@pytest.mark.req("NF-06")
+def test_a_secret_written_as_a_loop_is_checked_too(tmp_path: Path) -> None:
+    main = good_main()
+    loop = audit_copy_job(main)["properties"]["configuration"]["copy"][0]
+    loop["input"] = {"name": "argus-documents", "value": "[parameters('connection')]"}
+    assert run(tmp_path, main) == [
+        "app [parameters('auditJobName')] gets a secret that is not a Key Vault reference"
+    ]
+
+
+@pytest.mark.req("NF-06")
+def test_a_secret_list_built_by_an_expression_without_key_vault_fails(tmp_path: Path) -> None:
+    main = good_main()
+    secrets = standin_resources(main)["seedJob"]["properties"]["configuration"]
+    secrets["secrets"] = "[createArray(createObject('name', 'token', 'value', parameters('t')))]"
+    assert run(tmp_path, main) == [
+        "app caj-argus-demo-seed gets a secret that is not a Key Vault reference"
+    ]
+
+
+@pytest.mark.req("NF-06")
+def test_a_connection_string_as_a_plain_setting_fails(tmp_path: Path) -> None:
+    main = good_main()
+    apps_variables(main)["plainSettings"].append(
+        {"name": "ARGUS_DOCUMENTS_CONNECTION_STRING", "value": "[parameters('connection')]"}
+    )
+    problems = run(tmp_path, main)
+    # Both the web app and the audit copy job use plainSettings here.
+    assert len(problems) == 2
+    assert all(
+        "gets the secret setting ARGUS_DOCUMENTS_CONNECTION_STRING as a plain value" in p
+        for p in problems
+    )
+
+
+@pytest.mark.req("NF-06")
+def test_a_key_written_straight_into_a_job_env_fails(tmp_path: Path) -> None:
+    main = good_main()
+    container = audit_copy_job(main)["properties"]["template"]["containers"][0]
+    container["env"] = [{"name": "AZURE_OPENAI_API_KEY", "value": "[parameters('key')]"}]
+    assert run(tmp_path, main) == [
+        "app [parameters('auditJobName')] gets the secret setting AZURE_OPENAI_API_KEY as a "
+        "plain value, not from Key Vault"
+    ]
+
+
+@pytest.mark.req("NF-06")
+def test_secrets_handed_over_as_values_by_a_loop_fail(tmp_path: Path) -> None:
+    main = good_main()
+    container = audit_copy_job(main)["properties"]["template"]["containers"][0]
+    container["env"] = AUDIT_JOB_ENV.replace("'secretRef'", "'value'")
+    assert run(tmp_path, main) == [
+        "app [parameters('auditJobName')] hands secrets over as plain settings"
+    ]
+
+
+@pytest.mark.req("NF-06")
+def test_a_stand_in_token_as_a_secret_reference_passes(tmp_path: Path) -> None:
+    main = good_main()
+    container = audit_copy_job(main)["properties"]["template"]["containers"][0]
+    container["env"] = [{"name": "ARGUS_GRAPH_STANDIN_TOKEN", "secretRef": "token"}]
+    assert run(tmp_path, main) == []

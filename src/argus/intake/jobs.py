@@ -43,7 +43,9 @@ from argus.intake.filing import Folders, remove_due
 from argus.intake.graph import GraphClient
 from argus.intake.invoices import Invoicing
 from argus.intake.sweep import DocumentArchive, Sorting, sweep
-from argus.logsafe import use_safe_logging
+from argus.logsafe import FAILED_MARK as FAILED_MARK
+from argus.logsafe import OK_MARK as OK_MARK
+from argus.logsafe import log_outcome, use_safe_logging
 from argus.reading.document_intelligence import AzureDocumentIntelligence
 from argus.reading.language_model import AzureOpenAIFieldModel
 from argus.secrets import EnvironmentSecretStore
@@ -56,9 +58,6 @@ log = logging.getLogger("argus.intake.jobs")
 SWEEP: Final = "sweep"
 REMOVAL: Final = "removal"
 JOBS: Final = (SWEEP, REMOVAL)
-# What the Azure alerts look for in the job logs (infra/modules/alerts.bicep).
-OK_MARK: Final = "argus-job ok"
-FAILED_MARK: Final = "argus-job failed"
 
 # Who Max ASP is, for the sorting (#25, #70) and the invoice reading (#30, #106). Plain values,
 # not secrets. In demo mode the templates set the synthetic values of the test fixtures.
@@ -256,10 +255,7 @@ def run_job(
             services.close()
     except Exception:
         log.exception("The %s job could not finish", job)
-    if ok:
-        log.info("%s %s", OK_MARK, job)
-    else:
-        log.error("%s %s", FAILED_MARK, job)
+    log_outcome(log, job, ok)
     return ok
 
 

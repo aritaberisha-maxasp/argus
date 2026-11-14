@@ -3,7 +3,7 @@
 // The scheduled jobs from ADR 0001 (mailbox sweep, reminders, payment run, bank import,
 // exception digest) run in this environment as Container Apps jobs. Each job story adds its
 // job here once the app has a command for it. Today: the mailbox sweep and the daily removal
-// (#125). The nightly audit copy (#103) follows the same pattern.
+// (#125), and the nightly audit copy (#103).
 //
 // Every secret comes from Key Vault through the app's managed identity. The pipeline from #81
 // builds the ARGUS image and passes it in. The very first deploy starts with a public
@@ -65,6 +65,12 @@ param runIntakeJobs bool
 
 @description('Names of the two intake jobs, from main.bicep.')
 param intakeJobNames object
+
+@description('Run the nightly audit copy as a scheduled job (#103).')
+param runAuditJob bool
+
+@description('Name of the nightly audit copy job, from main.bicep.')
+param auditJobName string
 
 @description('Who Max ASP is, for the sorting and the invoice reading. Used only with demo off.')
 param intakeSettings intakeSettingValues
@@ -444,6 +450,88 @@ resource intakeJobs 'Microsoft.App/jobs@2024-03-01' = [
     }
   }
 ]
+
+// The nightly audit copy (#83, #103, NF-01): `python -m argus.audit` copies the new audit
+// events into `audit-log/<night>.jsonl` in the documents container, then compares the database
+// with every copy. Once a night at 01:00 UTC (02:00 Berlin in winter, 03:00 in summer), well
+// after midnight, because the copy and the check each read their own snapshot. No retries: a
+// failed run has normally put an item in the exception queue already, and it always logs
+// `argus-job failed audit-copy`, which the alert in alerts.bicep watches for the case where
+// the database could not be reached. The next night tries again.
+// Same image, identity and database sign in as the web app. It only needs the document store
+// secret, as a Key Vault reference like every other secret: the locked store live, the demo
+// store in demo mode (ADR 0009). Plain values only, so tools/check_infra.py can read them.
+var auditJob = {
+  job: 'audit-copy'
+  cron: '0 1 * * *'
+}
+var auditSecrets = [
+  generatedSecrets[0]
+]
+
+resource auditCopyJob 'Microsoft.App/jobs@2024-03-01' = if (runAuditJob) {
+  name: auditJobName
+  location: location
+  tags: tags
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: {
+      '${identityId}': {}
+    }
+  }
+  properties: {
+    environmentId: environment.id
+    workloadProfileName: 'Consumption'
+    configuration: {
+      triggerType: 'Schedule'
+      // The check reads every copy each night, so it gets more time than the intake jobs.
+      replicaTimeout: 3600
+      replicaRetryLimit: 0
+      scheduleTriggerConfig: {
+        cronExpression: auditJob.cron
+        parallelism: 1
+        replicaCompletionCount: 1
+      }
+      registries: [
+        {
+          server: registryLoginServer
+          identity: identityId
+        }
+      ]
+      secrets: [
+        for secret in auditSecrets: {
+          name: toLower(secret.secretName)
+          keyVaultUrl: '${keyVaultUri}secrets/${secret.secretName}'
+          identity: identityId
+        }
+      ]
+    }
+    template: {
+      containers: [
+        {
+          name: auditJob.job
+          image: image
+          command: [
+            'python'
+            '-m'
+            'argus.audit'
+          ]
+          resources: {
+            cpu: json('0.5')
+            memory: '1Gi'
+          }
+          env: concat(
+            plainSettings,
+            map(auditSecrets, secret => {
+              name: secret.envName
+              secretRef: toLower(secret.secretName)
+            })
+          )
+        }
+      ]
+    }
+  }
+}
 
 output environmentId string = environment.id
 output appName string = app.name
