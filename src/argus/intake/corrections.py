@@ -22,7 +22,7 @@ from dataclasses import dataclass
 
 from sqlalchemy import Connection, text
 
-from argus.cases.model import Actor, ExceptionReason, Outcome
+from argus.cases.model import Actor, CaseKind, ExceptionReason, Outcome
 from argus.cases.store import correct_case, open_exception, resolve_exception
 from argus.intake.duplicates import flag_if_duplicate
 
@@ -33,6 +33,10 @@ _FIELD_WORDS = {
     "gross_amount": "the gross amount",
     "currency": "the currency",
 }
+
+
+class BadCorrection(ValueError):
+    """A value the person can fix, with a sentence that says how."""
 
 
 class NotCorrectable(Exception):
@@ -144,8 +148,9 @@ def correct_flagged_values(
     row = (
         connection.execute(
             text(
-                "select reason, case_id from exception_item"
-                " where id = :id and resolved_at is null for update"
+                "select e.reason, e.case_id, c.kind from exception_item e"
+                " left join invoice_case c on c.id = e.case_id"
+                " where e.id = :id and e.resolved_at is null for update of e"
             ),
             {"id": exception_id},
         )
@@ -159,6 +164,12 @@ def correct_flagged_values(
     ):
         raise NotCorrectable(f"exception {exception_id} is not an open values to check exception")
     case_id = int(row["case_id"])
+    if row["kind"] == CaseKind.INCOMING_INVOICE.value and correction.gross_cents <= 0:
+        # The database refuses it too (migration 0013); this is the sentence for the person.
+        raise BadCorrection(
+            "An invoice asks for money, so its gross amount is above zero. Enter it without a"
+            " minus sign."
+        )
     correction_id = correct_case(
         connection,
         case_id,

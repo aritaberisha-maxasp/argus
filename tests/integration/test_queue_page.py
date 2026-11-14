@@ -539,6 +539,8 @@ def test_an_approver_cannot_correct_values(
         ("gross_amount", "1.190,00", "gross amount"),
         ("gross_amount", "11.900", "gross amount"),
         ("gross_amount", "0", "cannot be zero"),
+        ("gross_amount", "-1190,00", "above zero"),
+        ("document_number", "RE|1", "invoice number"),
         ("currency", "EURO", "three letter code"),
         ("reason", "  ", "why"),
         ("document_number", " ", "invoice number"),

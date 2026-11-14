@@ -38,6 +38,7 @@ from argus.cases.money import to_cents
 from argus.cases.store import CaseRuleBroken, unit_of_work
 from argus.documents.store import DocumentStore
 from argus.intake.corrections import (
+    BadCorrection,
     CorrectedBy,
     Correction,
     NotCorrectable,
@@ -69,7 +70,8 @@ QueueReader = Annotated[SignedInUser, Depends(require_role(Role.FINANCE, Role.AD
 
 _SAFE_CONTENT_TYPE = re.compile(r"^[a-z0-9][a-z0-9.+-]*/[a-z0-9][a-z0-9.+-]*$")
 
-# An amount as a person types it: 1190, 1190.00 or 1190,00, with a minus for a credit note.
+# An amount as a person types it: 1190, 1190.00 or 1190,00. A credit note may carry a minus as
+# printed; an incoming invoice may not (checked against the case kind).
 # No thousands separators, so "1.190" is never read as 1.19 or 1190 by mistake.
 _AMOUNT = re.compile(r"^-?\d{1,12}(?:[.,]\d{1,2})?$")
 
@@ -86,7 +88,7 @@ class CorrectionForm(BaseModel):
 def parse_correction(form: CorrectionForm) -> Correction:
     """The form as a correction, or ValueError with a sentence for the person."""
     number = form.document_number.strip()
-    if not 1 <= len(number) <= 100:
+    if not 1 <= len(number) <= 100 or "|" in number:
         raise ValueError("Enter the invoice number as printed on the invoice.")
     amount = form.gross_amount.strip().replace(" ", "")
     if not _AMOUNT.match(amount):
@@ -240,6 +242,8 @@ def install_queue_page(
         try:
             with unit_of_work(engine(), user.actor) as db:
                 done = correct_flagged_values(db, exception_id, correction, by)
+        except BadCorrection as problem:
+            return _json({"problem": str(problem)}, status.HTTP_422_UNPROCESSABLE_ENTITY)
         except NotCorrectable:
             raise HTTPException(
                 status.HTTP_404_NOT_FOUND, "no open exception with values to check"

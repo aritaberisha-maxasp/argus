@@ -13,7 +13,8 @@ This migration adds:
 - ``case_correction``: one row per correction, never changed or removed. A correction needs a
   person (a ``user:`` actor, never a job), the person's name as it was at that moment (ADR 0008)
   and a reason of at least three characters. The database fills in the old values, who and
-  when. All three new values are required, so the duplicate key can be built right after.
+  when. All three new values are required, so the duplicate key can be built right after. The
+  gross amount of an incoming invoice must be above zero; credit notes keep their printed sign.
   Inserting the row is what changes the case: the database copies the new values onto the case
   in the same statement.
 - On ``invoice_case`` the number, amount and currency now only change through such a row in
@@ -82,10 +83,16 @@ begin
   if coalesce(length(btrim(new.reason)), 0) < 3 then
     raise exception 'a correction of case % needs a reason', new.case_id;
   end if;
-  select document_number, gross_minor, currency into c
+  select kind, document_number, gross_minor, currency into c
   from invoice_case where id = new.case_id for update;
   if not found then
     raise exception 'case % does not exist', new.case_id;
+  end if;
+  -- An invoice asks for money, so its gross amount is above zero. A minus would also give it
+  -- a duplicate key no copy of the real invoice matches (code review of PR 159). Credit notes
+  -- keep the sign as printed.
+  if c.kind = 'incoming_invoice' and new.gross_minor <= 0 then
+    raise exception 'the gross amount of invoice case % must be above zero', new.case_id;
   end if;
   if new.exception_id is not null then
     select case_id, resolved_at into x from exception_item where id = new.exception_id;

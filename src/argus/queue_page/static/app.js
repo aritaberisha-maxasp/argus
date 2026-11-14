@@ -332,7 +332,7 @@
     reason.required = true;
     reason.maxLength = 500;
     reason.className = "reason";
-    const reasonLabel = el("label", "Why (kept in the audit log)");
+    const reasonLabel = el("label", "Why (kept in the audit log for ten years, so no personal details)");
     reasonLabel.htmlFor = reason.id;
     const reasonRow = el("p");
     reasonRow.append(reasonLabel, reason);

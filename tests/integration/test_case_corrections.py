@@ -26,6 +26,7 @@ from argus.cases.store import (
     unit_of_work,
 )
 from argus.intake.corrections import (
+    BadCorrection,
     CorrectedBy,
     Correction,
     NotCorrectable,
@@ -497,3 +498,50 @@ def test_only_an_open_values_to_check_exception_can_be_corrected(app: Engine) ->
 
     with pytest.raises(NotCorrectable):
         correct(app, exception_id, number, 12000)
+
+
+# Code review of PR 159: a minus on an invoice would slip past the duplicate check
+
+
+@pytest.mark.parametrize("cents", [-11900, 0])
+def test_the_database_refuses_an_invoice_amount_that_is_not_above_zero(
+    app: Engine, cents: int
+) -> None:
+    case_id, _ = a_flagged_case(app)
+
+    with (
+        pytest.raises(CaseRuleBroken, match="must be above zero"),
+        unit_of_work(app, BENJAMIN.actor) as db,
+    ):
+        insert_correction(db, case_id, gross_cents=cents)
+    assert row_of(app, case_id)["gross_minor"] is None
+
+
+def test_a_minus_copy_of_a_known_invoice_is_refused_not_waved_through(app: Engine) -> None:
+    vat = issuer()
+    intake(app, "RC-30", gross="119.00", vat=vat)
+    case_id = intake(app, "RC-30", gross=None, vat=vat)
+
+    with pytest.raises(BadCorrection, match="above zero"):
+        correct(app, values_exception(app, case_id), "RC-30", -11900)
+    assert row_of(app, case_id)["status"] == CaseStatus.EXCEPTION
+    assert row_of(app, case_id)["duplicate_key"] is None
+
+
+def test_a_credit_note_keeps_its_minus_as_printed(app: Engine) -> None:
+    with unit_of_work(app, INTAKE) as db:
+        case_id = create_case(
+            db,
+            CaseKind.INCOMING_CREDIT_NOTE,
+            source_email_id=800_000 + next(_counter),
+            document_number="GS-31",
+            currency="EUR",
+            case_key=f"{issuer()}|GS-31",
+        )
+        exception_id = queue_values_to_check(db, case_id)
+    assert exception_id is not None
+
+    correct(app, exception_id, "GS-31", -11900)
+
+    assert row_of(app, case_id)["gross_minor"] == -11900
+    assert row_of(app, case_id)["duplicate_key"] is not None
