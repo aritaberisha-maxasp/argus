@@ -12,11 +12,12 @@ This migration adds:
   this exception, or as ``rejected``.
 - ``case_correction``: one row per correction, never changed or removed. A correction needs a
   person (a ``user:`` actor, never a job), the person's name as it was at that moment (ADR 0008)
-  and a reason of at least three characters. The database fills in the old values, who and
-  when. All three new values are required, so the duplicate key can be built right after. The
-  gross amount of an incoming invoice must be above zero; credit notes keep their printed sign.
-  Inserting the row is what changes the case: the database copies the new values onto the case
-  in the same statement.
+  and a reason of at least three characters other than spaces. The database fills in the old
+  values, who and when. All three new values are required, so the duplicate key can be built
+  right after. The gross amount of an incoming invoice must be above zero; credit notes keep
+  their printed sign. Inserting the row is what changes the case: the database copies the new
+  values onto the case in the same statement. Blank means only spaces of any kind, including
+  tabs, line breaks and non-breaking spaces (QA on PR 159).
 - On ``invoice_case`` the number, amount and currency now only change through such a row in
   the same transaction, with exactly those values. Any other change is refused. So a job can
   never change what gets paid, and every change has a person and a reason.
@@ -48,6 +49,17 @@ depends_on = None
 UPGRADE = r"""
 alter type exception_reason add value 'values_to_check';
 
+-- btrim only removes plain spaces. This also removes tabs, line breaks and the Unicode spaces
+-- (non-breaking, thin, ideographic, zero width), so a text of only those counts as blank (QA on
+-- PR 159).
+create function correction_trim(t text) returns text language sql immutable
+set search_path = pg_catalog, pg_temp as $$
+  select regexp_replace(
+    regexp_replace(t,
+                   '^[\s\u00a0\u1680\u180e\u2000-\u200b\u2028\u2029\u202f\u205f\u3000\ufeff]+', ''),
+    '[\s\u00a0\u1680\u180e\u2000-\u200b\u2028\u2029\u202f\u205f\u3000\ufeff]+$', '')
+$$;
+
 create table case_correction (
   id bigint generated always as identity primary key,
   case_id bigint not null references invoice_case(id),
@@ -55,13 +67,14 @@ create table case_correction (
   old_document_number text,               -- set by the database from the case
   old_gross_minor bigint,
   old_currency char(3),
-  document_number text not null check (length(btrim(document_number)) between 1 and 100),
+  document_number text not null check (length(correction_trim(document_number)) between 1 and 100),
   gross_minor bigint not null,            -- cents, never floats
   currency char(3) not null check (currency ~ '^[A-Z]{3}$'),
-  reason text not null check (length(btrim(reason)) between 3 and 500),
+  reason text not null check (length(correction_trim(reason)) between 3 and 500),
   corrected_by text not null,             -- user:<Entra object ID>, set by the database
-  corrected_by_name text not null check (length(btrim(corrected_by_name)) between 1 and 200),
-  corrected_by_address text check (length(btrim(corrected_by_address)) between 3 and 320),
+  corrected_by_name text not null
+    check (length(correction_trim(corrected_by_name)) between 1 and 200),
+  corrected_by_address text check (length(correction_trim(corrected_by_address)) between 3 and 320),
   corrected_at timestamptz not null,      -- set by the database
   txid bigint not null                    -- the transaction, set by the database
 );
@@ -80,7 +93,7 @@ begin
     raise exception 'only a person can correct the number, amount or currency of case %',
       new.case_id;
   end if;
-  if coalesce(length(btrim(new.reason)), 0) < 3 then
+  if coalesce(length(correction_trim(new.reason)), 0) < 3 then
     raise exception 'a correction of case % needs a reason', new.case_id;
   end if;
   select kind, document_number, gross_minor, currency into c
@@ -243,6 +256,7 @@ drop function case_correction_fixed();
 drop function case_correction_audit();
 drop function case_correction_apply();
 drop function case_correction_guard();
+drop function correction_trim(text);
 -- Postgres cannot drop one value of an enum, so the type is built again without it.
 alter type exception_reason rename to exception_reason_0013;
 create type exception_reason as enum (

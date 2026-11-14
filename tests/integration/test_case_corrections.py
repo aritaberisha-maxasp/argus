@@ -325,7 +325,10 @@ def test_python_also_refuses_a_job_before_asking_the_database(app: Engine) -> No
         correct_flagged_values(db, exception_id, Correction("X", 1, "EUR", "why"), job)
 
 
-@pytest.mark.parametrize("reason", ["", "   ", "ok", None])
+@pytest.mark.parametrize(
+    "reason",
+    ["", "   ", "ok", None, "\n\n\n", "\t\t\t", "\u00a0\u00a0\u00a0", "\u2003\u200b\u3000\r\n"],
+)
 def test_a_blank_or_missing_reason_is_refused_by_the_database(
     app: Engine, reason: str | None
 ) -> None:
@@ -336,11 +339,24 @@ def test_a_blank_or_missing_reason_is_refused_by_the_database(
     assert row_of(app, case_id)["gross_minor"] is None
 
 
-def test_a_correction_without_the_persons_name_is_refused(app: Engine) -> None:
+@pytest.mark.parametrize("name", [" ", "\n\t", "\u00a0\u2003"])
+def test_a_correction_without_the_persons_name_is_refused(app: Engine, name: str) -> None:
     case_id, _ = a_flagged_case(app)
 
     with pytest.raises(CaseRuleBroken), unit_of_work(app, BENJAMIN.actor) as db:
-        insert_correction(db, case_id, name=" ")
+        insert_correction(db, case_id, name=name)
+
+
+def test_a_reason_with_words_around_line_breaks_is_kept_as_typed(app: Engine) -> None:
+    case_id, _ = a_flagged_case(app)
+
+    with unit_of_work(app, BENJAMIN.actor) as db:
+        correction_id = insert_correction(db, case_id, reason="\u00a0total on\npage 2\n")
+    with app.connect() as connection:
+        reason: str = connection.execute(
+            text("select reason from case_correction where id = :id"), {"id": correction_id}
+        ).scalar_one()
+    assert reason == "\u00a0total on\npage 2\n"
 
 
 @pytest.mark.parametrize(
