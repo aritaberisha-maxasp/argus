@@ -94,6 +94,13 @@ AUDIT_JOB_ENV = (
 )
 
 
+# How Bicep compiles the pick of the document store secret by name (#103).
+AUDIT_SECRETS = (
+    "[filter(variables('generatedSecrets'), lambda('secret', equals("
+    "lambdaVariables('secret').envName, 'ARGUS_DOCUMENTS_CONNECTION_STRING')))]"
+)
+
+
 def audit_job() -> dict[str, Any]:
     """The nightly audit copy job as Bicep compiles it from infra/modules/apps.bicep, with its
     secrets written as a loop (#103)."""
@@ -280,12 +287,16 @@ def good_main() -> dict[str, Any]:
                 {"job": "removal", "cron": "30 2 * * *"},
             ],
             "plainSettings": [
-                {"name": "ARGUS_DEMO", "value": "[if(parameters('demo'), 'true', 'false')]"}
+                {"name": "ARGUS_DEMO", "value": "[if(parameters('demo'), 'true', 'false')]"},
+                {
+                    "name": "ARGUS_DATABASE_URL",
+                    "value": "[format('postgresql+psycopg://{0}', 'x')]",
+                },
             ],
             "signInEnv": sign_in_env(),
             "demoSettings": [{"name": "ARGUS_MAILBOX", "value": "accounts@maxasp.example"}],
             "auditJob": {"job": "audit-copy", "cron": "0 1 * * *"},
-            "auditSecrets": ["[variables('generatedSecrets')[0]]"],
+            "auditSecrets": AUDIT_SECRETS,
         },
         "resources": [
             intake_jobs(),
@@ -1294,7 +1305,11 @@ def test_a_connection_string_as_a_plain_setting_fails(tmp_path: Path) -> None:
 def test_a_key_written_straight_into_a_job_env_fails(tmp_path: Path) -> None:
     main = good_main()
     container = audit_copy_job(main)["properties"]["template"]["containers"][0]
-    container["env"] = [{"name": "AZURE_OPENAI_API_KEY", "value": "[parameters('key')]"}]
+    container["env"] = AUDIT_JOB_ENV.replace(
+        "variables('plainSettings'), ",
+        "variables('plainSettings'), createArray(createObject('name', 'AZURE_OPENAI_API_KEY', "
+        "'value', parameters('key'))), ",
+    )
     assert run(tmp_path, main) == [
         "app [parameters('auditJobName')] gets the secret setting AZURE_OPENAI_API_KEY as a "
         "plain value, not from Key Vault"
@@ -1316,14 +1331,94 @@ def test_secrets_handed_over_as_values_by_a_loop_fail(tmp_path: Path, env: str) 
     main = good_main()
     container = audit_copy_job(main)["properties"]["template"]["containers"][0]
     container["env"] = env
+    problems = run(tmp_path, main)
+    assert "app [parameters('auditJobName')] hands secrets over as plain settings" in problems
+    # Without a secretRef the job no longer gets the store secret from Key Vault either.
+    assert len(problems) == 2
+
+
+@pytest.mark.req("NF-01", "NF-06")
+@pytest.mark.parametrize(
+    "secrets",
+    [
+        "[createArray()]",
+        AUDIT_SECRETS.replace("ARGUS_DOCUMENTS_CONNECTION_STRING", "AZURE_OPENAI_API_KEY"),
+        "[variables('generatedSecrets')[1]]",
+    ],
+)
+def test_an_audit_copy_job_without_the_document_store_secret_fails(
+    tmp_path: Path, secrets: str
+) -> None:
+    main = good_main()
+    apps_variables(main)["auditSecrets"] = secrets
+    assert run(tmp_path, main) == [
+        "audit copy job [parameters('auditJobName')] must get "
+        "ARGUS_DOCUMENTS_CONNECTION_STRING as a Key Vault reference"
+    ]
+
+
+@pytest.mark.req("NF-01")
+def test_an_audit_copy_job_without_the_database_fails(tmp_path: Path) -> None:
+    main = good_main()
+    container = audit_copy_job(main)["properties"]["template"]["containers"][0]
+    container["env"] = AUDIT_JOB_ENV.replace("variables('plainSettings'), ", "")
+    assert run(tmp_path, main) == [
+        "audit copy job [parameters('auditJobName')] must get ARGUS_DATABASE_URL"
+    ]
+
+
+@pytest.mark.req("NF-06")
+def test_a_harmless_plain_setting_next_to_the_secrets_passes(tmp_path: Path) -> None:
+    main = good_main()
+    container = audit_copy_job(main)["properties"]["template"]["containers"][0]
+    container["env"] = AUDIT_JOB_ENV.replace(
+        "variables('plainSettings'), ",
+        "variables('plainSettings'), createArray(createObject('name', 'ARGUS_LOG_LEVEL', "
+        "'value', 'info')), ",
+    )
+    assert run(tmp_path, main) == []
+
+
+@pytest.mark.req("NF-06")
+def test_secrets_handed_over_as_values_by_an_env_loop_fail(tmp_path: Path) -> None:
+    main = good_main()
+    container = audit_copy_job(main)["properties"]["template"]["containers"][0]
+    container["copy"] = [
+        {
+            "name": "env",
+            "count": "[length(variables('auditSecrets'))]",
+            "input": {
+                "name": "[variables('auditSecrets')[copyIndex('env')].envName]",
+                "value": "x",
+            },
+        }
+    ]
     assert run(tmp_path, main) == [
         "app [parameters('auditJobName')] hands secrets over as plain settings"
     ]
 
 
 @pytest.mark.req("NF-06")
+def test_a_plain_secret_two_variables_deep_fails(tmp_path: Path) -> None:
+    main = good_main()
+    variables = apps_variables(main)
+    variables["extraSettings"] = [
+        {"name": "ARGUS_DOCUMENTS_CONNECTION_STRING", "value": "[parameters('connection')]"}
+    ]
+    variables["baseSettings"] = variables["plainSettings"]
+    variables["plainSettings"] = "[concat(variables('extraSettings'), variables('baseSettings'))]"
+    problems = run(tmp_path, main)
+    assert len(problems) == 2
+    assert all("ARGUS_DOCUMENTS_CONNECTION_STRING as a plain value" in p for p in problems)
+
+
+@pytest.mark.req("NF-06")
 def test_a_stand_in_token_as_a_secret_reference_passes(tmp_path: Path) -> None:
     main = good_main()
     container = audit_copy_job(main)["properties"]["template"]["containers"][0]
-    container["env"] = [{"name": "ARGUS_GRAPH_STANDIN_TOKEN", "secretRef": "token"}]
+    container["env"] = AUDIT_JOB_ENV.replace(
+        "variables('plainSettings'), ",
+        "variables('plainSettings'), createArray(createObject('name', "
+        "'ARGUS_GRAPH_STANDIN_TOKEN', 'secretRef', 'token')), ",
+    )
     assert run(tmp_path, main) == []

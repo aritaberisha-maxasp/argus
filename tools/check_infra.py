@@ -88,10 +88,17 @@ AUDIT_JOB = "audit-copy"
 AUDIT_SCHEDULE = "0 1 * * *"
 # Settings whose value is a secret. They may only come from a Key Vault reference (NF-06).
 SECRET_SETTING = re.compile(r"(CONNECTION_STRING|API_KEY|KEY|TOKEN|SECRET|PASSWORD)$")
-# A loop over secrets that hands their value over as a plain setting instead of a secretRef:
-# an env expression that names a secret's envName and also sets a 'value', in either order
-# (compliance review of PR 157).
-_PLAIN_SECRET_MAP = re.compile(r"\.envName\b.*'value'|'value'.*\.envName\b")
+# The settings the audit copy job needs (#103, AC 2): the database from the plain settings and
+# the document store connection as a Key Vault reference.
+AUDIT_DATABASE_SETTING = "ARGUS_DATABASE_URL"
+AUDIT_STORE_SETTING = "ARGUS_DOCUMENTS_CONNECTION_STRING"
+# A map over a secrets list whose lambda turns each one into a secretRef setting, and the
+# names a filter over such a list keeps.
+_SECRET_REF_MAP = re.compile(
+    r"map\(variables\('(\w+)'\), lambda\('(\w+)', createObject\('name', "
+    r"lambdaVariables\('\2'\)\.envName, 'secretRef'"
+)
+_FILTER_KEEPS = re.compile(r"\.envName, '([A-Z0-9_]+)'\)")
 # Sign in with Microsoft (#23, ADR 0008, #133). The web app needs all five, from a parameter.
 SIGN_IN_SETTINGS = (
     "ARGUS_ENTRA_TENANT_ID",
@@ -395,12 +402,62 @@ def _dicts(value: Any) -> Iterator[dict[str, Any]]:
             yield from _dicts(item)
 
 
-def _plain_secret_setting_problems(template: dict[str, Any]) -> list[str]:
-    """No app or job gets a secret as a plain setting: neither an entry such as
-    ``ARGUS_DOCUMENTS_CONNECTION_STRING`` with a value, in the env list or in a variable the
-    env list uses, nor a loop that hands the secrets over as values (NF-06, #103)."""
-    problems = []
+def _calls(text: str, function: str) -> Iterator[str]:
+    """The text of each call of ``function`` in an expression, up to its own closing
+    parenthesis, for example every ``lambda(...)``."""
+    opening = f"{function}("
+    start = text.find(opening)
+    while start != -1:
+        depth = 0
+        for index in range(start + len(function), len(text)):
+            if text[index] == "(":
+                depth += 1
+            elif text[index] == ")":
+                depth -= 1
+                if depth == 0:
+                    yield text[start : index + 1]
+                    break
+        start = text.find(opening, start + 1)
+
+
+_OBJECT_NAME = re.compile(r"'name', '([A-Za-z0-9_]+)'")
+
+
+def _with_variables(template: dict[str, Any], value: Any) -> list[Any]:
+    """The value and every variable it uses, followed as deep as they go."""
     variables = template.get("variables", {})
+    found: list[Any] = [value]
+    seen: set[str] = set()
+    index = 0
+    while index < len(found):
+        for text in strings(found[index]):
+            for name in _COPY_VARIABLE.findall(text):
+                if name not in seen:
+                    seen.add(name)
+                    found.append(variables.get(name))
+        index += 1
+    return found
+
+
+def _container_env(container: dict[str, Any]) -> list[Any]:
+    """The env of a container: the plain value, and the input of a loop that Bicep compiles an
+    ``env: [for ...]`` list into (``copy`` named ``env`` on the container)."""
+    sources: list[Any] = [container.get("env")]
+    for loop in container.get("copy", []):
+        if isinstance(loop, dict) and loop.get("name") == "env":
+            sources.append(loop.get("input"))
+    return sources
+
+
+def _plain_secret_setting_problems(template: dict[str, Any]) -> list[str]:
+    """No app or job gets a secret as a plain setting (NF-06, #103). Looks at the container env,
+    written out, as an expression or as a loop, and at every variable it uses, as deep as they
+    go. It reports a setting such as ``ARGUS_DOCUMENTS_CONNECTION_STRING`` with a value, and a
+    loop or lambda that turns a secret's ``envName`` into a setting with a value.
+
+    It cannot follow parameters or module outputs: a plain secret handed in from outside the
+    template is the job of the parameter rules in :func:`secret_problems`."""
+    problems = []
     found = template.get("resources", [])
     for resource in found.values() if isinstance(found, dict) else found:
         if resource.get("type") not in (CONTAINER_APP, CONTAINER_JOB):
@@ -408,12 +465,28 @@ def _plain_secret_setting_problems(template: dict[str, Any]) -> list[str]:
         name = resource.get("name", "?")
         containers = resource.get("properties", {}).get("template", {}).get("containers", [])
         for container in containers if isinstance(containers, list) else []:
-            env = container.get("env") if isinstance(container, dict) else None
-            used: list[Any] = [env]
-            for text in strings(env):
-                used += [variables.get(v) for v in _COPY_VARIABLE.findall(text)]
-                if _PLAIN_SECRET_MAP.search(text):
-                    problems.append(f"app {name} hands secrets over as plain settings")
+            if not isinstance(container, dict):
+                continue
+            used = _with_variables(template, _container_env(container))
+            loops_with_values = any(
+                ".envName" in body and "'value'" in body
+                for text in strings(used)
+                for body in _calls(text, "lambda")
+            ) or any(
+                "envName" in str(entry.get("name", "")) and "value" in entry
+                for entry in (e for value in used for e in _dicts(value))
+            )
+            if loops_with_values:
+                problems.append(f"app {name} hands secrets over as plain settings")
+            # A setting written as createObject('name', 'X', 'value', ...) inside an expression.
+            for text in strings(used):
+                for body in _calls(text, "createObject"):
+                    for setting in _OBJECT_NAME.findall(body):
+                        if SECRET_SETTING.search(setting) and "'value'" in body:
+                            problems.append(
+                                f"app {name} gets the secret setting {setting} as a plain value, "
+                                "not from Key Vault"
+                            )
             for entry in (e for value in used for e in _dicts(value)):
                 setting = entry.get("name")
                 if (
@@ -426,6 +499,38 @@ def _plain_secret_setting_problems(template: dict[str, Any]) -> list[str]:
                         "not from Key Vault"
                     )
     return problems
+
+
+def _secret_ref_settings(template: dict[str, Any], container: dict[str, Any]) -> set[str]:
+    """The settings a container surely gets as a secretRef: written out, or through a map over
+    a list of secrets that is written out or filtered by name."""
+    variables = template.get("variables", {})
+    names: set[str] = set()
+    for value in _with_variables(template, _container_env(container)):
+        for entry in _dicts(value):
+            if "secretRef" in entry and isinstance(entry.get("name"), str):
+                names.add(entry["name"])
+        for text in strings(value):
+            for listed, _ in _SECRET_REF_MAP.findall(text):
+                source = variables.get(listed)
+                if isinstance(source, list):
+                    names |= {
+                        str(item["envName"])
+                        for item in source
+                        if isinstance(item, dict) and "envName" in item
+                    }
+                elif isinstance(source, str) and source.startswith("[filter("):
+                    names |= set(_FILTER_KEEPS.findall(source))
+    return names
+
+
+def _plain_settings(template: dict[str, Any], container: dict[str, Any]) -> set[str]:
+    return {
+        str(entry["name"])
+        for value in _with_variables(template, container.get("env"))
+        for entry in _dicts(value)
+        if "value" in entry and isinstance(entry.get("name"), str)
+    }
 
 
 def modules(template: dict[str, Any]) -> Iterator[tuple[str, dict[str, Any], dict[str, Any]]]:
@@ -583,6 +688,16 @@ def audit_job_problems(main: dict[str, Any]) -> list[str]:
             cron = _plain(
                 template, configuration.get("scheduleTriggerConfig", {}).get("cronExpression")
             )
+            for container in containers if isinstance(containers, list) else []:
+                if not isinstance(container, dict):
+                    continue
+                if AUDIT_STORE_SETTING not in _secret_ref_settings(template, container):
+                    problems.append(
+                        f"audit copy job {name} must get {AUDIT_STORE_SETTING} as a Key Vault "
+                        "reference"
+                    )
+                if AUDIT_DATABASE_SETTING not in _plain_settings(template, container):
+                    problems.append(f"audit copy job {name} must get {AUDIT_DATABASE_SETTING}")
             if cron != AUDIT_SCHEDULE:
                 problems.append(
                     f"audit copy job {name} must run on the schedule {AUDIT_SCHEDULE!r}"

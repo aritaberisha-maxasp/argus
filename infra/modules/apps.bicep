@@ -465,9 +465,9 @@ var auditJob = {
   job: 'audit-copy'
   cron: '0 1 * * *'
 }
-var auditSecrets = [
-  generatedSecrets[0]
-]
+// Picked by name, not by position, so reordering generatedSecrets cannot hand the job another
+// secret. tools/check_infra.py checks that the job gets exactly this one.
+var auditSecrets = filter(generatedSecrets, secret => secret.envName == 'ARGUS_DOCUMENTS_CONNECTION_STRING')
 
 resource auditCopyJob 'Microsoft.App/jobs@2024-03-01' = if (runAuditJob) {
   name: auditJobName
