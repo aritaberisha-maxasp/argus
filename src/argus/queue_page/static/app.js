@@ -153,8 +153,8 @@
 
   // --- talking to ARGUS -----------------------------------------------------------------
 
-  async function call(token, path) {
-    const response = await fetch(path, {
+  async function call(token, path, sent) {
+    const response = sent || await fetch(path, {
       headers: { Authorization: "Bearer " + (await token()) },
       cache: "no-store",
     });
@@ -168,6 +168,22 @@
     }
     if (response.status === 404) throw new Error("This exception is not open any more, or it does not exist.");
     throw new Error("ARGUS could not answer right now (" + response.status + "). Try again in a moment.");
+  }
+
+  // Sends a change to ARGUS. A refusal the person can fix (422) or that the database gave
+  // (409) comes back with a sentence in "problem", shown as it is.
+  async function send(token, path, body) {
+    const response = await fetch(path, {
+      method: "POST",
+      headers: { Authorization: "Bearer " + (await token()), "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      cache: "no-store",
+    });
+    if (response.status === 409 || response.status === 422) {
+      const answer = await response.json().catch(() => ({}));
+      if (typeof answer.problem === "string") throw new Error(answer.problem);
+    }
+    return call(async () => "", path, response);
   }
 
   // --- the list -------------------------------------------------------------------------
@@ -249,6 +265,8 @@
       ]));
     }
 
+    if (x.correctable) parts.push(...correction(token, x));
+
     if (x.email_id !== null) {
       parts.push(el("h2", "Original email"));
       if (x.email) {
@@ -268,6 +286,95 @@
       parts.push(files(token, x));
     }
     show(...parts);
+  }
+
+  // --- correcting the values of an invoice (#112) ----------------------------------------
+
+  // The form for the invoice number, gross amount and currency, filled with what the case has
+  // or what ARGUS read. The invoice itself is under "Files as stored", marked "this case".
+  function correction(token, x) {
+    const c = x.case;
+    const read = x.read_values || {};
+    const readValue = (name) => (read[name] && read[name].value) || "";
+    const amount = c.gross_cents !== null && c.gross_cents !== undefined
+      ? (c.gross_cents / 100).toFixed(2) : readValue("gross_amount");
+    const form = el("form", null, "correction");
+    const fields = [
+      ["document_number", "Invoice number", c.document_number || readValue("invoice_number"), "text"],
+      ["gross_amount", "Gross amount", amount, "text"],
+      ["currency", "Currency (three letters)", c.currency || readValue("currency"), "text"],
+    ];
+    const inputs = {};
+    for (const [name, label, value, type] of fields) {
+      const id = "correct-" + name;
+      const input = el("input");
+      input.id = id;
+      input.name = name;
+      input.type = type;
+      input.value = value || "";
+      input.required = true;
+      if (name === "gross_amount") input.inputMode = "decimal";
+      if (name === "currency") input.maxLength = 3;
+      const labelNode = el("label", label);
+      labelNode.htmlFor = id;
+      const row = el("p");
+      row.append(labelNode, input);
+      const r = read[name];
+      if (r && (r.flag || r.note)) {
+        row.append(el("span", "ARGUS read " + (r.value === null ? "nothing" : "\u201c" + r.value + "\u201d") +
+          (r.note ? ": " + r.note : ""), "muted hint"));
+      }
+      form.append(row);
+      inputs[name] = input;
+    }
+    const reason = el("textarea");
+    reason.id = "correct-reason";
+    reason.required = true;
+    reason.maxLength = 500;
+    reason.className = "reason";
+    const reasonLabel = el("label", "Why (kept in the audit log)");
+    reasonLabel.htmlFor = reason.id;
+    const reasonRow = el("p");
+    reasonRow.append(reasonLabel, reason);
+    const button = el("button", "Save and let the case carry on", "primary");
+    button.type = "submit";
+    const result = el("p");
+    result.setAttribute("role", "status");
+    form.append(reasonRow, button, result);
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      button.disabled = true;
+      result.className = "muted";
+      result.textContent = "Saving…";
+      try {
+        const answer = await (await send(token, "/exceptions/" + encodeURIComponent(x.exception_id) +
+          "/correction", {
+          document_number: inputs.document_number.value,
+          gross_amount: inputs.gross_amount.value,
+          currency: inputs.currency.value,
+          reason: reason.value,
+        })).json();
+        const back = el("a", "Back to all open exceptions");
+        back.href = "/queue";
+        const done = answer.outcome === "duplicate"
+          ? el("p", "Saved. With these values the invoice looks like a second copy of case " +
+            answer.duplicate_of + ", so it is back in the queue as a possible duplicate. ")
+          : el("p", "Saved. ARGUS found no duplicate, so case " + answer.case_id +
+            " carries on toward approval. ");
+        done.append(back);
+        form.replaceWith(done);
+      } catch (e) {
+        result.className = "problem";
+        result.textContent = e.message;
+        button.disabled = false;
+      }
+    });
+    return [
+      el("h2", "Correct the invoice values"),
+      el("p", "Open the invoice under \u201cFiles as stored\u201d, then enter the values as printed. " +
+        "ARGUS checks for duplicates again before the case goes on.", "muted"),
+      form,
+    ];
   }
 
   function files(token, x) {

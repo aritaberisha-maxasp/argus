@@ -19,10 +19,17 @@ from sqlalchemy import Engine, text
 from argus.app import create_app
 from argus.auth import Role
 from argus.cases.model import Actor, CaseKind, ExceptionReason, Outcome
-from argus.cases.store import create_case, open_exception, resolve_exception, unit_of_work
+from argus.cases.store import (
+    correct_case,
+    create_case,
+    open_exception,
+    resolve_exception,
+    unit_of_work,
+)
 from argus.documents.email import store_email
 from argus.documents.records import link_document_to_case, record_email_documents
 from argus.documents.store import MemoryDocumentStore
+from argus.intake.corrections import queue_values_to_check
 from argus.intake.graph import InboxMessage
 from argus.intake.records import mark_classified, mark_stored, see_email
 from argus.intake.sweep import SWEEP_ACTOR
@@ -381,3 +388,226 @@ def test_without_sign_in_there_is_no_queue(
 
     assert client.get("/exceptions").status_code == 401
     assert client.get(f"/exceptions/{exception_id}").status_code == 401
+
+
+# --- #112: correcting the invoice number, amount and currency of a flagged invoice ---
+
+
+def values_exception(app: Engine, email: Stored, number: str) -> tuple[int, int]:
+    """A case whose gross amount ARGUS could not confirm, waiting with values to check, as
+    the intake leaves it (#112)."""
+    with unit_of_work(app, Actor.system("intake")) as db:
+        case_id = create_case(
+            db,
+            CaseKind.INCOMING_INVOICE,
+            source_email_id=email.email_id,
+            document_number=number,
+            currency="EUR",
+            case_key=f"vat:DE9{uuid.uuid4().int % 10**8:08d}|{number}",
+        )
+        link_document_to_case(db, case_id, email.attachment_document_id)
+        exception_id = queue_values_to_check(db, case_id)
+    assert exception_id is not None
+    return case_id, exception_id
+
+
+CORRECTION = {
+    "document_number": "RE-QUEUE-112",
+    "gross_amount": "1190,00",
+    "currency": "eur",
+    "reason": "Erika Mustermann confirmed the total on page 2",
+}
+
+
+@pytest.mark.req("IN-10", "PR-01")
+def test_benjamin_corrects_the_values_and_the_case_carries_on(
+    app: Engine,
+    client: TestClient,
+    entra: FakeEntra,
+    store: MemoryDocumentStore,
+    captured: pytest.LogCaptureFixture,
+) -> None:
+    email = received_email(app, store)
+    case_id, exception_id = values_exception(app, email, f"RE-QUEUE-{uuid.uuid4().hex[:6]}")
+
+    shown = client.get(f"/exceptions/{exception_id}", headers=as_role(entra, Role.FINANCE))
+    assert shown.json()["correctable"] is True
+    assert shown.json()["reason_text"] == "The invoice number, amount or currency needs checking"
+    # The invoice itself is there to open, marked as this case's file.
+    assert any(f["linked_to_case"] for f in shown.json()["files"])
+
+    response = client.post(
+        f"/exceptions/{exception_id}/correction",
+        json=CORRECTION,
+        headers=as_role(entra, Role.FINANCE),
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["outcome"] == "continues"
+    assert response.json()["case_id"] == case_id
+    with app.connect() as connection:
+        row = (
+            connection.execute(
+                text(
+                    "select status, document_number, gross_minor, currency, duplicate_key"
+                    " from invoice_case where id = :id"
+                ),
+                {"id": case_id},
+            )
+            .mappings()
+            .one()
+        )
+        actor: str = connection.execute(
+            text(
+                "select actor_type || ':' || actor from audit_event"
+                " where case_id = :id and event_type = 'case_corrected'"
+            ),
+            {"id": case_id},
+        ).scalar_one()
+    assert row["status"] == "received"
+    assert (row["document_number"], row["gross_minor"], row["currency"]) == (
+        "RE-QUEUE-112",
+        119000,
+        "EUR",
+    )
+    assert row["duplicate_key"] is not None
+    assert actor == f"user:{BENJAMIN}"
+    assert (
+        client.get(f"/exceptions/{exception_id}", headers=as_role(entra, Role.FINANCE)).status_code
+        == 404
+    )
+    # Neither the values nor the reason reach the log.
+    assert_no_personal_data(captured)
+    assert "1190" not in "\n".join(r.getMessage() for r in captured.records)
+
+
+@pytest.mark.req("IN-10")
+def test_a_correction_into_a_known_invoice_comes_back_as_a_duplicate(
+    app: Engine, client: TestClient, entra: FakeEntra, store: MemoryDocumentStore
+) -> None:
+    email = received_email(app, store)
+    number = f"RE-QUEUE-{uuid.uuid4().hex[:6]}"
+    first_id, first_exception = values_exception(app, email, number)
+    with app.connect() as connection:
+        key: str = connection.execute(
+            text("select case_key from invoice_case where id = :id"), {"id": first_id}
+        ).scalar_one()
+    client.post(
+        f"/exceptions/{first_exception}/correction",
+        json={**CORRECTION, "document_number": number},
+        headers=as_role(entra, Role.ADMIN, ARITA),
+    )
+    with unit_of_work(app, Actor.system("intake")) as db:
+        second_id = create_case(
+            db,
+            CaseKind.INCOMING_INVOICE,
+            source_email_id=email.email_id,
+            document_number="unreadable",
+            currency="EUR",
+            case_key=f"{key.split('|')[0]}|{number}-copy",
+        )
+        second_exception = queue_values_to_check(db, second_id)
+
+    response = client.post(
+        f"/exceptions/{second_exception}/correction",
+        json={**CORRECTION, "document_number": number},
+        headers=as_role(entra, Role.FINANCE),
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["outcome"] == "duplicate"
+    assert response.json()["duplicate_of"] == first_id
+
+
+def test_an_approver_cannot_correct_values(
+    app: Engine, client: TestClient, entra: FakeEntra, store: MemoryDocumentStore
+) -> None:
+    email = received_email(app, store)
+    _, exception_id = values_exception(app, email, f"RE-QUEUE-{uuid.uuid4().hex[:6]}")
+    path = f"/exceptions/{exception_id}/correction"
+
+    assert client.post(path, json=CORRECTION).status_code == 401
+    assert (
+        client.post(path, json=CORRECTION, headers=as_role(entra, Role.APPROVER, ALICE)).status_code
+        == 403
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "says"),
+    [
+        ("gross_amount", "1.190,00", "gross amount"),
+        ("gross_amount", "11.900", "gross amount"),
+        ("gross_amount", "0", "cannot be zero"),
+        ("currency", "EURO", "three letter code"),
+        ("reason", "  ", "why"),
+        ("document_number", " ", "invoice number"),
+    ],
+)
+def test_a_value_the_person_can_fix_comes_back_with_a_sentence(
+    app: Engine,
+    client: TestClient,
+    entra: FakeEntra,
+    store: MemoryDocumentStore,
+    field: str,
+    value: str,
+    says: str,
+) -> None:
+    email = received_email(app, store)
+    case_id, exception_id = values_exception(app, email, f"RE-QUEUE-{uuid.uuid4().hex[:6]}")
+
+    response = client.post(
+        f"/exceptions/{exception_id}/correction",
+        json={**CORRECTION, field: value},
+        headers=as_role(entra, Role.FINANCE),
+    )
+
+    assert response.status_code == 422
+    assert says in response.json()["problem"]
+    with app.connect() as connection:
+        status_now: str = connection.execute(
+            text("select status from invoice_case where id = :id"), {"id": case_id}
+        ).scalar_one()
+    assert status_now == "exception"
+
+
+def test_only_exceptions_with_values_to_check_take_a_correction(
+    app: Engine, client: TestClient, entra: FakeEntra, store: MemoryDocumentStore
+) -> None:
+    email = received_email(app, store)
+    _, other = case_exception(app, email)
+
+    shown = client.get(f"/exceptions/{other}", headers=as_role(entra, Role.FINANCE))
+    response = client.post(
+        f"/exceptions/{other}/correction", json=CORRECTION, headers=as_role(entra, Role.FINANCE)
+    )
+
+    assert shown.json()["correctable"] is False
+    assert response.status_code == 404
+
+
+def test_a_refusal_from_the_database_comes_back_as_a_conflict(
+    app: Engine, client: TestClient, entra: FakeEntra, store: MemoryDocumentStore
+) -> None:
+    """The person enters exactly what the case already holds: nothing to correct."""
+    email = received_email(app, store)
+    case_id, exception_id = values_exception(app, email, f"RE-QUEUE-{uuid.uuid4().hex[:6]}")
+    with unit_of_work(app, Actor.user(BENJAMIN)) as db:
+        correct_case(
+            db,
+            case_id,
+            document_number="RE-QUEUE-SAME",
+            gross_cents=119000,
+            currency="EUR",
+            reason="first try",
+            name="Benjamin Test",
+        )
+
+    response = client.post(
+        f"/exceptions/{exception_id}/correction",
+        json={**CORRECTION, "document_number": "RE-QUEUE-SAME"},
+        headers=as_role(entra, Role.FINANCE),
+    )
+
+    assert response.status_code == 409
+    assert "changes nothing" in response.json()["problem"]

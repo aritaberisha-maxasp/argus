@@ -54,6 +54,9 @@ class ExceptionReason(StrEnum):
     # These two belong to no case, email or bank statement.
     AUDIT_COPY_FAILED = "audit_copy_failed"
     AUDIT_CHECK_FAILED = "audit_check_failed"
+    # The invoice number, gross amount or currency is missing or not confirmed, so the case
+    # cannot be checked for duplicates. A person corrects the values (#112).
+    VALUES_TO_CHECK = "values_to_check"
 
 
 class Outcome(StrEnum):

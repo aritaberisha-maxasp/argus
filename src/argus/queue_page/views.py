@@ -3,7 +3,7 @@
 The list shows every open exception with its case, reason, age in working days and sender. One
 exception opens with why ARGUS stopped, the case, and the email it came from with every file as
 stored (#20). These functions only read: the queue is changed by the stories that resolve
-exceptions (#112 and later).
+exceptions, such as correcting the values of an invoice (#112, :mod:`argus.intake.corrections`).
 
 The sender in the list is the From domain that the sorting recorded and checked (#70), so the
 list needs no file from the document store. The full From address is in the stored email, which
@@ -13,7 +13,7 @@ Nothing here logs. Names, addresses, subjects and file names are personal data a
 the log (NF-03).
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from email import message_from_bytes, policy
 from email.message import EmailMessage
@@ -23,6 +23,7 @@ from sqlalchemy import Connection, text
 
 from argus.cases.model import CaseKind, CaseStatus, ExceptionReason
 from argus.cases.store import list_open_exceptions
+from argus.intake.corrections import FIELDS
 from argus.intake.email_text import body_of
 from argus.working_days import working_days_between
 
@@ -45,6 +46,7 @@ REASON_TEXT: dict[ExceptionReason, str] = {
     ExceptionReason.FORWARD_FAILED: "A payment reminder could not be forwarded",
     ExceptionReason.AUDIT_COPY_FAILED: "The nightly copy of the audit log failed",
     ExceptionReason.AUDIT_CHECK_FAILED: "The audit log did not match its copies",
+    ExceptionReason.VALUES_TO_CHECK: "The invoice number, amount or currency needs checking",
 }
 
 
@@ -99,6 +101,10 @@ class ExceptionDetail:
     received_at: datetime | None
     sender: str | None
     files: list[FileRow]
+    # The person can correct the invoice number, amount and currency here (#112).
+    correctable: bool = False
+    # What ARGUS read for those values, per field: value, flag and note. Empty without a case.
+    read_values: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -228,7 +234,35 @@ def open_exception_detail(connection: Connection, exception_id: int) -> Exceptio
         received_at=received_at,
         sender=sender,
         files=email_files(connection, email_id, row["case_id"]) if email_id is not None else [],
+        correctable=reason is ExceptionReason.VALUES_TO_CHECK and case is not None,
+        read_values=read_values(connection, case.id) if case is not None else {},
     )
+
+
+def read_values(connection: Connection, case_id: int) -> dict[str, dict[str, Any]]:
+    """What ARGUS read for the invoice number, gross amount and currency of a case, from the
+    reading of its invoice (#30): the value, the flag when a person has to check it, and the
+    note that says why. Empty when the case has no stored reading."""
+    reading: dict[str, Any] | None = connection.execute(
+        text(
+            "select reading from invoice_reading where case_id = :id and role = 'invoice'"
+            " order by id limit 1"
+        ),
+        {"id": case_id},
+    ).scalar_one_or_none()
+    fields: dict[str, Any] = (reading or {}).get("fields") or {}
+    out: dict[str, dict[str, Any]] = {}
+    for name in FIELDS:
+        found = fields.get(name)
+        if not isinstance(found, dict):
+            continue
+        value = found.get("value")
+        out[name] = {
+            "value": None if value is None else str(value),
+            "flag": found.get("flag"),
+            "note": found.get("note"),
+        }
+    return out
 
 
 def email_files(connection: Connection, email_id: int, case_id: int | None) -> list[FileRow]:

@@ -28,6 +28,7 @@ from argus.cases.store import (
     DuplicateRefused,
     NotAllowed,
     change_case,
+    correct_case,
     create_case,
     get_case,
     list_open_exceptions,
@@ -319,7 +320,16 @@ def test_a_correction_before_approval_is_logged_with_old_and_new_value(app: Engi
     walk(app, case_id, S.AWAITING_APPROVAL)
 
     with unit_of_work(app, Actor.user("arita-entra-id")) as db:
-        change_case(db, case_id, gross_cents=11900)
+        case = get_case(db, case_id)
+        correct_case(
+            db,
+            case_id,
+            document_number=str(case.document_number),
+            gross_cents=11900,
+            currency=str(case.currency),
+            reason="amount checked against the invoice",
+            name="Arita",
+        )
         changed = [e for e in trace(db, case_id) if e.event_type == "case_changed"]
 
     assert len(changed) == 1
