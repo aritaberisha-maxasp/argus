@@ -9,6 +9,7 @@ import json
 import logging
 import uuid
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -20,6 +21,9 @@ from argus.auth import Role
 from argus.cases.model import Actor, CaseKind, CaseStatus, ClosedReason, ExceptionReason
 from argus.cases.store import create_case, move_case, open_exception, unit_of_work
 from argus.documents.store import MemoryDocumentStore
+from argus.intake.graph import InboxMessage
+from argus.intake.records import see_email
+from argus.intake.sweep import SWEEP_ACTOR
 from argus.invoices_page.views import MAX_ROWS
 from argus.invoices_page.web import DATA_PATH as SEARCH
 from standins.entra.app import FakeEntra
@@ -109,6 +113,28 @@ def new_case(app: Engine, kind: CaseKind, number: str, cents: int, **extra: Any)
     with unit_of_work(app, INTAKE) as db:
         return create_case(
             db, kind, document_number=number, gross_cents=cents, currency="EUR", **extra
+        )
+
+
+def case_from_email_at(app: Engine, received_at: datetime, number: str) -> int:
+    """A case whose email came in at ``received_at`` (UTC), as Exchange reports it."""
+    with unit_of_work(app, SWEEP_ACTOR) as db:
+        record, _ = see_email(
+            db,
+            InboxMessage(
+                id=f"AAMk-{uuid.uuid4().hex}",
+                internet_message_id=f"<{uuid.uuid4().hex}@lieferant-test.example>",
+                received_at=received_at,
+            ),
+        )
+    with unit_of_work(app, INTAKE) as db:
+        return create_case(
+            db,
+            CaseKind.INCOMING_INVOICE,
+            source_email_id=record.id,
+            document_number=number,
+            gross_cents=100,
+            currency="EUR",
         )
 
 
@@ -209,6 +235,35 @@ def test_the_newest_case_comes_first(
     ids = [c["case_id"] for c in listed(client, entra, q=tag)["cases"]]
 
     assert ids == [second, first]
+
+
+def test_the_newest_arrival_comes_first_even_with_a_lower_case_number(
+    app: Engine, client: TestClient, entra: FakeEntra, tag: str
+) -> None:
+    # The case opened first came in last: the order follows the arrival, not the case number.
+    newer = case_from_email_at(app, datetime(2026, 11, 12, 9, 0, tzinfo=UTC), f"LATE-{tag}")
+    older = case_from_email_at(app, datetime(2026, 11, 5, 9, 0, tzinfo=UTC), f"EARLY-{tag}")
+    assert newer < older
+
+    ids = [c["case_id"] for c in listed(client, entra, q=tag)["cases"]]
+
+    assert ids == [newer, older]
+
+
+def test_the_date_filter_counts_days_in_berlin(
+    app: Engine, client: TestClient, entra: FakeEntra, tag: str
+) -> None:
+    # 22:59 UTC on 10 Nov is 23:59 in Berlin, still 10 Nov; 23:30 UTC is 00:30 on 11 Nov.
+    late_evening = case_from_email_at(app, datetime(2026, 11, 10, 22, 59, tzinfo=UTC), f"E-{tag}")
+    after_midnight = case_from_email_at(app, datetime(2026, 11, 10, 23, 30, tzinfo=UTC), f"F-{tag}")
+
+    def ids(**query: str) -> set[int]:
+        return set(by_id(listed(client, entra, q=tag, **query)))
+
+    assert ids(received_from="2026-11-10", received_to="2026-11-10") == {late_evening}
+    assert ids(received_from="2026-11-11", received_to="2026-11-11") == {after_midnight}
+    assert ids(received_to="2026-11-10") == {late_evening}
+    assert ids(received_from="2026-11-11") == {after_midnight}
 
 
 def test_a_bank_transaction_shows_the_amount_of_the_transaction(
