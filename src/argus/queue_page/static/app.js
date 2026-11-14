@@ -193,9 +193,10 @@
     const back = sessionStorage.getItem(RETURN_KEY);
     if (back !== null) {
       sessionStorage.removeItem(RETURN_KEY);
-      // The demo mailbox page (#135) signs in through this page and comes back here.
-      if (back === "/mailbox") {
-        window.location.replace("/mailbox");
+      // The demo mailbox page (#135) and the invoice status page (#62) sign in through this
+      // page and come back here. Only these fixed addresses, so nothing can send people away.
+      if (back === "/mailbox" || /^\/invoices(\?[A-Za-z0-9_=&%.+-]*)?$/.test(back)) {
+        window.location.replace(back);
         return null;
       }
       if (/^(\?exception=\d+)?$/.test(back)) history.replaceState(null, "", "/queue" + back);
