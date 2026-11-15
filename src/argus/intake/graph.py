@@ -143,8 +143,56 @@ def allowed_paths(
         paths += (
             ("POST", re.compile(f"{user}/messages/{_MESSAGE_ID}/createForward")),
             ("POST", re.compile(f"{user}/messages/{_MESSAGE_ID}/send")),
+            # A notice about a Wise statement (#56); checked by notice_body_problem.
+            ("POST", re.compile(f"{user}/sendMail")),
         )
     return paths
+
+
+# What a statement notice may carry. No attachment, no copy, no reply address.
+MAX_NOTICE_SUBJECT = 200
+MAX_NOTICE_TEXT = 5000
+
+
+def notice_body_problem(content: bytes, forward_to: str) -> str | None:
+    """Why a sendMail body is refused, or None when it is fine. A notice (#56) is a plain text
+    email with a subject, to the one address set for reminders, and nothing else."""
+    try:
+        body = json.loads(content)
+    except ValueError:
+        return "the notice body is not JSON"
+    if not isinstance(body, dict) or set(body) - {"message", "saveToSentItems"}:
+        return "the notice may only carry a message"
+    message = body.get("message")
+    if not isinstance(message, dict) or set(message) != {"subject", "body", "toRecipients"}:
+        return "the notice may only carry a subject, a text and its recipient"
+    subject, text_body = message["subject"], message["body"]
+    if not isinstance(subject, str) or not 0 < len(subject) <= MAX_NOTICE_SUBJECT:
+        return "the notice subject is missing or too long"
+    if (
+        not isinstance(text_body, dict)
+        or set(text_body) != {"contentType", "content"}
+        or text_body["contentType"] != "Text"
+        or not isinstance(text_body["content"], str)
+        or not 0 < len(text_body["content"]) <= MAX_NOTICE_TEXT
+    ):
+        return "the notice must be plain text of a sensible length"
+    recipients = message["toRecipients"]
+    if not isinstance(recipients, list) or len(recipients) != 1:
+        return "the notice must have exactly one recipient"
+    recipient = recipients[0]
+    if not isinstance(recipient, dict) or set(recipient) != {"emailAddress"}:
+        return "the notice recipient is not an address"
+    address = recipient["emailAddress"]
+    if not isinstance(address, dict) or set(address) != {"address"}:
+        return "the notice recipient is not an address"
+    if (
+        not isinstance(address["address"], str)
+        or not forward_to
+        or address["address"].lower() != forward_to.lower()
+    ):
+        return "the notice goes to an address that is not the one set for reminders"
+    return None
 
 
 def forward_body_problem(content: bytes, forward_to: str) -> str | None:
@@ -211,6 +259,11 @@ class _GuardedTransport(httpx.BaseTransport):
             if problem:
                 log.warning("Refused Graph forward: %s", problem)
                 raise GraphCallRefused(f"refused Graph forward: {problem}")
+        if path.endswith("/sendMail"):
+            problem = notice_body_problem(request.read(), self._forward_to or "")
+            if problem:
+                log.warning("Refused Graph notice: %s", problem)
+                raise GraphCallRefused(f"refused Graph notice: {problem}")
         request.headers["Prefer"] = IMMUTABLE_IDS
         return self._inner.handle_request(request)
 
@@ -400,6 +453,22 @@ class GraphClient:
         if not isinstance(draft_id, str) or not re.fullmatch(_MESSAGE_ID, draft_id):
             raise GraphApiError("POST", "createForward", 200, "no draft ID in the answer")
         return draft_id
+
+    def send_notice(self, subject: str, text: str) -> None:
+        """Send a short plain text notice about a Wise statement to the reminder address
+        (Benjamin, #56). Sent once, without retries: a notice sent twice is better than none,
+        but the caller decides about trying again."""
+        if not self.forward_to:
+            raise GraphCallRefused("refused Graph notice: no reminder address is set")
+        body = {
+            "message": {
+                "subject": subject,
+                "body": {"contentType": "Text", "content": text},
+                "toRecipients": [{"emailAddress": {"address": self.forward_to}}],
+            },
+            "saveToSentItems": True,
+        }
+        self._post(f"{self._user}/sendMail", body)
 
     def is_draft(self, message_id: str) -> bool:
         """Whether this message is still an unsent draft."""

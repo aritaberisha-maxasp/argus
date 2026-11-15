@@ -51,6 +51,33 @@ BENJAMIN = Actor.user("benjamin-entra-id")
 _counter = iter(range(1, 1_000_000))
 
 
+def statement(app: Engine, outcome: str = "imported") -> int:
+    """A statement of the EUR balance for November 2026 (#56): since migration 0014 a bank
+    transaction belongs to an imported statement of its currency and month. An imported one
+    is reused, because there is only one per month."""
+    with unit_of_work(app, Actor.system("bank-import")) as db:
+        if outcome == "imported":
+            found = db.execute(
+                text(
+                    "select id from bank_statement where currency = 'EUR'"
+                    " and period = '2026-11-01' and outcome = 'imported'"
+                )
+            ).scalar_one_or_none()
+            if found is not None:
+                return int(found)
+        sha = f"{next(_counter):064x}"
+        statement_id: int = db.execute(
+            text(
+                "insert into bank_statement (sha256, location, size_bytes, source, currency,"
+                " period, opening_minor, closing_minor, transaction_count, outcome)"
+                " values (:sha, 'sha256/' || :sha, 1, 'folder', 'EUR', '2026-11-01', 0, 0, 1,"
+                " :outcome) returning id"
+            ),
+            {"sha": sha, "outcome": outcome},
+        ).scalar_one()
+    return statement_id
+
+
 def new_case(app: Engine, kind: CaseKind = CaseKind.INCOMING_INVOICE, **fields: object) -> int:
     n = next(_counter)
     defaults: dict[str, object] = {
@@ -728,15 +755,17 @@ def test_a_confirmed_duplicate_can_only_be_closed_as_duplicate(app: Engine) -> N
 
 @pytest.mark.req("BA-07")
 def test_the_same_wise_transaction_twice_is_refused(app: Engine) -> None:
+    statement_id = statement(app)
+
     def import_once() -> None:
         with unit_of_work(app, Actor.system("bank-import")) as db:
             case_id = create_case(db, CaseKind.BANK_TRANSACTION)
             db.execute(
                 text(
                     "insert into bank_transaction values (:id, 'EUR', 'TRANSFER-TEST-1', "
-                    "'2026-11-03', -892500)"
+                    "'2026-11-03', -892500, :statement_id)"
                 ),
-                {"id": case_id},
+                {"id": case_id, "statement_id": statement_id},
             )
 
     import_once()
@@ -876,14 +905,15 @@ def test_a_system_job_cannot_approve(app: Engine) -> None:
 
 @pytest.mark.req("BA-07", "NF-01")
 def test_a_bank_transaction_import_is_logged(app: Engine) -> None:
+    statement_id = statement(app)
     with unit_of_work(app, Actor.system("bank-import")) as db:
         case_id = create_case(db, CaseKind.BANK_TRANSACTION)
         db.execute(
             text(
                 "insert into bank_transaction values (:id, 'EUR', 'TRANSFER-TEST-LOG', "
-                "'2026-11-03', -892500)"
+                "'2026-11-03', -892500, :statement_id)"
             ),
-            {"id": case_id},
+            {"id": case_id, "statement_id": statement_id},
         )
         imported = [e for e in trace(db, case_id) if e.event_type == "bank_transaction_imported"]
 
@@ -1171,7 +1201,7 @@ def test_a_case_with_a_second_open_exception_stays_in_exception(app: Engine) -> 
 def test_the_queue_lists_open_exceptions_with_case_reason_age_and_detail(app: Engine) -> None:
     case_id = booked_invoice(app)
     email_id = 800_000 + next(_counter)
-    statement_id = 700_000 + next(_counter)
+    statement_id = statement(app, "blocked")
     with unit_of_work(app, INTAKE) as db:
         on_case = open_exception(
             db, ExceptionReason.BOOKING_ERROR, "account 4980 is locked", case_id=case_id
