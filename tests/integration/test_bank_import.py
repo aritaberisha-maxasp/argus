@@ -55,7 +55,12 @@ def clean_bank(owner: Engine) -> Iterator[None]:
         with owner.begin() as connection:
             connection.execute(text("set local session_replication_role = replica"))
             connection.execute(text("delete from bank_notice"))
-            connection.execute(text("delete from exception_item where statement_id is not null"))
+            connection.execute(
+                text(
+                    "delete from exception_item where statement_id is not null"
+                    " or facts ? 'bank_statement'"
+                )
+            )
             connection.execute(
                 text(
                     "with gone as (delete from bank_transaction returning case_id)"
@@ -205,6 +210,64 @@ def test_a_file_that_is_not_a_statement_is_refused_with_its_reason(app: Engine) 
         "not_a_wise_statement",
     )
     assert statements(app) == []
+
+
+@pytest.mark.req("EX-01", "BA-01")
+@pytest.mark.parametrize(
+    ("data", "reason", "words"),
+    [
+        # A custom date range in Wise that runs into the next month.
+        (
+            OCTOBER.replace(b'"30-10-2026","30-10-2026', b'"02-11-2026","02-11-2026'),
+            "more_than_one_month",
+            "mehr als einen Kalendermonat",
+        ),
+        # Sent on the last day of the month.
+        (OCTOBER, "month_not_over", "noch nicht vorbei"),
+        # A Wise export with a renamed column.
+        (
+            OCTOBER.replace(b'"Running Balance"', b'"Balance"'),
+            "not_a_wise_statement",
+            "Spalten",
+        ),
+    ],
+)
+def test_a_statement_from_benjamin_that_cannot_be_read_goes_to_the_queue_with_its_reason(
+    app: Engine, data: bytes, reason: str, words: str
+) -> None:
+    email_id = 950_000 + len(reason)
+    source = StatementSource.email(BENJAMIN, authenticated=True, email_id=email_id)
+    today = date(2026, 10, 31) if reason == "month_not_over" else DECEMBER_2ND
+
+    first = import_statement(app, MemoryDocumentStore(), SETTINGS, source, data, today=today)
+    again = import_statement(app, MemoryDocumentStore(), SETTINGS, source, data, today=today)
+
+    assert (first.outcome, first.refused_because) == (ImportOutcome.REFUSED, reason)
+    assert again.outcome is ImportOutcome.REFUSED
+    with app.connect() as connection:
+        rows = connection.execute(
+            text(
+                "select detail, facts from exception_item where email_id = :id"
+                " and reason = 'unreadable_document' and resolved_at is null"
+            ),
+            {"id": email_id},
+        ).all()
+    assert len(rows) == 1, "one exception, even when the same file comes twice"
+    assert words in rows[0].detail
+    assert rows[0].facts == {"bank_statement": True, "reason": reason, "sha256": fingerprint(data)}
+
+
+@pytest.mark.req("EX-01")
+def test_a_refused_file_from_anyone_else_opens_no_exception(app: Engine) -> None:
+    source = StatementSource.email("someone@maxasp.example", authenticated=True, email_id=960_001)
+
+    import_statement(app, MemoryDocumentStore(), SETTINGS, source, b"x", today=DECEMBER_2ND)
+
+    with app.connect() as connection:
+        count: int = connection.execute(
+            text("select count(*) from exception_item where email_id = 960001")
+        ).scalar_one()
+    assert count == 0
 
 
 # 2. Each transaction becomes a case; importing the same file again creates nothing new.

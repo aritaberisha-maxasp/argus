@@ -3,9 +3,9 @@
 Covers BA-01, BA-07, BA-08 and NF-01 (issue #56, ADR 0004). The steps:
 
 1. **Who sent it.** A statement counts only when it comes from one of the addresses set in
-   ``ARGUS_STATEMENT_SENDERS`` (Benjamin) and the email passed SPF, DKIM or DMARC for that
-   address (the sender check of #70), or when it sits in the agreed mailbox folder
-   ``ARGUS_STATEMENT_FOLDER``. Anything else is refused before the file is stored or read.
+   ``ARGUS_STATEMENT_SENDERS`` (Benjamin) and the email has an aligned SPF, DKIM or DMARC
+   pass for that address's domain (the sender check of #70), or when it sits in the agreed
+   mailbox folder ``ARGUS_STATEMENT_FOLDER``. Anything else is refused before the file is stored or read.
 2. **Read it.** :mod:`argus.bank.statement` reads the CSV. A file that is not one currency and
    one finished month is refused. A refusal is written to the audit log with the file's
    fingerprint and a reason code.
@@ -42,6 +42,7 @@ from argus.bank.notices import NoticeKind, Notifier, queue_notice, send_pending_
 from argus.bank.statement import (
     Difference,
     StatementUnreadable,
+    Unreadable,
     WiseStatement,
     balance_differences,
     read_wise_csv,
@@ -88,8 +89,14 @@ class StatementSource:
     def email(
         cls, sender_address: str, *, authenticated: bool, email_id: int | None = None
     ) -> "StatementSource":
-        """An email from ``sender_address``. ``authenticated`` is True only when the sender
-        check (#70) found SPF, DKIM or DMARC passing for that address's domain."""
+        """An email from ``sender_address``. ``authenticated`` is True only when the email has
+        an aligned SPF, DKIM or DMARC pass for that address's domain.
+
+        The caller must pass ``Authentication.passed`` from
+        :func:`argus.sorting.sender.authenticate` for the sender's own address. Never pass
+        ``SenderCheck.treated_as`` or "not a failed claim": mail from Max ASP's own domain is
+        not checked there and counts as internal unless DMARC fails, so a forged From line
+        with Benjamin's address could pass (compliance review of PR 162)."""
         return cls(
             SourceKind.EMAIL,
             email_id=email_id,
@@ -154,7 +161,40 @@ class ImportResult:
     case_ids: tuple[int, ...] = field(default=(), repr=False)
 
 
-def _refuse(engine: Engine, source: StatementSource, sha256: str, reason: str) -> ImportResult:
+def unreadable_detail(unreadable: StatementUnreadable) -> str:
+    """What the person in the exception queue reads when a statement from Benjamin or the
+    agreed folder cannot be read. In German, like the notices to Benjamin."""
+    why = UNREADABLE_REASONS.get(unreadable.reason, "die Datei kann nicht gelesen werden")
+    return (
+        f"Der Wise Kontoauszug wurde nicht importiert: {why}. Bitte den Auszug für genau einen "
+        "abgeschlossenen Kalendermonat und eine Währung als CSV aus Wise herunterladen und "
+        "erneut senden."
+    )
+
+
+UNREADABLE_REASONS = {
+    Unreadable.TOO_LARGE: "die Datei ist zu groß für einen Monatsauszug",
+    Unreadable.NOT_TEXT: "die Datei ist keine CSV Datei in UTF-8",
+    Unreadable.NOT_A_WISE_STATEMENT: "die Spalten eines Wise Kontoauszugs fehlen",
+    Unreadable.NO_TRANSACTIONS: "der Auszug enthält keine Buchungen",
+    Unreadable.BAD_ROW: "eine Zeile kann nicht gelesen werden",
+    Unreadable.SAME_ID_TWICE: "dieselbe Buchung steht zweimal im Auszug",
+    Unreadable.MORE_THAN_ONE_CURRENCY: "der Auszug enthält mehr als eine Währung",
+    Unreadable.MORE_THAN_ONE_MONTH: "der Auszug reicht über mehr als einen Kalendermonat",
+    Unreadable.MONTH_NOT_OVER: "der Monat des Auszugs ist noch nicht vorbei",
+}
+
+
+def _refuse(
+    engine: Engine,
+    source: StatementSource,
+    sha256: str,
+    reason: str,
+    unreadable: StatementUnreadable | None = None,
+) -> ImportResult:
+    """Log the refusal. A file from an accepted source that cannot be read also goes into the
+    queue on its email, so a person sees why (EX-01, code review of PR 162). A file from
+    anyone else stays in the audit log only."""
     with unit_of_work(engine, IMPORT_ACTOR) as db:
         record_event(
             db,
@@ -162,6 +202,22 @@ def _refuse(engine: Engine, source: StatementSource, sha256: str, reason: str) -
             email_id=source.email_id,
             details={"sha256": sha256, "source": source.kind.value, "reason": reason},
         )
+        if unreadable is not None and source.email_id is not None:
+            already_open: bool = db.execute(
+                text(
+                    "select exists (select 1 from exception_item where email_id = :id"
+                    " and reason = 'unreadable_document' and resolved_at is null)"
+                ),
+                {"id": source.email_id},
+            ).scalar_one()
+            if not already_open:
+                open_exception(
+                    db,
+                    ExceptionReason.UNREADABLE_DOCUMENT,
+                    unreadable_detail(unreadable),
+                    email_id=source.email_id,
+                    facts={"bank_statement": True, "reason": reason, "sha256": sha256},
+                )
     log.warning("Statement %s refused: %s", sha256[:12], reason)
     return ImportResult(ImportOutcome.REFUSED, sha256=sha256, refused_because=reason)
 
@@ -186,7 +242,7 @@ def import_statement(
     try:
         statement = read_wise_csv(data, today=today)
     except StatementUnreadable as unreadable:
-        return _refuse(engine, source, sha256, unreadable.reason.value)
+        return _refuse(engine, source, sha256, unreadable.reason.value, unreadable)
 
     stored = documents.put(data, CONTENT_TYPE)  # outside any transaction
     with unit_of_work(engine, IMPORT_ACTOR) as db:

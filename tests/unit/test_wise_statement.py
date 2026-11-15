@@ -20,7 +20,7 @@ from argus.bank.statement import (
     read_wise_csv,
     running_balance_differences,
 )
-from argus.intake.graph import notice_body_problem
+from argus.intake.graph import forward_body_problem, notice_body_problem
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "wise"
 OCTOBER = (FIXTURES / "statement_EUR_2026-10.csv").read_bytes()
@@ -268,3 +268,26 @@ def test_the_graph_guard_refuses_any_other_notice(changes: dict[str, object]) ->
 def test_the_graph_guard_refuses_a_notice_when_no_address_is_set() -> None:
     assert notice_body_problem(notice(), "") is not None
     assert notice_body_problem(b"not json", BENJAMIN) is not None
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        b'{"message": {"subject": "s", "body": {"contentType": "Text", "content": "t"},'
+        b' "toRecipients": [{"emailAddress": {"address": "someone@else.example",'
+        b' "address": "benjamin@maxasp.example"}}]}}',
+        b'{"message": {"subject": "s", "subject": "t", "body": {"contentType": "Text",'
+        b' "content": "t"}, "toRecipients": [{"emailAddress":'
+        b' {"address": "benjamin@maxasp.example"}}]}}',
+    ],
+)
+def test_the_graph_guards_refuse_a_repeated_json_key(body: bytes) -> None:
+    assert notice_body_problem(body, BENJAMIN) is not None
+    assert (
+        forward_body_problem(
+            b'{"comment": "c", "toRecipients": [{"emailAddress": {"address": "x@y.example",'
+            b' "address": "benjamin@maxasp.example"}}]}',
+            BENJAMIN,
+        )
+        is not None
+    )

@@ -158,9 +158,9 @@ def notice_body_problem(content: bytes, forward_to: str) -> str | None:
     """Why a sendMail body is refused, or None when it is fine. A notice (#56) is a plain text
     email with a subject, to the one address set for reminders, and nothing else."""
     try:
-        body = json.loads(content)
+        body = _strict_json(content)
     except ValueError:
-        return "the notice body is not JSON"
+        return "the notice body is not JSON with each key once"
     if not isinstance(body, dict) or set(body) - {"message", "saveToSentItems"}:
         return "the notice may only carry a message"
     message = body.get("message")
@@ -195,13 +195,30 @@ def notice_body_problem(content: bytes, forward_to: str) -> str | None:
     return None
 
 
+class _RepeatedKey(ValueError):
+    pass
+
+
+def _refuse_repeated_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    keys = [key for key, _ in pairs]
+    if len(keys) != len(set(keys)):
+        raise _RepeatedKey("a JSON key appears twice")
+    return dict(pairs)
+
+
+def _strict_json(content: bytes) -> Any:
+    """JSON with every key once. Plain json.loads keeps the last of two equal keys, so a guard
+    would check one value while Graph might act on the other (code review of PR 162)."""
+    return json.loads(content, object_pairs_hook=_refuse_repeated_keys)
+
+
 def forward_body_problem(content: bytes, forward_to: str) -> str | None:
     """Why a createForward body is refused, or None when it is fine. A forward goes to the one
     set address and nowhere else: no other recipient, no copy, no changed message."""
     try:
-        body = json.loads(content)
+        body = _strict_json(content)
     except ValueError:
-        return "the forward body is not JSON"
+        return "the forward body is not JSON with each key once"
     if not isinstance(body, dict) or set(body) - {"comment", "toRecipients"}:
         return "the forward may only carry a comment and its recipient"
     recipients = body.get("toRecipients")
