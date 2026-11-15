@@ -104,6 +104,10 @@ GLOBAL_TYPES = frozenset({ACTION_GROUP, ALERT_PROCESSING_RULE})
 BACKUP_JOBS_TABLE = "AddonAzureBackupJobs"
 _WEEKLY_START = re.compile(r"^R/(\d{4}-\d{2}-\d{2})T[^/]+/P1W$")
 _KUSTO_DAY = re.compile(r"dayofweek\(now\(\)\)\s*==\s*(\d)d")
+_KUSTO_HOUR = re.compile(r"hourofday\(now\(\)\)\s*==\s*(\d+)")
+# The hour (UTC) the "no backup" alert checks: late enough that a Sunday backup has finished
+# and its record has reached Log Analytics, early enough that the 2 day window still covers it.
+BACKUP_CHECK_HOUR = 23
 EMAIL = re.compile(r"[\w.+-]+@[\w-]+(\.[\w-]+)+")
 _COPY_VARIABLE = re.compile(r"variables\('(\w+)'\)")
 # 10 years for the long term backups until the tax advisor confirms the period (ADR 0007).
@@ -324,6 +328,16 @@ def _resolve(template: dict[str, Any], value: Any) -> Any:
     return template.get("variables", {}).get(found[1], value) if found else value
 
 
+def _switched_off(resource: dict[str, Any]) -> bool:
+    """A resource that can never be deployed or is disabled."""
+    condition = resource.get("condition", True)
+    return (
+        condition is False
+        or condition == "[false()]"
+        or (resource.get("properties", {}).get("enabled", True) is False)
+    )
+
+
 def _backup_weekday(main: dict[str, Any]) -> int | None:
     """The weekday of the weekly backup, Sunday 0 as in Kusto, or None when not readable."""
     for template in templates(main):
@@ -372,16 +386,18 @@ def backup_alert_problems(main: dict[str, Any]) -> list[str]:
             a.get("actionType") == "AddActionGroups" and a.get("actionGroupIds")
             for a in properties.get("actions", [])
         )
-        routed = routed or (backup and sends and properties.get("enabled", True) is not False)
+        scoped = properties.get("scopes") == ["[resourceGroup().id]"]
+        routed = routed or (backup and sends and scoped and not _switched_off(rule))
     if not routed:
         problems.append(
-            "no alert processing rule sends the Azure Backup alerts (a failed backup job) to an "
-            "action group"
+            "no alert processing rule sends the Azure Backup alerts (a failed backup job) of this "
+            "resource group to an action group"
         )
 
     logged = any(
         r.get("type") == DIAGNOSTIC_SETTING
         and "backupVaults" in str(r.get("scope", ""))
+        and not _switched_off(r)
         and r.get("properties", {}).get("workspaceId")
         and any(
             log.get("category") == BACKUP_JOBS_TABLE and log.get("enabled")
@@ -410,6 +426,13 @@ def backup_alert_problems(main: dict[str, Any]) -> list[str]:
         name = resource.get("name", "?")
         if not resource.get("properties", {}).get("actions", {}).get("actionGroups"):
             problems.append(f"alert {name} sends to no action group")
+        if _switched_off(resource):
+            problems.append(f"alert {name} is switched off")
+        hour = _KUSTO_HOUR.search(query)
+        if hour is None or int(hour[1]) != BACKUP_CHECK_HOUR:
+            problems.append(
+                f"alert {name} must check in one hour, hourofday(now()) == {BACKUP_CHECK_HOUR}"
+            )
         day = _KUSTO_DAY.search(query)
         if weekday is None:
             problems.append("the weekly backup schedule cannot be read (R/<date>T<time>/P1W)")

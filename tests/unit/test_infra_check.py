@@ -1204,6 +1204,8 @@ def test_no_backup_alerts_at_all_fail(tmp_path: Path) -> None:
         lambda rule: rule["properties"]["conditions"][0].update(values=["Log Alerts V2"]),
         lambda rule: rule["properties"]["conditions"][0].update(operator="NotEquals"),
         lambda rule: rule["properties"].update(enabled=False),
+        lambda rule: rule.update(condition="[false()]"),
+        lambda rule: rule["properties"].update(scopes=["/subscriptions/x/resourceGroups/other"]),
     ],
 )
 def test_a_failed_job_alert_that_reaches_no_action_group_fails(tmp_path: Path, change: Any) -> None:
@@ -1229,6 +1231,7 @@ def test_the_alert_processing_rule_may_be_global_but_nothing_else_new(tmp_path: 
         lambda setting: setting["properties"]["logs"][0].update(category="CoreAzureBackup"),
         lambda setting: setting["properties"].pop("workspaceId"),
         lambda setting: setting.update(scope="[format('Microsoft.Sql/servers/{0}', 'x')]"),
+        lambda setting: setting.update(condition="[false()]"),
     ],
 )
 def test_job_records_that_do_not_reach_log_analytics_fail(tmp_path: Path, change: Any) -> None:
@@ -1291,3 +1294,27 @@ def test_an_unreadable_backup_schedule_fails(tmp_path: Path) -> None:
     main = good_main()
     backup_module(main)["variables"]["weeklySchedule"] = "R/2026-11-08T01:00:00+00:00/P1D"
     assert any("weekly backup schedule cannot be read" in p for p in run(tmp_path, main))
+
+
+@pytest.mark.req("NF-01")
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda rule: rule["properties"].update(enabled=False),
+        lambda rule: rule.update(condition="[false()]"),
+    ],
+)
+def test_a_switched_off_no_backup_alert_fails(tmp_path: Path, change: Any) -> None:
+    main = good_main()
+    change(backup_alert_resources(main)[2])
+    assert any("no-backup is switched off" in p for p in run(tmp_path, main))
+
+
+@pytest.mark.req("NF-01")
+@pytest.mark.parametrize("hour", ["== 25", "== 22", "< 24"])
+def test_a_no_backup_alert_on_the_wrong_hour_fails(tmp_path: Path, hour: str) -> None:
+    main = good_main()
+    backup_alert_resources(main)[2]["properties"]["criteria"]["allOf"][0]["query"] = (
+        NO_BACKUP_QUERY.replace("== 23", hour)
+    )
+    assert any("hourofday(now()) == 23" in p for p in run(tmp_path, main))
