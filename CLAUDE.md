@@ -19,7 +19,7 @@ The requirements live in [docs/requirements/requirements.md](docs/requirements/r
 See [docs/process/workflow.md](docs/process/workflow.md) for the full flow, board columns, labels and ceremonies. The short version:
 
 1. Every piece of work starts as a GitHub issue that meets the [Definition of Ready](docs/process/definition-of-ready.md).
-2. One issue, one branch, one PR. Open the PR as a draft early and link the issue with `Closes #<n>`.
+2. One issue, one branch, one PR. Open the PR early as a normal PR, not a draft (our GitHub access cannot take a PR out of draft), and link the issue with `Closes #<n>`.
 3. Drive the PR until CI is green, review comments are handled and QA has posted test evidence.
 4. Then add the label `ready-for-arita` and move the issue to that column. Arita reviews and merges.
 5. A PR is done only when it meets the [Definition of Done](docs/process/definition-of-done.md).
