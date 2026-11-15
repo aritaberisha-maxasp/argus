@@ -28,7 +28,7 @@ import io
 import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, time
 from enum import StrEnum
 
 from argus.cases.money import from_cents, to_cents
@@ -219,20 +219,27 @@ def derived_id(row: Mapping[str, str | None]) -> str:
 
 
 def _in_order(rows: list[WiseTransaction]) -> list[WiseTransaction]:
-    """Oldest first. Wise lists the newest first; a file sorted the other way is kept. Rows
-    with the same date keep their order in the file, unless Wise gave a time for each."""
-    if all(r.at is not None for r in rows):
-        return sorted(rows, key=lambda r: r.at or datetime.min)
-    if rows[0].booked_on > rows[-1].booked_on:
+    """Oldest first. Wise lists the newest first; a file sorted the other way is kept.
+
+    Rows are sorted by Wise's time when every row has one, otherwise by date. The sort is
+    stable, so rows with the same time (or the same date) keep the order chosen first: a
+    newest first file is turned round before sorting, and when the first and last row share
+    the same time or date, the order whose running balances add up wins (QA on PR 162)."""
+    timed = all(r.at is not None for r in rows)
+
+    def key(row: WiseTransaction) -> datetime:
+        if timed and row.at is not None:
+            return row.at
+        return datetime.combine(row.booked_on, time.min)
+
+    first, last = key(rows[0]), key(rows[-1])
+    if first > last:
         rows = list(reversed(rows))
-    elif rows[0].booked_on == rows[-1].booked_on:
-        # First and last on the same day and no times: take the order whose running balances
-        # add up, and the file's own order when both or neither do.
+    elif first == last:
         backwards = list(reversed(rows))
         if running_balance_differences(rows) and not running_balance_differences(backwards):
             rows = backwards
-    # Stable, so rows of the same day keep the order chosen above.
-    return sorted(rows, key=lambda r: r.booked_on)
+    return sorted(rows, key=key)
 
 
 def read_wise_csv(data: bytes, *, today: date) -> WiseStatement:

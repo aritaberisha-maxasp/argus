@@ -116,6 +116,34 @@ def test_rows_of_one_day_without_times_take_the_order_that_adds_up() -> None:
     assert statement.opening_cents == 0
 
 
+@pytest.mark.req("BA-08")
+def test_rows_with_the_same_time_in_a_newest_first_file_keep_the_order_that_adds_up() -> None:
+    # QA on PR 162: the fee and the transfer above it share one time stamp.
+    data = OCTOBER.replace(b'"15-10-2026 00:00:01.000"', b'"15-10-2026 10:00:00.000"')
+    assert data != OCTOBER
+
+    statement = read_wise_csv(data, today=TODAY)
+
+    ids = [t.wise_id for t in statement.transactions]
+    assert ids.index("FEE-900000004") < ids.index("TRANSFER-900000005")
+    assert balance_differences(statement, None) == []
+
+
+def test_timed_rows_of_an_oldest_first_file_with_equal_times_stay_in_file_order() -> None:
+    header = '"TransferWise ID","Date","Date Time","Amount","Currency","Running Balance"\n'
+    data = (
+        header
+        + '"T-1","05-10-2026","05-10-2026 09:00:00.000","10.00","EUR","10.00"\n'
+        + '"T-2","05-10-2026","05-10-2026 09:00:00.000","5.00","EUR","15.00"\n'
+        + '"T-3","06-10-2026","06-10-2026 09:00:00.000","1.00","EUR","16.00"\n'
+    ).encode()
+
+    statement = read_wise_csv(data, today=TODAY)
+
+    assert [t.wise_id for t in statement.transactions] == ["T-1", "T-2", "T-3"]
+    assert running_balance_differences(statement.transactions) == []
+
+
 @pytest.mark.req("BA-07")
 def test_a_row_without_id_gets_one_built_from_its_content() -> None:
     data = csv_of(
