@@ -1,8 +1,9 @@
 """The Microsoft Graph client that reads the accounts mailbox (ADR 0003, IN-01, NF-06).
 
 It signs in as the ARGUS app and needs only two application permissions, Mail.ReadWrite and
-Mail.Send, limited by Exchange to the one mailbox. Mail.Send is used for one thing only:
-forwarding payment reminders to the one address set for them (IN-05, #27). Every token is
+Mail.Send, limited by Exchange to the one mailbox. Mail.Send is used for two things only:
+forwarding payment reminders to the one address set for them (IN-05, #27), and sending the daily
+digest of open exceptions to the one address set for it (EX-03, #61). Every token is
 checked before use: if it carries any other Graph permission, the client refuses to send
 anything, so a too wide grant is noticed at once instead of going unused and unseen.
 
@@ -118,7 +119,7 @@ def check_token(token: SecretStr) -> None:
 
 
 def allowed_paths(
-    base_path: str, mailbox: str, forward_to: str | None = None
+    base_path: str, mailbox: str, forward_to: str | None = None, digest_to: str | None = None
 ) -> tuple[tuple[str, re.Pattern[str]], ...]:
     """The only Graph calls ARGUS makes, all on the one mailbox: list the Inbox, read an email,
     find or create the ARGUS folders, move an email into one and delete an email (#26), and
@@ -126,7 +127,10 @@ def allowed_paths(
 
     Forwarding a payment reminder (#27) is only allowed when a forward address is set: save a
     forward as a draft and send a draft. Reading a message, which shows whether it is still a
-    draft and who it goes to, is already allowed for #26."""
+    draft and who it goes to, is already allowed for #26.
+
+    Sending the daily digest of open exceptions (#61) is only allowed when a digest address is
+    set: save a new message as a draft and send a draft."""
     user = re.escape(f"{base_path.rstrip('/')}/users/{quote(mailbox, safe='@')}")
     paths: tuple[tuple[str, re.Pattern[str]], ...] = (
         ("GET", re.compile(f"{user}/mailFolders/inbox/messages")),
@@ -140,10 +144,11 @@ def allowed_paths(
         ("DELETE", re.compile(f"{user}/messages/{_MESSAGE_ID}")),
     )
     if forward_to:
-        paths += (
-            ("POST", re.compile(f"{user}/messages/{_MESSAGE_ID}/createForward")),
-            ("POST", re.compile(f"{user}/messages/{_MESSAGE_ID}/send")),
-        )
+        paths += (("POST", re.compile(f"{user}/messages/{_MESSAGE_ID}/createForward")),)
+    if digest_to:
+        paths += (("POST", re.compile(f"{user}/messages")),)
+    if forward_to or digest_to:
+        paths += (("POST", re.compile(f"{user}/messages/{_MESSAGE_ID}/send")),)
     return paths
 
 
@@ -167,6 +172,34 @@ def forward_body_problem(content: bytes, forward_to: str) -> str | None:
     return None
 
 
+def digest_body_problem(content: bytes, digest_to: str) -> str | None:
+    """Why the body of a new message is refused, or None when it is fine. The only new message
+    ARGUS writes is the daily digest (#61): a subject, a body and the one set address, nothing
+    else. No copy, no attachment, no other recipient."""
+    try:
+        body = json.loads(content)
+    except ValueError:
+        return "the digest body is not JSON"
+    if not isinstance(body, dict) or set(body) != {"subject", "body", "toRecipients"}:
+        return "the digest may only carry a subject, a body and its recipient"
+    if not isinstance(body["subject"], str):
+        return "the digest subject is not text"
+    content_part = body["body"]
+    if (
+        not isinstance(content_part, dict)
+        or set(content_part) != {"contentType", "content"}
+        or content_part["contentType"] not in ("text", "html")
+        or not isinstance(content_part["content"], str)
+    ):
+        return "the digest body must be plain text or HTML"
+    to = _addresses(body["toRecipients"])
+    if len(to) != 1 or len(body["toRecipients"]) != 1:
+        return "the digest must have exactly one recipient"
+    if not isinstance(to[0], str) or not digest_to or to[0].lower() != digest_to.lower():
+        return "the digest goes to an address that is not the one set for it"
+    return None
+
+
 class _AppToken(httpx.Auth):
     """Adds a fresh, checked token to each request."""
 
@@ -181,8 +214,9 @@ class _AppToken(httpx.Auth):
 
 
 class _GuardedTransport(httpx.BaseTransport):
-    """Checks every request against the allowlist, the mailbox and the Graph host, and every
-    forward against the one address set for reminders."""
+    """Checks every request against the allowlist, the mailbox and the Graph host, every
+    forward against the one address set for reminders and every new message against the one
+    address set for the digest."""
 
     def __init__(
         self,
@@ -190,11 +224,17 @@ class _GuardedTransport(httpx.BaseTransport):
         base_url: httpx.URL,
         mailbox: str,
         forward_to: str | None = None,
+        digest_to: str | None = None,
     ) -> None:
         self._inner = inner
         self._origin = (base_url.scheme, base_url.host, base_url.port)
-        self._allowed = allowed_paths(base_url.raw_path.decode("ascii"), mailbox, forward_to)
+        base_path = base_url.raw_path.decode("ascii")
+        self._allowed = allowed_paths(base_path, mailbox, forward_to, digest_to)
+        self._new_message = re.compile(
+            re.escape(f"{base_path.rstrip('/')}/users/{quote(mailbox, safe='@')}/messages")
+        )
         self._forward_to = forward_to
+        self._digest_to = digest_to
 
     def handle_request(self, request: httpx.Request) -> httpx.Response:
         url = request.url
@@ -211,6 +251,11 @@ class _GuardedTransport(httpx.BaseTransport):
             if problem:
                 log.warning("Refused Graph forward: %s", problem)
                 raise GraphCallRefused(f"refused Graph forward: {problem}")
+        if request.method == "POST" and self._new_message.fullmatch(path):
+            problem = digest_body_problem(request.read(), self._digest_to or "")
+            if problem:
+                log.warning("Refused Graph digest: %s", problem)
+                raise GraphCallRefused(f"refused Graph digest: {problem}")
         request.headers["Prefer"] = IMMUTABLE_IDS
         return self._inner.handle_request(request)
 
@@ -237,15 +282,18 @@ class GraphClient:
         standin: bool = False,
         sleep: Callable[[float], None] = time.sleep,
         forward_to: str | None = None,
+        digest_to: str | None = None,
     ) -> None:
         """``standin=True`` allows plain http, for the fake Graph only, never for Graph.
 
-        ``forward_to`` is the one address payment reminders go to (IN-05). Without it the
-        client cannot forward or send anything."""
+        ``forward_to`` is the one address payment reminders go to (IN-05), ``digest_to`` the
+        one address the daily digest of open exceptions goes to (EX-03). Without either the
+        client cannot send anything."""
         if urlsplit(base_url).scheme != "https" and not standin:
             raise ValueError("the Graph base URL must use https unless it is the stand in")
         self.mailbox = mailbox
         self.forward_to = forward_to
+        self.digest_to = digest_to
         url = httpx.URL(base_url.rstrip("/") + "/")
         self._user = f"users/{quote(mailbox, safe='@')}"
         self._deleted_items: str | None = None
@@ -254,7 +302,7 @@ class GraphClient:
         self._http = httpx.Client(
             base_url=url,
             transport=_GuardedTransport(
-                transport or httpx.HTTPTransport(), url, mailbox, forward_to
+                transport or httpx.HTTPTransport(), url, mailbox, forward_to, digest_to
             ),
             timeout=timeout,
             follow_redirects=False,
@@ -407,18 +455,42 @@ class GraphClient:
         answer = self._get(f"{self._user}/messages/{message_id}", {"$select": "isDraft"}).json()
         return bool(answer.get("isDraft")) if isinstance(answer, dict) else False
 
-    def send_draft(self, message_id: str) -> None:
+    def create_digest(self, subject: str, html: str) -> str:
+        """Save the daily digest to the digest address as a new draft and return the draft's
+        immutable ID. Nothing is sent yet (#61)."""
+        if not self.digest_to:
+            raise GraphCallRefused("refused Graph digest: no digest address is set")
+        body = {
+            "subject": subject,
+            "body": {"contentType": "html", "content": html},
+            "toRecipients": [{"emailAddress": {"address": self.digest_to}}],
+        }
+        draft = self._post(f"{self._user}/messages", body).json()
+        draft_id = draft.get("id") if isinstance(draft, dict) else None
+        if not isinstance(draft_id, str) or not re.fullmatch(_MESSAGE_ID, draft_id):
+            raise GraphApiError("POST", "messages", 200, "no draft ID in the answer")
+        return draft_id
+
+    def send_draft(self, message_id: str, to: str | None = None) -> None:
         """Send a saved draft. Graph sends a draft only once.
+
+        ``to`` is the one address the draft must go to: the forward address unless named, or
+        the digest address for the digest.
 
         The draft sits in the shared mailbox until it is sent, so a person could change it in
         the meantime. Right before sending, ARGUS reads its recipients again and refuses unless
-        it goes to the one forward address only, with no copy (compliance review of PR 93)."""
+        it goes to that one address only, with no copy (compliance review of PR 93)."""
         _check_id(message_id)
+        expected = self.forward_to if to is None else to
+        if not expected or expected.lower() not in {
+            a.lower() for a in (self.forward_to, self.digest_to) if a
+        }:
+            raise GraphCallRefused("refused to send the draft: not an address set for ARGUS")
         answer = self._get(
             f"{self._user}/messages/{message_id}",
             {"$select": "isDraft,toRecipients,ccRecipients,bccRecipients"},
         ).json()
-        problem = draft_recipient_problem(answer, self.forward_to or "")
+        problem = draft_recipient_problem(answer, expected)
         if problem:
             log.warning("Refused to send draft %s: %s", message_id, problem)
             raise GraphCallRefused(f"refused to send the draft: {problem}")
@@ -525,7 +597,8 @@ def _addresses(recipients: Any) -> list[Any]:
 
 
 def draft_recipient_problem(message: Any, forward_to: str) -> str | None:
-    """Why a draft must not be sent, or None when it goes to ``forward_to`` only."""
+    """Why a draft must not be sent, or None when it goes to ``forward_to`` only. Used for the
+    digest address too (#61), with the same rules."""
     if not isinstance(message, dict) or message.get("isDraft") is not True:
         return "it is not a draft"
     if _addresses(message.get("ccRecipients")) or _addresses(message.get("bccRecipients")):
@@ -534,7 +607,7 @@ def draft_recipient_problem(message: Any, forward_to: str) -> str | None:
     if len(to) != 1:
         return "it must have exactly one recipient"
     if not isinstance(to[0], str) or not forward_to or to[0].lower() != forward_to.lower():
-        return "it goes to an address that is not the one set for reminders"
+        return "it goes to an address that is not the one set for it"
     return None
 
 

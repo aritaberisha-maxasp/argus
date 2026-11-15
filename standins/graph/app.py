@@ -3,9 +3,10 @@
 It serves the accounts mailbox from the synthetic fixture emails in ``tests/fixtures/emails``
 and answers the Graph calls ARGUS makes the way Graph does: listing the Inbox with paging,
 reading an email as its raw .eml file, finding and creating folders, moving an email into a
-folder and deleting it, and forwarding an email through a saved draft that can be sent only
-once (#27). Like Graph, a deleted email moves to Deleted Items and can still be found there;
-only deleting it again from Deleted Items makes it unfindable (404). Like Graph with RBAC for
+folder and deleting it, forwarding an email through a saved draft that can be sent only
+once (#27), and saving a new message as a draft, for the daily digest (#61). Like Graph, a
+deleted email moves to Deleted Items and can still be found there; only deleting it again from
+Deleted Items makes it unfindable (404). Like Graph with RBAC for
 Applications, it only lets the app into its one mailbox. IDs are immutable only when the
 request asks for them with ``Prefer: IdType="ImmutableId"``, so a client that forgets the
 header gets different IDs.
@@ -67,7 +68,9 @@ def _message(raw: bytes) -> Message:
 
 @dataclass
 class Draft:
-    """A forward saved as a draft. Like Graph, it carries every attachment of the original."""
+    """A forward saved as a draft. Like Graph, it carries every attachment of the original.
+    A new message (the daily digest, #61) has no original, no attachments and a subject and
+    body of its own."""
 
     id: str
     original_id: str
@@ -77,6 +80,8 @@ class Draft:
     is_draft: bool = True
     cc: list[str] = field(default_factory=list)
     bcc: list[str] = field(default_factory=list)
+    subject: str = ""
+    body: str = ""
 
 
 def attachments_of(raw: bytes) -> list[tuple[str, bytes]]:
@@ -283,6 +288,30 @@ def create_app(
             to=[r["emailAddress"]["address"] for r in body.get("toRecipients", [])],
             comment=body.get("comment", ""),
             attachments=attachments_of(message.raw),
+        )
+        box.drafts[draft.id] = draft
+        return JSONResponse({"id": draft.id, "isDraft": True}, status_code=201)
+
+    @app.post("/v1.0/users/{user}/messages")
+    async def create_message(
+        request: Request,
+        user: str,
+        authorization: Annotated[str | None, Header()] = None,
+        prefer: Annotated[str | None, Header()] = None,
+    ) -> Response:
+        """Save a new message as a draft in the mailbox, as Graph does (#61)."""
+        refused = check(request, user, authorization, prefer)
+        if refused:
+            return refused
+        body = await request.json()
+        draft = Draft(
+            id="AAkALgAAAAAAHYQDEapmEc2byACqAC-EWg0C" + uuid.uuid4().hex,
+            original_id="",
+            to=[r["emailAddress"]["address"] for r in body.get("toRecipients", [])],
+            comment="",
+            attachments=[],
+            subject=body.get("subject", ""),
+            body=body.get("body", {}).get("content", ""),
         )
         box.drafts[draft.id] = draft
         return JSONResponse({"id": draft.id, "isDraft": True}, status_code=201)
@@ -523,6 +552,8 @@ def create_app(
                 {
                     "original_id": d.original_id,
                     "to": d.to,
+                    "subject": d.subject,
+                    "body": d.body,
                     "attachments": [
                         {"filename": name, "sha256": hashlib.sha256(data).hexdigest()}
                         for name, data in d.attachments

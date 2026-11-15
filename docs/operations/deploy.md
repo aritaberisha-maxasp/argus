@@ -275,7 +275,7 @@ These are the steps 4 and 5 from [infra/README.md](../../infra/README.md#one-tim
 - The Microsoft Graph and Wise secrets into Key Vault, then a PR that adds them to `manualSecrets` in `main.bicepparam`.
 - The two roles for the backup vault, then a PR that switches `databaseBackupProtected` on, so the long term backup of the database starts ([backup-and-restore.md](backup-and-restore.md)).
 
-After the first deploy with the ARGUS image, two scheduled jobs run in the environment: `caj-argus-sweep` every 5 minutes and `caj-argus-removal` once a day at 02:30 UTC (#125). Their alerts go to `ARGUS_ALERT_EMAIL` through the action group `ag-argus-ops`. Right after the jobs first appear, the "no removal run" alert can fire once, until the first nightly run; it clears by itself. To check the email path, open `ag-argus-ops` in the portal and use **Test action group**.
+After the first deploy with the ARGUS image, three scheduled jobs run in the environment: `caj-argus-sweep` every 5 minutes, `caj-argus-removal` once a day at 02:30 UTC (#125) and `caj-argus-digest` once a day at 05:00 UTC, the email to Benjamin with every open exception (#61). Their alerts go to `ARGUS_ALERT_EMAIL` through the action group `ag-argus-ops`. Right after the jobs first appear, the "no removal run" alert can fire once, until the first nightly run; it clears by itself. To check the email path, open `ag-argus-ops` in the portal and use **Test action group**.
 
 For the demo with the stand ins, see [docs/runbooks/demo.md](../runbooks/demo.md). Demo mode is on in `main.bicepparam` until go live, so the first deploy already brings up the stand ins (#124).
 
@@ -288,6 +288,8 @@ The alert email names the rule. Open the job in the portal (resource group `rg-a
 - **`alert-caj-argus-sweep-failed`.** A sweep run failed, or one email in it failed. The next run starts on time anyway and tries the failed email again. If the alert stays on, the same email keeps failing: the log names its record ID and the error.
 - **`alert-caj-argus-sweep-silent`.** No sweep finished in 30 minutes. The job did not start, crashed before it could log, or was switched off. Look at the execution history first.
 - **`alert-caj-argus-removal-failed`** and **`alert-caj-argus-removal-silent`.** The same for the daily removal from ARGUS/Removed.
+- **`alert-caj-argus-digest-failed`.** The daily digest of open exceptions could not be sent: a setting is missing, Graph or the database could not be reached, or the saved draft was deleted or changed in the mailbox before ARGUS sent it. In the last two cases ARGUS sends nothing more that day, so Benjamin gets no digest until the next morning; look at the exception queue instead.
+- **`alert-caj-argus-digest-silent`.** No digest run finished in 26 hours. A run with no open exceptions also counts as finished, so this means the job did not run.
 
 Each alert clears by itself once the runs are clean again.
 

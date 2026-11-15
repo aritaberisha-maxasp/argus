@@ -44,7 +44,7 @@ def module(name: str, location: str, template: dict[str, Any]) -> dict[str, Any]
 
 
 def intake_jobs() -> dict[str, Any]:
-    """The sweep and removal jobs as Bicep compiles the loop in infra/modules/apps.bicep."""
+    """The sweep, removal and digest jobs as Bicep compiles the loop in infra/modules/apps.bicep."""
     return {
         "copy": {"name": "intakeJobs", "count": "[length(variables('intakeJobList'))]"},
         "condition": "[parameters('runIntakeJobs')]",
@@ -90,7 +90,7 @@ def alerts() -> dict[str, Any]:
     """The action group and the log alert loop as compiled from infra/modules/alerts.bicep."""
     rules = [
         {"job": job, "kind": kind, "query": f'Logs | where Log_s contains "argus-job {mark} {job}"'}
-        for job in ("sweep", "removal")
+        for job in ("sweep", "removal", "digest")
         for kind, mark in (("failed", "failed"), ("silent", "ok"))
     ]
     return {
@@ -208,6 +208,7 @@ def good_main() -> dict[str, Any]:
             "intakeJobList": [
                 {"job": "sweep", "cron": "*/5 * * * *"},
                 {"job": "removal", "cron": "30 2 * * *"},
+                {"job": "digest", "cron": "0 5 * * *"},
             ],
             "plainSettings": [
                 {"name": "ARGUS_DEMO", "value": "[if(parameters('demo'), 'true', 'false')]"}
@@ -912,9 +913,18 @@ def test_a_missing_intake_job_fails(tmp_path: Path) -> None:
 @pytest.mark.req("IN-01", "NF-01")
 def test_an_intake_job_without_its_schedule_check_fails(tmp_path: Path) -> None:
     main = good_main()
-    apps_module(main)["variables"]["intakeJobList"].append({"job": "digest", "cron": "0 6 * * *"})
+    jobs = apps_module(main)["variables"]["intakeJobList"]
+    jobs.append({"job": "payment-run", "cron": "0 6 * * *"})
     problems = run(tmp_path, main)
-    assert "unknown intake jobs ['digest']: add their schedule to this check" in problems
+    assert "unknown intake jobs ['payment-run']: add their schedule to this check" in problems
+
+
+@pytest.mark.req("EX-03", "NF-01")
+@pytest.mark.parametrize("cron", ["*/30 * * * *", "0 5 * * 1-5", "0 5,17 * * *", ""])
+def test_a_digest_that_does_not_run_once_a_day_fails(tmp_path: Path, cron: str) -> None:
+    main = good_main()
+    apps_module(main)["variables"]["intakeJobList"][2]["cron"] = cron
+    assert run(tmp_path, main) == ["the digest job must run once a day"]
 
 
 @pytest.mark.req("IN-01", "NF-01")
