@@ -246,6 +246,17 @@ def test_a_changed_digest_draft_is_not_sent(app: FastAPI) -> None:
 
 
 @pytest.mark.req("NF-06")
+def test_a_digest_draft_with_an_attachment_is_not_sent(app: FastAPI) -> None:
+    graph = client(app)
+    draft_id = graph.create_digest("subject", "<p>x</p>")
+    TestClient(app).patch(f"/_standin/drafts/{draft_id}", json={"attach": ["export.xlsx"]})
+
+    with pytest.raises(GraphCallRefused, match="has an attachment"):
+        graph.send_draft(draft_id, to=DIGEST_TO, no_attachments=True)
+    assert mailbox(app).sent == []
+
+
+@pytest.mark.req("NF-06")
 def test_a_draft_is_only_sent_to_an_address_set_for_argus(app: FastAPI) -> None:
     graph = client(app)
     draft_id = graph.create_digest("subject", "<p>x</p>")

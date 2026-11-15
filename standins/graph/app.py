@@ -340,6 +340,7 @@ def create_app(
                     "toRecipients": recipients(draft.to),
                     "ccRecipients": recipients(draft.cc),
                     "bccRecipients": recipients(draft.bcc),
+                    "hasAttachments": bool(draft.attachments),
                 }
             )
         message = box.find(message_id)
@@ -499,12 +500,14 @@ def create_app(
 
     @app.patch("/_standin/drafts/{draft_id}")
     async def change_draft(draft_id: str, request: Request) -> dict[str, str]:
-        """Change a draft's recipients, as a person in Outlook could before it is sent."""
+        """Change a draft's recipients or add files to it, as a person in Outlook could before
+        it is sent. ``attach`` names files to add, each with made up content."""
         draft = box.drafts[draft_id]
         changes = await request.json()
         draft.to = changes.get("to", draft.to)
         draft.cc = changes.get("cc", draft.cc)
         draft.bcc = changes.get("bcc", draft.bcc)
+        draft.attachments += [(name, b"added by a person") for name in changes.get("attach", [])]
         return {"changed": draft_id}
 
     @app.delete("/_standin/drafts/{draft_id}")

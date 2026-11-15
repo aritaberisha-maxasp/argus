@@ -21,7 +21,8 @@ forward (#27):
 4. The recorded draft is sent. Before sending, ARGUS asks Graph whether it is still a draft, so
    a crash after sending does not send again. Graph itself sends a draft once. Right before
    sending, the Graph client reads the draft's recipients again and refuses unless it goes to
-   the digest address only, because a person could change the draft meanwhile.
+   the digest address only and has no attachment, because a person could change the draft
+   meanwhile.
 5. A short unit of work records ``exception_digest_sent`` with the outcome. From then on the
    day is finished.
 
@@ -83,7 +84,9 @@ class DigestMailbox(Protocol):
 
     def is_draft(self, message_id: str) -> bool: ...
 
-    def send_draft(self, message_id: str, to: str | None = None) -> None: ...
+    def send_draft(
+        self, message_id: str, to: str | None = None, *, no_attachments: bool = False
+    ) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -251,7 +254,7 @@ def _send(graph: DigestMailbox, draft_id: str) -> str:
         if not graph.is_draft(draft_id):
             log.info("Digest draft was found already sent")
             return FOUND_SENT
-        graph.send_draft(draft_id, to=graph.digest_to)
+        graph.send_draft(draft_id, to=graph.digest_to, no_attachments=True)
     except GraphApiError as error:
         if error.status != 404:
             raise  # Graph unreachable or throttled: the next run tries again

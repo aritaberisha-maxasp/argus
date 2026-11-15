@@ -471,7 +471,9 @@ class GraphClient:
             raise GraphApiError("POST", "messages", 200, "no draft ID in the answer")
         return draft_id
 
-    def send_draft(self, message_id: str, to: str | None = None) -> None:
+    def send_draft(
+        self, message_id: str, to: str | None = None, *, no_attachments: bool = False
+    ) -> None:
         """Send a saved draft. Graph sends a draft only once.
 
         ``to`` is the one address the draft must go to: the forward address unless named, or
@@ -479,7 +481,9 @@ class GraphClient:
 
         The draft sits in the shared mailbox until it is sent, so a person could change it in
         the meantime. Right before sending, ARGUS reads its recipients again and refuses unless
-        it goes to that one address only, with no copy (compliance review of PR 93)."""
+        it goes to that one address only, with no copy (compliance review of PR 93).
+        ``no_attachments`` also refuses a draft that has an attachment: the digest never has
+        one, so an attachment means a person added it (compliance review of PR 161)."""
         _check_id(message_id)
         expected = self.forward_to if to is None else to
         if not expected or expected.lower() not in {
@@ -488,9 +492,11 @@ class GraphClient:
             raise GraphCallRefused("refused to send the draft: not an address set for ARGUS")
         answer = self._get(
             f"{self._user}/messages/{message_id}",
-            {"$select": "isDraft,toRecipients,ccRecipients,bccRecipients"},
+            {"$select": "isDraft,toRecipients,ccRecipients,bccRecipients,hasAttachments"},
         ).json()
         problem = draft_recipient_problem(answer, expected)
+        if problem is None and no_attachments and answer.get("hasAttachments") is not False:
+            problem = "it has an attachment"
         if problem:
             log.warning("Refused to send draft %s: %s", message_id, problem)
             raise GraphCallRefused(f"refused to send the draft: {problem}")

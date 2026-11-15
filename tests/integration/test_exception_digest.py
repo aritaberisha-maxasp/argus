@@ -25,6 +25,8 @@ from argus.intake.digest import (
     SENT,
     SENT_NOW,
     DigestMailbox,
+    _finish,
+    _record_draft,
     send_daily_digest,
 )
 from argus.intake.graph import GraphClient
@@ -256,8 +258,10 @@ class CrashAfterSend:
     def is_draft(self, message_id: str) -> bool:
         return self._graph.is_draft(message_id)
 
-    def send_draft(self, message_id: str, to: str | None = None) -> None:
-        self._graph.send_draft(message_id, to)
+    def send_draft(
+        self, message_id: str, to: str | None = None, *, no_attachments: bool = False
+    ) -> None:
+        self._graph.send_draft(message_id, to, no_attachments=no_attachments)
         raise ConnectionError("crashed right after sending")
 
 
@@ -339,6 +343,22 @@ def test_a_changed_draft_is_not_sent(app: Engine, fake: FastAPI) -> None:
     assert mailbox(fake).sent == []
 
 
+@pytest.mark.req("EX-03", "NF-06")
+def test_a_draft_with_an_added_attachment_is_not_sent(app: Engine, fake: FastAPI) -> None:
+    open_audit_exceptions(app)
+    day = next_day()
+    graph = client(fake)
+    with pytest.raises(ConnectionError):
+        send_daily_digest(app, CrashAfterSend(_NoSend(graph)), APP_URL, today=day)
+    (draft_id,) = mailbox(fake).drafts
+    TestClient(fake).patch(f"/_standin/drafts/{draft_id}", json={"attach": ["export.xlsx"]})
+
+    result = send_daily_digest(app, graph, APP_URL, today=day)
+
+    assert result.outcome == DRAFT_CHANGED
+    assert mailbox(fake).sent == []
+
+
 class _NoSend:
     """A Graph client that saves drafts but never sends, to leave a recorded draft behind."""
 
@@ -352,7 +372,9 @@ class _NoSend:
     def is_draft(self, message_id: str) -> bool:
         return self._graph.is_draft(message_id)
 
-    def send_draft(self, message_id: str, to: str | None = None) -> None:
+    def send_draft(
+        self, message_id: str, to: str | None = None, *, no_attachments: bool = False
+    ) -> None:
         pass
 
 
@@ -376,3 +398,18 @@ def test_the_digest_job_sends_once_and_logs_ok(
     lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("argus-job")]
     assert lines == ["argus-job ok digest", "argus-job ok digest"]
     assert "Erika" not in caplog.text and DIGEST_TO not in caplog.text
+
+
+# The writes guard themselves too, not only the run lock
+
+
+@pytest.mark.req("EX-03", "NF-01")
+def test_only_the_first_recorded_draft_and_outcome_of_a_day_count(app: Engine) -> None:
+    day = next_day()
+
+    assert _record_draft(app, day, "AAkFirstDraft", []) == "AAkFirstDraft"
+    assert _record_draft(app, day, "AAkSecondDraft", []) == "AAkFirstDraft"
+    assert _finish(app, day, "AAkFirstDraft", SENT_NOW) == SENT_NOW
+    assert _finish(app, day, "AAkFirstDraft", DRAFT_GONE) == SENT_NOW
+
+    assert [e[0] for e in digest_events(app, day)] == [DRAFTED, SENT]
