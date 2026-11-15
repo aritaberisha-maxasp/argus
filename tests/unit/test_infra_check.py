@@ -123,6 +123,69 @@ def alerts() -> dict[str, Any]:
     }
 
 
+# The "no backup" query from infra/modules/backup-alerts.bicep: Monday, the day after the
+# Sunday backup.
+NO_BACKUP_QUERY = (
+    "union isfuzzy=true (datatable(TimeGenerated: datetime)[]), (AddonAzureBackupJobs) "
+    '| where JobOperation == "Backup" and JobStatus startswith "Completed" '
+    "| summarize completed = count() "
+    "| where completed == 0 and dayofweek(now()) == 1d and hourofday(now()) == 23"
+)
+
+
+def backup_alerts() -> dict[str, Any]:
+    """The backup alerts as compiled from infra/modules/backup-alerts.bicep (#115)."""
+    return {
+        "parameters": {"location": {"type": "string"}, "watchBackups": {"type": "bool"}},
+        "variables": {"noBackupQuery": NO_BACKUP_QUERY},
+        "resources": [
+            {
+                "condition": "[parameters('watchBackups')]",
+                "type": "Microsoft.Insights/diagnosticSettings",
+                "scope": "[format('Microsoft.DataProtection/backupVaults/{0}', 'bvault-argus')]",
+                "name": "argus-backup-jobs",
+                "properties": {
+                    "workspaceId": "[parameters('workspaceId')]",
+                    "logs": [{"category": "AddonAzureBackupJobs", "enabled": True}],
+                },
+            },
+            {
+                "condition": "[parameters('watchBackups')]",
+                "type": "Microsoft.AlertsManagement/actionRules",
+                "name": "apr-bvault-argus-to-ops",
+                "location": "global",
+                "properties": {
+                    "enabled": True,
+                    "scopes": ["[resourceGroup().id]"],
+                    "conditions": [
+                        {
+                            "field": "MonitorService",
+                            "operator": "Equals",
+                            "values": ["Azure Backup"],
+                        }
+                    ],
+                    "actions": [
+                        {
+                            "actionType": "AddActionGroups",
+                            "actionGroupIds": ["[parameters('actionGroupId')]"],
+                        }
+                    ],
+                },
+            },
+            {
+                "condition": "[parameters('watchBackups')]",
+                "type": "Microsoft.Insights/scheduledQueryRules",
+                "name": "alert-bvault-argus-no-backup",
+                "location": "[parameters('location')]",
+                "properties": {
+                    "criteria": {"allOf": [{"query": "[variables('noBackupQuery')]"}]},
+                    "actions": {"actionGroups": ["[parameters('actionGroupId')]"]},
+                },
+            },
+        ],
+    }
+
+
 # How Bicep compiles the env list of the web app in infra/modules/apps.bicep (#133).
 WEB_APP_ENV = (
     "[concat(variables('plainSettings'), variables('signInEnv'), if(parameters('demo'), "
@@ -285,6 +348,7 @@ def good_main() -> dict[str, Any]:
         },
     }
     backup = {
+        "variables": {"weeklySchedule": "R/2026-11-08T01:00:00+00:00/P1W"},
         "parameters": {
             "location": {"type": "string"},
             "retentionYears": {"type": "int", "maxValue": 10},
@@ -306,6 +370,9 @@ def good_main() -> dict[str, Any]:
                             "retentionDurationInDays": 14,
                         },
                     },
+                    "monitoringSettings": {
+                        "azureMonitorAlertSettings": {"alertsForAllJobFailures": "Enabled"}
+                    },
                 },
             },
             "policy": {
@@ -313,7 +380,15 @@ def good_main() -> dict[str, Any]:
                 "name": "[format('{0}/{1}', 'bvault-argus', 'argus-database-monthly')]",
                 "properties": {
                     "policyRules": [
-                        {"name": "BackupWeekly", "objectType": "AzureBackupRule"},
+                        {
+                            "name": "BackupWeekly",
+                            "objectType": "AzureBackupRule",
+                            "trigger": {
+                                "schedule": {
+                                    "repeatingTimeIntervals": ["[variables('weeklySchedule')]"]
+                                }
+                            },
+                        },
                         {
                             "name": "Default",
                             "objectType": "AzureRetentionRule",
@@ -369,6 +444,7 @@ def good_main() -> dict[str, Any]:
             "ai": module("ai", "[parameters('aiLocation')]", ai),
             "apps": module("apps", "[parameters('location')]", apps),
             "alerts": module("alerts", "[parameters('location')]", alerts()),
+            "backupAlerts": module("backup-alerts", "[parameters('location')]", backup_alerts()),
             "standins": {
                 **module("standins", "[parameters('location')]", standins),
                 "condition": "[and(parameters('demo'), not(empty(parameters('demoImage'))))]",
@@ -1084,3 +1160,134 @@ def test_no_web_app_fails(tmp_path: Path) -> None:
     del main["resources"]["apps"]["properties"]["template"]["resources"][1]
 
     assert run(tmp_path, main) == ["no ARGUS web app found in the apps module"]
+
+
+def backup_alert_resources(main: dict[str, Any]) -> list[dict[str, Any]]:
+    found: list[dict[str, Any]] = main["resources"]["backupAlerts"]["properties"]["template"][
+        "resources"
+    ]
+    return found
+
+
+@pytest.mark.req("NF-01")
+@pytest.mark.parametrize("setting", ["Disabled", None])
+def test_a_vault_that_raises_no_alert_for_a_failed_job_fails(
+    tmp_path: Path, setting: str | None
+) -> None:
+    main = good_main()
+    vault = backup_module(main)["resources"]["vault"]
+    if setting is None:
+        del vault["properties"]["monitoringSettings"]
+    else:
+        vault["properties"]["monitoringSettings"]["azureMonitorAlertSettings"][
+            "alertsForAllJobFailures"
+        ] = setting
+    assert any("raises no alert when a backup job fails" in p for p in run(tmp_path, main))
+
+
+@pytest.mark.req("NF-01")
+def test_no_backup_alerts_at_all_fail(tmp_path: Path) -> None:
+    main = good_main()
+    del main["resources"]["backupAlerts"]
+    problems = run(tmp_path, main)
+    assert any("no alert processing rule" in p for p in problems)
+    assert any("sends no AddonAzureBackupJobs records" in p for p in problems)
+    assert any("no backup job completed for 8 days" in p for p in problems)
+
+
+@pytest.mark.req("NF-01")
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda rule: rule["properties"]["actions"][0].update(actionGroupIds=[]),
+        lambda rule: rule["properties"].update(actions=[]),
+        lambda rule: rule["properties"]["conditions"][0].update(values=["Log Alerts V2"]),
+        lambda rule: rule["properties"]["conditions"][0].update(operator="NotEquals"),
+        lambda rule: rule["properties"].update(enabled=False),
+    ],
+)
+def test_a_failed_job_alert_that_reaches_no_action_group_fails(tmp_path: Path, change: Any) -> None:
+    main = good_main()
+    change(backup_alert_resources(main)[1])
+    assert any("no alert processing rule" in p for p in run(tmp_path, main))
+
+
+@pytest.mark.req("NF-03")
+def test_the_alert_processing_rule_may_be_global_but_nothing_else_new(tmp_path: Path) -> None:
+    main = good_main()
+    assert run(tmp_path, main) == []
+    backup_alert_resources(main)[2]["location"] = "global"
+    assert any("fixed location 'global'" in p for p in run(tmp_path, main))
+
+
+@pytest.mark.req("NF-01")
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda setting: setting["properties"].update(logs=[]),
+        lambda setting: setting["properties"]["logs"][0].update(enabled=False),
+        lambda setting: setting["properties"]["logs"][0].update(category="CoreAzureBackup"),
+        lambda setting: setting["properties"].pop("workspaceId"),
+        lambda setting: setting.update(scope="[format('Microsoft.Sql/servers/{0}', 'x')]"),
+    ],
+)
+def test_job_records_that_do_not_reach_log_analytics_fail(tmp_path: Path, change: Any) -> None:
+    main = good_main()
+    change(backup_alert_resources(main)[0])
+    assert any("sends no AddonAzureBackupJobs records" in p for p in run(tmp_path, main))
+
+
+@pytest.mark.req("NF-01")
+def test_a_no_backup_alert_without_an_action_group_fails(tmp_path: Path) -> None:
+    main = good_main()
+    backup_alert_resources(main)[2]["properties"]["actions"]["actionGroups"] = []
+    problems = run(tmp_path, main)
+    assert any("alert-bvault-argus-no-backup sends to no action group" in p for p in problems)
+
+
+@pytest.mark.req("NF-01")
+def test_a_no_backup_query_written_inline_is_read_too(tmp_path: Path) -> None:
+    main = good_main()
+    rule = backup_alert_resources(main)[2]
+    rule["properties"]["criteria"]["allOf"][0]["query"] = NO_BACKUP_QUERY
+    assert run(tmp_path, main) == []
+    rule["properties"]["criteria"]["allOf"][0]["query"] = "Logs | where true"
+    assert any("no backup job completed for 8 days" in p for p in run(tmp_path, main))
+
+
+@pytest.mark.req("NF-01")
+@pytest.mark.parametrize(
+    ("schedule", "query_day"),
+    [
+        # The backup moves to Saturday, the rule still checks on Monday.
+        ("R/2026-11-07T01:00:00+00:00/P1W", "1d"),
+        # The rule moves to Tuesday, the backup stays on Sunday.
+        ("R/2026-11-08T01:00:00+00:00/P1W", "2d"),
+    ],
+)
+def test_a_no_backup_alert_on_the_wrong_day_fails(
+    tmp_path: Path, schedule: str, query_day: str
+) -> None:
+    main = good_main()
+    backup_module(main)["variables"]["weeklySchedule"] = schedule
+    backup_alert_resources(main)[2]["properties"]["criteria"]["allOf"][0]["query"] = (
+        NO_BACKUP_QUERY.replace("== 1d", f"== {query_day}")
+    )
+    assert any("day after the weekly backup" in p for p in run(tmp_path, main))
+
+
+@pytest.mark.req("NF-01")
+def test_a_saturday_backup_with_a_sunday_check_passes(tmp_path: Path) -> None:
+    main = good_main()
+    backup_module(main)["variables"]["weeklySchedule"] = "R/2026-11-07T01:00:00+00:00/P1W"
+    backup_alert_resources(main)[2]["properties"]["criteria"]["allOf"][0]["query"] = (
+        NO_BACKUP_QUERY.replace("== 1d", "== 0d")
+    )
+    assert run(tmp_path, main) == []
+
+
+@pytest.mark.req("NF-01")
+def test_an_unreadable_backup_schedule_fails(tmp_path: Path) -> None:
+    main = good_main()
+    backup_module(main)["variables"]["weeklySchedule"] = "R/2026-11-08T01:00:00+00:00/P1D"
+    assert any("weekly backup schedule cannot be read" in p for p in run(tmp_path, main))

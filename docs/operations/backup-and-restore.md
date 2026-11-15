@@ -36,13 +36,35 @@ az role assignment create --assignee-object-id "$vault_principal" \
   --role Reader --scope /subscriptions/<subscription id>/resourceGroups/rg-argus
 ```
 
-Then change `param databaseBackupProtected = false` to `true` in `infra/main.bicepparam`, in a PR of its own. When it is merged, the deploy connects the server to the vault. The first backup runs the next Sunday. To see it at once: portal, Backup vault, Backup instances, the server, Backup now.
+The same switch also creates the backup alerts (#115), and one of them is an alert processing rule. Azure only accepts it when the subscription has the resource provider `Microsoft.AlertsManagement` registered, and the deploy identity may not register providers. Check it once; if it does not print `Registered`, register it (this needs a right on the subscription, so Arita or Max ASP IT):
 
-If the deploy fails with `UserErrorMissingRequiredPermissions`, one of the two roles is missing or has not spread yet. Wait ten minutes and run the deploy again (Actions, Deploy, Run workflow).
+```
+az provider show --namespace Microsoft.AlertsManagement --query registrationState --output tsv
+az provider register --namespace Microsoft.AlertsManagement
+```
+
+Then change `param databaseBackupProtected = false` to `true` in `infra/main.bicepparam`, in a PR of its own. When it is merged, the deploy connects the server to the vault and switches on the backup alerts. The first backup runs the next Sunday. To see it at once: portal, Backup vault, Backup instances, the server, Backup now.
+
+If the deploy fails with `UserErrorMissingRequiredPermissions`, one of the two roles is missing or has not spread yet. Wait ten minutes and run the deploy again (Actions, Deploy, Run workflow). If it fails with `MissingSubscriptionRegistration` for `Microsoft.AlertsManagement`, the provider above is not registered yet.
 
 ## Check that backups run
 
-Portal, Backup vault, Backup jobs. Every Sunday should show one completed backup job. A failed job shows its reason there. Until the alert on failed backup jobs is built (a follow up of #82), someone has to look here every Monday. Once a quarter, look at Backup instances, the server, Restore, and check the list of recovery points goes back as far as it should.
+Nobody has to look every week. Once the long term backup is switched on, Azure emails `ARGUS_ALERT_EMAIL` through the action group `ag-argus-ops` (#115):
+
+- when a backup or restore job of the vault fails, or someone deletes backup data;
+- when no backup job has completed since Sunday. The rule checks every Monday between 23:00 and 24:00 UTC, so the last good backup is then at least 8 days old.
+
+Once a quarter, still look at Backup instances, the server, Restore, and check the list of recovery points goes back as far as it should.
+
+### When a backup alert arrives
+
+A missing weekly backup is not urgent for the database itself (the server keeps its own 35 days), but every missed month leaves a gap in the ten year trail. Fix it the same week.
+
+- **A failed backup job.** The email comes from Azure Backup and names the vault, the backup instance (the database server), the job and an error code. Portal, Backup vault, Backup jobs, the failed job: it shows the reason. `UserErrorMissingRequiredPermissions` means one of the vault's two roles is gone (see the one time step above). For anything else, start a new backup at once (Backup instances, the server, Backup now) and check that it completes. If it fails again, look up the error code in the Azure Backup docs or ask the team.
+- **`alert-bvault-...-no-backup`.** No backup job completed since Sunday. Look at Backup jobs first. If there is a failed job, see above. If there is no job at all, look at Backup instances: the server must be listed with protection on. If it is gone or stopped, `databaseBackupProtected` was switched off or the instance was removed; the next deploy with the switch on brings it back. If the jobs look fine but the alert still came, the job records did not reach Log Analytics: check the diagnostic setting `argus-backup-jobs` on the vault. Then run Backup now, so the month has its backup.
+- **Deleted backup data.** Treat it as an incident and tell Arita at once. Soft delete keeps deleted backups for 14 days, so they can still be brought back (Backup vault, Backup instances, show soft deleted items).
+
+The alert names only the vault, the job, the time and an error code. It never holds invoice or personal data, and the link in it opens the Azure portal, where you sign in as usual.
 
 ## Restore
 
