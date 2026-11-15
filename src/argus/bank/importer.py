@@ -5,7 +5,8 @@ Covers BA-01, BA-07, BA-08 and NF-01 (issue #56, ADR 0004). The steps:
 1. **Who sent it.** A statement counts only when it comes from one of the addresses set in
    ``ARGUS_STATEMENT_SENDERS`` (Benjamin) and the email has an aligned SPF, DKIM or DMARC
    pass for that address's domain (the sender check of #70), or when it sits in the agreed
-   mailbox folder ``ARGUS_STATEMENT_FOLDER``. Anything else is refused before the file is stored or read.
+   mailbox folder ``ARGUS_STATEMENT_FOLDER``. Anything else is refused before the file is
+   stored or read.
 2. **Read it.** :mod:`argus.bank.statement` reads the CSV. A file that is not one currency and
    one finished month is refused. A refusal is written to the audit log with the file's
    fingerprint and a reason code.
