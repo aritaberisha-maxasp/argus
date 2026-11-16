@@ -39,7 +39,7 @@ Arita merged all waiting Sprint 3 PRs (154 to 162 and the retro PR 164) on the m
 
 Carry over: the DATEV spike #2, open until Benjamin answers. Next in line, refinement only: #38, #64, #116 (#64 and #116 moved back to the backlog from Sprint 3, where they did not start).
 
-Numbers for this sprint: next free ADR is 0009; new migrations start at 0015 and are chained to the highest one in main or any open PR.
+Numbers for this sprint: next free ADR is 0010; new migrations start at 0015 and are chained to the highest one in main or any open PR.
 
 ## Sprint 3 (9 to 15 Nov 2026, done)
 
