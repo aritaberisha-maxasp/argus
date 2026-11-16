@@ -14,6 +14,11 @@ anything, so a run that starts twice or late does no harm.
   email to Benjamin with every open exception (EX-03, #61). Azure starts it once a day in the
   morning. It needs only the database and a Graph client that may send the digest and nothing
   else, so it does not build the sorting or the reading.
+- ``python -m argus.intake statements``: :func:`argus.bank.notices.remind_missing_statements`,
+  the daily check for a missing Wise statement and the reminder to Benjamin (BA-01, #166).
+  Azure starts it once a day in the morning. It needs only the database and the Graph client
+  that may send the notice, and refuses to start without ``ARGUS_REMINDER_FORWARD_TO``. The
+  sweep hands the statement emails to the import (:mod:`argus.intake.statements`).
 
 Exit code 0 when the run went through clean, 1 when it failed as a whole (the database or the
 mailbox could not be reached, a setting is missing) or any single email failed. A failed email
@@ -33,20 +38,24 @@ import re
 from collections.abc import Callable, Mapping
 from contextlib import ExitStack
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Final
 
-from sqlalchemy import Engine
+from sqlalchemy import Engine, text
 
+from argus.bank.importer import BankSettings
+from argus.bank.notices import remind_missing_statements
 from argus.connections import connections_from_env
 from argus.db import engine_from_env
 from argus.db.mode import DatabaseModeError
 from argus.db.mode import check_database_for_mode as _check_database_for_mode
 from argus.documents.store import AzureDocumentStore
-from argus.intake.digest import app_url_from_environment, send_daily_digest
+from argus.intake.digest import app_url_from_environment, berlin_today, send_daily_digest
 from argus.intake.email_text import EmailReader
 from argus.intake.filing import Folders, remove_due
-from argus.intake.graph import GraphClient
+from argus.intake.graph import GraphClient, lookup_name_ok
 from argus.intake.invoices import Invoicing
+from argus.intake.statements import Statements
 from argus.intake.sweep import DocumentArchive, Sorting, sweep
 from argus.logsafe import FAILED_MARK as FAILED_MARK
 from argus.logsafe import OK_MARK as OK_MARK
@@ -63,7 +72,8 @@ log = logging.getLogger("argus.intake.jobs")
 SWEEP: Final = "sweep"
 REMOVAL: Final = "removal"
 DIGEST: Final = "digest"
-JOBS: Final = (SWEEP, REMOVAL, DIGEST)
+STATEMENTS: Final = "statements"
+JOBS: Final = (SWEEP, REMOVAL, DIGEST, STATEMENTS)
 
 # Who Max ASP is, for the sorting (#25, #70) and the invoice reading (#30, #106). Plain values,
 # not secrets. In demo mode the templates set the synthetic values of the test fixtures.
@@ -155,6 +165,22 @@ class Services:
     archive: DocumentArchive
     sorting: Sorting
     _resources: ExitStack = field(default_factory=ExitStack)
+    # Hands statement emails to the Wise statement import (#166).
+    statements: Statements | None = None
+
+    def close(self) -> None:
+        self._resources.close()
+
+
+@dataclass
+class StatementServices:
+    """What one run of the statement job works with (#166): the database, the Wise balances
+    to look for and the Graph client that may send the notice."""
+
+    engine: Engine
+    graph: GraphClient
+    settings: BankSettings
+    _resources: ExitStack = field(default_factory=ExitStack)
 
     def close(self) -> None:
         self._resources.close()
@@ -181,6 +207,20 @@ def _setting(environ: Mapping[str, str], name: str) -> str:
     return value
 
 
+def bank_settings(environ: Mapping[str, str]) -> BankSettings:
+    """Who may send Wise statements, the statement folder and the balances (#56, #166)."""
+    try:
+        settings = BankSettings.from_environment(environ)
+    except ValueError as error:
+        raise JobSettingsError(str(error)) from None
+    if not all(lookup_name_ok(name) for name in settings.statement_folder.strip("/").split("/")):
+        raise JobSettingsError(
+            "ARGUS_STATEMENT_FOLDER must be a folder path such as ARGUS/Kontoauszüge,"
+            " with letters and spaces only"
+        )
+    return settings
+
+
 def check_database_for_mode(environ: Mapping[str, str], *, demo: bool) -> None:
     """Demo data only in the demo database, real data never in it (#124, ADR 0009, QA on PR
     130). The rule lives in :mod:`argus.db.mode`, shared with the nightly audit copy."""
@@ -198,12 +238,13 @@ def services_from_env(environ: Mapping[str, str]) -> Services:
     Document Intelligence in Max ASP's tenant (ADR 0006)."""
     settings = IntakeSettings.from_environment(environ)
     config = settings.sorting_config()
+    bank = bank_settings(environ)
     secrets = EnvironmentSecretStore(environ)
     resources = ExitStack()
     try:
         connections = connections_from_env(environ)
         check_database_for_mode(environ, demo=connections.demo)
-        graph = connections.graph_client()
+        graph = connections.graph_client(statement_folder=bank.statement_folder)
         resources.callback(graph.close)
         documents = AzureDocumentStore.from_secrets(secrets)
         openai_endpoint = _setting(environ, OPENAI_ENDPOINT_ENV)
@@ -226,12 +267,39 @@ def services_from_env(environ: Mapping[str, str]) -> Services:
             reminders=graph if graph.forward_to else None,
             invoicing=Invoicing(reader, settings.own_vat_ids, field_model),
         )
+        # A notice about a blocked statement goes out right away when the reminder address
+        # is set; otherwise the daily statement job sends it (#166).
+        statements = Statements(documents, bank, graph if graph.forward_to else None)
         engine = engine_from_env(environ=environ)
         resources.callback(engine.dispose)
     except BaseException:
         resources.close()
         raise
-    return Services(engine, graph, DocumentArchive(documents), sorting, resources)
+    return Services(
+        engine, graph, DocumentArchive(documents), sorting, resources, statements=statements
+    )
+
+
+def statement_services_from_env(environ: Mapping[str, str]) -> StatementServices:
+    """Build what the statement job needs: the database, the Wise balances and a Graph client
+    that may send the notice to ``ARGUS_REMINDER_FORWARD_TO`` (#166)."""
+    settings = bank_settings(environ)
+    resources = ExitStack()
+    try:
+        connections = connections_from_env(environ)
+        check_database_for_mode(environ, demo=connections.demo)
+        if not connections.reminder_forward_to:
+            raise JobSettingsError(
+                "set ARGUS_REMINDER_FORWARD_TO before the statements job can run"
+            )
+        graph = connections.graph_client()
+        resources.callback(graph.close)
+        engine = engine_from_env(environ=environ)
+        resources.callback(engine.dispose)
+    except BaseException:
+        resources.close()
+        raise
+    return StatementServices(engine, graph, settings, resources)
 
 
 def digest_services_from_env(environ: Mapping[str, str]) -> DigestServices:
@@ -256,7 +324,9 @@ def digest_services_from_env(environ: Mapping[str, str]) -> DigestServices:
 
 def run_sweep(services: Services) -> bool:
     """One sweep. True when nothing failed, including when another sweep was running."""
-    result = sweep(services.engine, services.graph, services.archive, services.sorting)
+    result = sweep(
+        services.engine, services.graph, services.archive, services.sorting, services.statements
+    )
     return result.failed == 0
 
 
@@ -272,6 +342,23 @@ def run_digest(services: DigestServices) -> bool:
     return send_daily_digest(services.engine, services.graph, services.app_url).ok
 
 
+def run_statements(services: StatementServices, today: date | None = None) -> bool:
+    """Today's check for a missing Wise statement (BA-01, #166). True when every notice that
+    was due went out, or was recorded as not sent in shadow mode; False when one is still
+    waiting because sending failed. The next run tries it again."""
+    remind_missing_statements(
+        services.engine,
+        services.settings.balances,
+        services.graph,
+        today=today or berlin_today(),
+    )
+    with services.engine.connect() as connection:
+        waiting: int = connection.execute(
+            text("select count(*) from bank_notice where status = 'pending'")
+        ).scalar_one()
+    return waiting == 0
+
+
 RUNNERS: Final[dict[str, Callable[[Services], bool]]] = {SWEEP: run_sweep, REMOVAL: run_removal}
 
 
@@ -280,7 +367,14 @@ def _run(
     environ: Mapping[str, str],
     build: Callable[[Mapping[str, str]], Services],
     build_digest: Callable[[Mapping[str, str]], DigestServices],
+    build_statements: Callable[[Mapping[str, str]], StatementServices],
 ) -> bool:
+    if job == STATEMENTS:
+        statements = build_statements(environ)
+        try:
+            return run_statements(statements)
+        finally:
+            statements.close()
     if job == DIGEST:
         digest = build_digest(environ)
         try:
@@ -299,12 +393,15 @@ def run_job(
     environ: Mapping[str, str],
     build: Callable[[Mapping[str, str]], Services] = services_from_env,
     build_digest: Callable[[Mapping[str, str]], DigestServices] = digest_services_from_env,
+    build_statements: Callable[
+        [Mapping[str, str]], StatementServices
+    ] = statement_services_from_env,
 ) -> bool:
     """Run one job once and log its outcome line. Never raises: a failure is logged through
     :mod:`argus.logsafe`, as its type and codes only."""
     ok = False
     try:
-        ok = _run(job, environ, build, build_digest)
+        ok = _run(job, environ, build, build_digest, build_statements)
     except Exception:
         log.exception("The %s job could not finish", job)
     log_outcome(log, job, ok)
@@ -316,13 +413,17 @@ def main(
     environ: Mapping[str, str] | None = None,
     build: Callable[[Mapping[str, str]], Services] = services_from_env,
     build_digest: Callable[[Mapping[str, str]], DigestServices] = digest_services_from_env,
+    build_statements: Callable[
+        [Mapping[str, str]], StatementServices
+    ] = statement_services_from_env,
 ) -> int:
-    """Entry point: ``python -m argus.intake sweep``, ``removal`` or ``digest``."""
+    """Entry point: ``python -m argus.intake sweep``, ``removal``, ``digest`` or
+    ``statements``."""
     parser = argparse.ArgumentParser(
         prog="python -m argus.intake",
         description=(
-            "Run one scheduled intake job once: the mailbox sweep, the daily removal or the "
-            "daily digest of open exceptions."
+            "Run one scheduled intake job once: the mailbox sweep, the daily removal, the "
+            "daily digest of open exceptions or the daily check for a missing Wise statement."
         ),
     )
     parser.add_argument("job", choices=JOBS)
@@ -333,4 +434,4 @@ def main(
     # One line per HTTP call every 5 minutes would fill the logs; failures still show.
     logging.getLogger("httpx").setLevel(logging.WARNING)
     environ = os.environ if environ is None else environ
-    return 0 if run_job(args.job, environ, build, build_digest) else 1
+    return 0 if run_job(args.job, environ, build, build_digest, build_statements) else 1

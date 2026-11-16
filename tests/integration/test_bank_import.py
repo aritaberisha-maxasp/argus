@@ -6,7 +6,6 @@ difference blocks the import and tells Benjamin; a reminder when the statement i
 Covers BA-01, BA-07, BA-08, NF-01 and NF-03.
 """
 
-from collections.abc import Iterator
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -27,9 +26,7 @@ from argus.cases.model import CaseKind, CaseStatus
 from argus.cases.store import CaseRuleBroken, NotAllowed, get_case, unit_of_work, verify_chain
 from argus.documents.store import MemoryDocumentStore, fingerprint
 from argus.intake.graph import GraphClient
-from argus.intake.mode import IntakeMode
 from standins.graph.app import MAILBOX, create_app
-from tests.integration.conftest import set_mode
 from tests.unit.intake.graph_helpers import BASE_URL, TOKEN, StaticTokens, standin_transport
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "wise"
@@ -44,35 +41,6 @@ DECEMBER_2ND = date(2026, 12, 2)
 def november_one_cent_off() -> bytes:
     """November with its opening balance one cent above October's closing balance."""
     return NOVEMBER.replace(b'"-500.00","EUR"', b'"-500.01","EUR"')
-
-
-@pytest.fixture
-def clean_bank(owner: Engine) -> Iterator[None]:
-    """Each test starts with no statements. The tables are append only, so the owner wipes
-    them with the triggers off, for this test cleanup only. The audit log stays."""
-
-    def wipe() -> None:
-        with owner.begin() as connection:
-            connection.execute(text("set local session_replication_role = replica"))
-            connection.execute(text("delete from bank_notice"))
-            connection.execute(
-                text(
-                    "delete from exception_item where statement_id is not null"
-                    " or facts ? 'bank_statement'"
-                )
-            )
-            connection.execute(
-                text(
-                    "with gone as (delete from bank_transaction returning case_id)"
-                    " delete from invoice_case where id in (select case_id from gone)"
-                )
-            )
-            connection.execute(text("delete from bank_statement"))
-
-    wipe()
-    yield
-    wipe()
-    set_mode(owner, IntakeMode.SHADOW)
 
 
 @pytest.fixture

@@ -36,16 +36,26 @@ Both days can be the same, for example in January (1 and 6 January are holidays 
 
 Each notice is recorded as pending, then sent, then marked sent, all outside any transaction for the sending. A crash right after sending can send it twice on the next run; nothing is lost. In shadow mode nothing is sent and the notice ends as `not_sent_shadow`. The import itself runs in shadow mode too, because it changes nothing outside ARGUS.
 
+## From the mailbox (#166)
+
+The mailbox sweep hands statement files to the import (`src/argus/intake/statements.py`). Two ways in:
+
+- **An email in the Inbox.** Right before an email is sorted, the sweep looks for CSV files in it. If the From address is in `ARGUS_STATEMENT_SENDERS` and `argus.sorting.sender.authenticate` passes for it (an aligned SPF, DKIM or DMARC pass, the strict check of #70), every CSV file goes to the import. The sorting's own sender check (`SenderCheck.treated_as`) is never used for this, because it treats Max ASP's own domain as internal unless DMARC fails.
+- **An email in the statement folder** `ARGUS_STATEMENT_FOLDER`. After the pass over the Inbox the sweep lists that folder and hands every CSV file of each email over once, whoever sent it. An audit event `bank_import_from_folder` marks the email as done. The Graph client can list this one folder only: the transport allows the listing for the folder ID the client found from its configured path, and refuses every other folder.
+
+A CSV file with Wise's columns from anyone else, or from a statement sender whose email fails the strict check (including a forged From line with Benjamin's address), is refused: the import writes `bank_import_refused` with reason `unknown_source`, and the email gets one exception `uncertain_classification` in German that says to move the email into the statement folder if the statement is genuine. When the email is then imported from the folder, the exception is resolved as `category_chosen`. A person who resolves it otherwise is not asked again for that email. A CSV without Wise's columns from anyone else is left to the sorting.
+
+Mail Benjamin sends from inside the tenant often carries no SPF, DKIM or DMARC result for his domain, so his emails may never pass the strict check. Then the folder is the way in, and the exception says so. No Exchange internal marker such as `X-MS-Exchange-Organization-AuthAs` is trusted: it was not tested on real headers, and the go live runbook has a step to try one real email instead.
+
+Every file goes to the import with the `email_id` of its email. Running the sweep again on the same email, or getting the same file in the Inbox and the folder, imports it once (BA-07). Shadow mode is as above: the import runs, notices are not sent.
+
+The daily job `python -m argus.intake statements` (`caj-argus-statements`, 06:00 UTC) runs `remind_missing_statements` and sends any notice still waiting. It ends with `argus-job ok statements` or `argus-job failed statements` like the other jobs, and fails when a notice could not be sent or `ARGUS_REMINDER_FORWARD_TO` is missing.
+
 ## What stays out of the logs
 
 The audit log gets fingerprints, IDs, currency, month, amounts and reason codes. File names, counterparties, payment references and descriptions stay in the database tables only (NF-03). The application log holds IDs, currency, month and counts.
 
 ## Not in this story
 
-- Taking statement emails out of the mailbox sweep and handing them to the import, and running `remind_missing_statements` once a day as a job. Follow up story, see the PR. That story must meet these points from the compliance review of PR 162:
-  - `StatementSource.email(authenticated=...)` gets `Authentication.passed` from `argus.sorting.sender.authenticate` for the sender's own address. Never `SenderCheck.treated_as` or "not a failed claim": the sorting treats mail from Max ASP's own domain as internal unless Exchange writes `dmarc=fail`, so a forged From line with Benjamin's address would pass.
-  - Mail sent inside the tenant often carries no SPF, DKIM or DMARC result, so the strict check may never pass for Benjamin's real emails. The story needs a tested way to recognise his genuine internal mail, or relies on the folder only. One option is a marker Exchange sets for mail from inside the tenant and strips from mail arriving from outside (for example `X-MS-Exchange-Organization-AuthAs: Internal`), checked on the topmost copy, with a test that the same header on an outside email does not count. The architect decides, tested against real Exchange headers.
-  - A forged email from outside with Benjamin's address and no aligned pass is refused, with an integration test.
-  - Every statement handed to the import carries its `email_id`, so an unreadable file always lands in the queue (QA on PR 162).
 - Booking and matching the bank transaction cases (#57, #58, BA-02 to BA-06).
 - A month without any transaction: Wise writes an empty CSV, which cannot show the balance, so ARGUS refuses it and the reminder for that balance keeps coming. To be settled with Benjamin.

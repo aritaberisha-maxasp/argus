@@ -44,7 +44,7 @@ def module(name: str, location: str, template: dict[str, Any]) -> dict[str, Any]
 
 
 def intake_jobs() -> dict[str, Any]:
-    """The sweep, removal and digest jobs as Bicep compiles the loop in infra/modules/apps.bicep."""
+    """The intake jobs as Bicep compiles the loop in infra/modules/apps.bicep."""
     return {
         "copy": {"name": "intakeJobs", "count": "[length(variables('intakeJobList'))]"},
         "condition": "[parameters('runIntakeJobs')]",
@@ -150,7 +150,7 @@ def alerts() -> dict[str, Any]:
     """The action group and the log alert loop as compiled from infra/modules/alerts.bicep."""
     rules = [
         {"job": job, "kind": kind, "query": f'Logs | where Log_s contains "argus-job {mark} {job}"'}
-        for job in ("sweep", "removal", "digest")
+        for job in ("sweep", "removal", "digest", "statements")
         for kind, mark in (("failed", "failed"), ("silent", "ok"))
     ]
     audit_rules = [
@@ -349,6 +349,7 @@ def good_main() -> dict[str, Any]:
                 {"job": "sweep", "cron": "*/5 * * * *"},
                 {"job": "removal", "cron": "30 2 * * *"},
                 {"job": "digest", "cron": "0 5 * * *"},
+                {"job": "statements", "cron": "0 6 * * *"},
             ],
             "plainSettings": [
                 {"name": "ARGUS_DEMO", "value": "[if(parameters('demo'), 'true', 'false')]"},
