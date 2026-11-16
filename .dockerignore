@@ -8,4 +8,7 @@ spikes
 tests/fixtures/emails/*
 # The fake Graph serves the fixture emails (standins/graph/Dockerfile).
 !tests/fixtures/emails/*.eml
+# The demo only emails (src/argus/demo/data.py), for the demo seed image only.
+!tests/fixtures/emails/demo
+!tests/fixtures/emails/demo/*.eml
 tests/fixtures/documents

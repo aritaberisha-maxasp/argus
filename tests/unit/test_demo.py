@@ -6,7 +6,8 @@ Covers: IN-01, NF-04
 
 import importlib
 import re
-from email import message_from_bytes
+from email import message_from_bytes, policy
+from email.message import EmailMessage
 from pathlib import Path
 
 import httpx
@@ -27,6 +28,10 @@ from argus.demo import (
     send_one,
 )
 from argus.demo.__main__ import main
+from argus.demo.data import DEMO_ONLY
+from argus.intake.email_text import body_of
+from argus.reading.fields import Flag
+from argus.reading.invoice import read_body
 from argus.wise import WiseCallRefused
 from standins.graph.app import create_app as create_fake_graph
 from standins.graph.app import fake_token
@@ -51,7 +56,8 @@ def manifest() -> dict[str, dict[str, str]]:
 @pytest.mark.req("IN-01")
 def test_the_demo_set_shows_every_case_the_issue_asks_for() -> None:
     rows = manifest()
-    picked = [rows[email.file] for email in DEMO_EMAILS]
+    # The demo only emails (E51 on) are not in the AC-1 manifest; they have a test of their own.
+    picked = [rows[email.file] for email in DEMO_EMAILS if email.file in rows]
     flags = {flag for row in picked for flag in row["flags"].split()}
     categories = {row["expected_category"] for row in picked}
     # Incoming invoices as PDF, scan, XRechnung and ZUGFeRD; an outgoing invoice; a reminder.
@@ -65,6 +71,43 @@ def test_the_demo_set_shows_every_case_the_issue_asks_for() -> None:
 def test_the_duplicate_arrives_after_the_invoice_it_repeats() -> None:
     files = [email.file for email in DEMO_EMAILS]
     assert files.index("E15_doppelte-rechnung.eml") > files.index("E01_buerobedarf-rechnung.eml")
+
+
+def test_the_demo_only_emails_stay_out_of_the_fifty_test_emails() -> None:
+    # AC-1 and the fake Graph count exactly 50; the demo only ones sit in a subfolder.
+    assert len(list(EMAILS.glob("*.eml"))) == 50
+    assert len(manifest()) == 50
+    demo_only = [email.file for email in DEMO_EMAILS if email.file.startswith(f"{DEMO_ONLY}/")]
+    assert demo_only == ["demo/E51_rechnung-ohne-waehrung.eml"]
+
+
+@pytest.mark.req("EX-01", "IN-10")
+def test_e51_states_no_currency_so_argus_cannot_confirm_amount_or_currency() -> None:
+    """E51 is in the demo to show the correction form (#112): its invoice is in the email text
+    and its amounts carry no currency, so ARGUS reads the number and the vendor but leaves the
+    amounts and the currency empty for a person. Nothing is guessed, not even EUR."""
+    raw = (EMAILS / DEMO_ONLY / "E51_rechnung-ohne-waehrung.eml").read_bytes()
+    message = message_from_bytes(raw, policy=policy.default)
+    assert isinstance(message, EmailMessage)
+    body = body_of(message)
+    assert not re.search(r"EUR|CHF|USD|GBP|[€$£]", body)
+    reading = read_body(body)
+    assert reading is not None and reading.kind == "invoice"
+    assert reading.value("invoice_number") == "R-2026-0961"
+    assert reading.value("vendor_vat_id") == "DE012345607"  # Beispiel Reinigung GmbH, known
+    assert reading.value("recipient_name") == "Max ASP GmbH"
+    for name in ("gross_amount", "currency"):
+        assert reading.fields[name].value is None
+        assert reading.fields[name].flag is Flag.NOT_FOUND
+
+
+@pytest.mark.req("IN-01")
+def test_send_finds_a_demo_only_email_by_its_number() -> None:
+    http, token = demo_graph()
+    connections = connections_from_env({**DEMO, "ARGUS_GRAPH_STANDIN_TOKEN": token})
+    sent = send_one(connections, EMAILS, "E51", http)
+    assert sent.file == "demo/E51_rechnung-ohne-waehrung.eml"
+    assert http.get("/_standin/records").json()["inbox"] == 1
 
 
 def test_every_demo_email_is_a_synthetic_fixture() -> None:
@@ -119,6 +162,7 @@ def test_seed_refuses_a_missing_email(tmp_path: Path) -> None:
 
 def test_seed_refuses_an_email_that_is_not_synthetic(tmp_path: Path) -> None:
     for email in DEMO_EMAILS:
+        (tmp_path / email.file).parent.mkdir(exist_ok=True)
         (tmp_path / email.file).write_bytes((EMAILS / email.file).read_bytes())
     first = tmp_path / DEMO_EMAILS[0].file
     first.write_bytes(first.read_bytes().replace(b"accounts@maxasp.example", b"someone@gmail.com"))
@@ -192,8 +236,10 @@ def test_the_demo_workflow_offers_every_test_email() -> None:
     inputs = workflow[True]["workflow_dispatch"]["inputs"]  # YAML reads "on" as True
     assert "send one email" in inputs["action"]["options"]
     offered = inputs["email"]["options"]
-    files = sorted(path.name.split("_")[0] for path in EMAILS.glob("E*_*.eml"))
+    found = [*EMAILS.glob("E*_*.eml"), *(EMAILS / DEMO_ONLY).glob("E*_*.eml")]
+    files = sorted(path.name.split("_")[0] for path in found)
     assert offered == files
+    assert "E51" in offered  # the demo only invoice with no currency
     assert inputs["email"]["default"] == "E12"
 
 

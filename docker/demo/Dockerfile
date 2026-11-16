@@ -23,6 +23,7 @@ COPY standins/__init__.py standins/__init__.py
 COPY standins/graph/__init__.py standins/graph/app.py standins/graph/
 COPY standins/wise/__init__.py standins/wise/app.py standins/wise/
 COPY tests/fixtures/emails/*.eml tests/fixtures/emails/
+COPY tests/fixtures/emails/demo/*.eml tests/fixtures/emails/demo/
 COPY tests/fixtures/master-data /data/master-data
 COPY tests/fixtures/datev /data/datev
 

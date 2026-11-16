@@ -1,0 +1,44 @@
+Authentication-Results: spf=pass (sender IP is 192.0.2.10)
+ smtp.mailfrom=beispiel-reinigung.example; dkim=pass (signature was verified)
+ header.d=beispiel-reinigung.example;dmarc=pass action=none
+ header.from=beispiel-reinigung.example;compauth=pass reason=100
+From: Beispiel Reinigung GmbH <buchhaltung@beispiel-reinigung.example>
+To: accounts@maxasp.example
+Subject: Rechnung R-2026-0961
+Date: Mon, 02 Nov 2026 10:05:00 +0100
+Message-ID: <E51.rechnung-ohne-waehrung@fixtures.argus.example>
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 8bit
+MIME-Version: 1.0
+
+Guten Tag,
+
+unser Abrechnungsprogramm wird gerade umgestellt. Deshalb erhalten Sie die Rechnung diesmal direkt in dieser E-Mail.
+
+Beispiel Reinigung GmbH
+Glanzgasse 2, 70007 Beispielstadt, DE
+USt-IdNr. DE012345607
+
+Max ASP GmbH
+Testallee 1
+70000 Musterstadt
+DE
+
+Rechnung
+Nummer: R-2026-0961
+Datum: 02.11.2026
+Leistungszeitraum: 01.10.2026 - 31.10.2026
+
+Pos.  Beschreibung  Menge  Einzelpreis  Betrag
+1  Unterhaltsreinigung Büro Oktober  1  640,00  640,00
+2  Grundreinigung Teeküche  1  145,00  145,00
+
+Nettobetrag: 785,00
+USt 19 %: 149,15
+Gesamtbetrag: 934,15
+
+Zahlbar bis 30.11.2026 ohne Abzug.
+Bankverbindung: IBAN DE57 0000 0007 0000 7000 07
+
+Mit freundlichen Grüßen
+Beispiel Reinigung GmbH

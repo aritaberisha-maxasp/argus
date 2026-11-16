@@ -372,7 +372,7 @@ jobs:
             -e ARGUS_MAILBOX=accounts@maxasp.example \
             -e ARGUS_GRAPH_STANDIN_TOKEN \
             argus-demo:ci python -m argus.demo seed
-          test "$(curl -sf http://localhost:8081/_standin/records | jq .inbox)" = 10
+          test "$(curl -sf http://localhost:8081/_standin/records | jq .inbox)" = 11
       - name: The seed refuses when demo mode is off
         run: |
           if docker run --rm --network demo -e ARGUS_DEMO=false argus-demo:ci python -m argus.demo seed; then
