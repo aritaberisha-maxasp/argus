@@ -270,16 +270,40 @@ def test_a_bank_transaction_shows_the_amount_of_the_transaction(
     app: Engine, client: TestClient, entra: FakeEntra, tag: str
 ) -> None:
     with unit_of_work(app, Actor.system("bank")) as db:
+        # Since migration 0014 (#56) a bank transaction belongs to an imported statement of
+        # its currency and month. There is one per month, so an existing one is reused.
+        statement_id: int | None = db.execute(
+            text(
+                "select id from bank_statement where currency = 'USD'"
+                " and period = date '2026-11-01' and outcome = 'imported'"
+            )
+        ).scalar_one_or_none()
+        if statement_id is None:
+            sha = uuid.uuid4().hex * 2
+            statement_id = db.execute(
+                text(
+                    """
+                    insert into bank_statement (sha256, location, size_bytes, source, currency,
+                                                period, opening_minor, closing_minor,
+                                                transaction_count, outcome)
+                    values (:sha, 'sha256/' || :sha, 1, 'folder', 'USD', date '2026-11-01',
+                            0, 0, 1, 'imported')
+                    returning id
+                    """
+                ),
+                {"sha": sha},
+            ).scalar_one()
         case_id = create_case(db, CaseKind.BANK_TRANSACTION, partner_account=f"WISE-{tag}")
         db.execute(
             text(
                 """
                 insert into bank_transaction (case_id, wise_balance_currency,
-                                              wise_transaction_id, booked_on, amount_minor)
-                values (:id, 'USD', :tx, date '2026-11-12', -4250)
+                                              wise_transaction_id, booked_on, amount_minor,
+                                              statement_id)
+                values (:id, 'USD', :tx, date '2026-11-12', -4250, :statement_id)
                 """
             ),
-            {"id": case_id, "tx": f"TX-{tag}"},
+            {"id": case_id, "tx": f"TX-{tag}", "statement_id": statement_id},
         )
 
     row = by_id(listed(client, entra, q=tag, kind="bank_transaction"))[case_id]
