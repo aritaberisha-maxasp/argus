@@ -31,7 +31,17 @@
   }
 
   function message(text, className) {
-    show(el("p", text, className));
+    show(el("p", text, "state" + (className ? " " + className : "")));
+  }
+
+  // The round badge in the header (#152): initials, the full name for screen readers.
+  function signedInAs(name) {
+    const badge = document.getElementById("who");
+    const parts = String(name || "").split(/[\s@._-]+/).filter(Boolean);
+    const initials = parts.length > 1 ? parts[0][0] + parts[parts.length - 1][0] : (parts[0] || "").slice(0, 1);
+    badge.textContent = initials.toUpperCase();
+    badge.setAttribute("aria-label", name ? "Signed in as " + name : "local test sign in");
+    badge.title = name || "local test sign in";
   }
 
   function when(iso) {
@@ -52,10 +62,10 @@
     if (mode === "token") {
       const saved = sessionStorage.getItem(DEV_TOKEN_KEY);
       if (saved) {
-        document.getElementById("who").textContent = "local test sign in";
+        signedInAs("");
         return async () => saved;
       }
-      const p = el("p", "Sign in on the ");
+      const p = el("p", "Sign in on the ", "state");
       const link = el("a", "exception queue page");
       link.href = "/queue";
       p.append(link, " first, then come back here in the same tab.");
@@ -90,7 +100,7 @@
       return null;
     }
     app.setActiveAccount(account);
-    document.getElementById("who").textContent = account.name || account.username || "";
+    signedInAs(account.name || account.username || "");
     return async function () {
       try {
         return (await app.acquireTokenSilent({ scopes, account })).accessToken;
@@ -167,7 +177,7 @@
 
   async function showMailbox(token) {
     const data = await load(token);
-    const refresh = el("button", "Refresh");
+    const refresh = el("button", "Refresh", "button");
     refresh.type = "button";
     refresh.addEventListener("click", () => run(token));
     const toolbar = el("div", null, "toolbar");
@@ -185,14 +195,16 @@
       li.append(a);
       list.append(li);
     }
-    show(
+    const intro = el("div", null, "intro-text");
+    intro.append(
+      el("span", "Demo only · fake mailbox", "eyebrow"),
       el("h1", "Fake mailbox"),
       el("p", "The synthetic accounts mailbox of the demo, read only. It shows where ARGUS " +
-        "sorted each email. At go live you look at the real mailbox in Outlook instead.", "muted"),
-      toolbar,
-      list,
-      ...data.folders.map(folderSection)
+        "sorted each email. At go live you look at the real mailbox in Outlook instead.", "lead")
     );
+    const folders = el("div", null, "panel mailbox");
+    folders.append(...data.folders.map(folderSection));
+    show(intro, toolbar, list, folders);
   }
 
   async function run(token) {

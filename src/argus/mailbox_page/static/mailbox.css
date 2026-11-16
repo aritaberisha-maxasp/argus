@@ -1,30 +1,80 @@
-/* The fake mailbox page (#135). Builds on the queue page style (/queue/app.css). */
+/* The fake mailbox page (#135), in the look of the queue page (#152). Builds on
+   /queue/app.css for colors, fonts, header and buttons. */
 
 .demo-badge {
-  margin-left: 8px;
-  font-size: 12px;
-  padding: 1px 8px;
-  border-radius: 10px;
-  background: #fff4e0;
-  color: #9a4a00;
-  border: 1px solid #f0d2a8;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: var(--flag);
+  border: 1px solid var(--flag);
+  white-space: nowrap;
 }
 
-header a + #who { margin-left: 16px; }
+.intro-text h1 { font-size: 44px; }
+.lead { margin: 0; color: var(--text-2); max-width: 720px; }
 
-.toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 4px 0 8px; }
+.toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; color: var(--muted); font-size: 14px; }
 
-.folders { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 4px; padding: 0; list-style: none; }
+.folders { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .folders a {
-  display: inline-block;
-  padding: 4px 10px;
-  border: 1px solid #d8dce4;
-  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 500;
   text-decoration: none;
 }
-.folders a.empty { color: #5b6475; }
-.folders .count { font-weight: 600; margin-left: 6px; }
+.folders a:hover { background: var(--hover); color: var(--text); }
+.folders a.empty { color: var(--muted); }
+.folders .count { font-family: var(--mono); margin-left: 8px; opacity: 0.7; }
 
-section.folder h2 { scroll-margin-top: 12px; }
-section.folder td.when { white-space: nowrap; }
-section.folder td.subject { overflow-wrap: anywhere; }
+.mailbox { overflow: hidden; }
+
+section.folder { padding: 24px 28px; scroll-margin-top: 12px; }
+section.folder + section.folder { border-top: 1px solid var(--line); }
+section.folder h2 { font-size: 20px; margin: 0 0 12px; }
+section.folder p { margin: 0; }
+
+/* Fixed columns that wrap long subjects and addresses, so the table never runs wider than
+   the screen. */
+section.folder table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 14px; }
+section.folder th, section.folder td {
+  text-align: left;
+  vertical-align: top;
+  padding: 10px 12px 10px 0;
+  border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+section.folder th {
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+section.folder th:nth-child(3), section.folder td.when { width: 170px; }
+section.folder td.when { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+section.folder tbody tr:last-child td { border-bottom: 0; }
+section.folder tbody tr:hover { background: var(--hover); }
+section.folder table + p { margin-top: 12px; }
+
+/* On a phone each email becomes a small card: subject, then sender and time. */
+@media (max-width: 640px) {
+  .intro-text h1 { font-size: 34px; }
+  section.folder { padding: 20px 18px; }
+  section.folder thead { display: none; }
+  section.folder table, section.folder tbody, section.folder tr, section.folder td { display: block; width: auto; }
+  section.folder tr { padding: 10px 0; border-bottom: 1px solid var(--line); }
+  section.folder tbody tr:last-child { border-bottom: 0; }
+  section.folder td { border: 0; padding: 2px 0; }
+  section.folder td.subject { color: var(--text); font-weight: 500; }
+  section.folder td:nth-child(2) { color: var(--text-2); }
+  section.folder td.when { width: auto; }
+}
