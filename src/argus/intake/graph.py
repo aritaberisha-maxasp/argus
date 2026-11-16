@@ -36,6 +36,8 @@ TOKEN_SCOPE = "https://graph.microsoft.com/.default"  # noqa: S105  a scope, not
 PERMISSIONS = frozenset({"Mail.ReadWrite", "Mail.Send"})
 IMMUTABLE_IDS = 'IdType="ImmutableId"'
 PAGE_SIZE = 50
+# How many folders, and emails per folder, the demo mailbox page reads at most (#135).
+FOLDER_PAGE = 100
 MAX_ATTEMPTS = 4
 MAX_RETRY_AFTER = 120.0
 
@@ -74,6 +76,25 @@ class TokenProvider(Protocol):
     credential (ADR 0001); no client secret exists."""
 
     def token(self, scope: str) -> SecretStr: ...
+
+
+@dataclass(frozen=True)
+class MailFolder:
+    """A folder of the mailbox, as listed."""
+
+    id: str
+    name: str
+
+
+@dataclass(frozen=True)
+class FolderMessage:
+    """An email in a folder, as the demo mailbox page shows it (#135): who sent it, about what
+    and when. Only ever read from the fake Graph."""
+
+    subject: str
+    sender_name: str
+    sender_address: str
+    received_at: datetime | None
 
 
 @dataclass(frozen=True)
@@ -119,7 +140,11 @@ def check_token(token: SecretStr) -> None:
 
 
 def allowed_paths(
-    base_path: str, mailbox: str, forward_to: str | None = None, digest_to: str | None = None
+    base_path: str,
+    mailbox: str,
+    forward_to: str | None = None,
+    digest_to: str | None = None,
+    standin: bool = False,
 ) -> tuple[tuple[str, re.Pattern[str]], ...]:
     """The only Graph calls ARGUS makes, all on the one mailbox: list the Inbox, read an email,
     find or create the ARGUS folders, move an email into one and delete an email (#26), and
@@ -130,7 +155,10 @@ def allowed_paths(
     draft and who it goes to, is already allowed for #26.
 
     Sending the daily digest of open exceptions (#61) is only allowed when a digest address is
-    set: save a new message as a draft and send a draft."""
+    set: save a new message as a draft and send a draft.
+
+    Listing the emails of any folder is allowed against the fake Graph only, for the demo
+    mailbox page (#135). Against the real Graph that call stays refused."""
     user = re.escape(f"{base_path.rstrip('/')}/users/{quote(mailbox, safe='@')}")
     paths: tuple[tuple[str, re.Pattern[str]], ...] = (
         ("GET", re.compile(f"{user}/mailFolders/inbox/messages")),
@@ -143,6 +171,8 @@ def allowed_paths(
         ("POST", re.compile(f"{user}/messages/{_MESSAGE_ID}/move")),
         ("DELETE", re.compile(f"{user}/messages/{_MESSAGE_ID}")),
     )
+    if standin:
+        paths += (("GET", re.compile(f"{user}/mailFolders/{_MESSAGE_ID}/messages")),)
     if forward_to:
         paths += (("POST", re.compile(f"{user}/messages/{_MESSAGE_ID}/createForward")),)
     if digest_to:
@@ -225,11 +255,12 @@ class _GuardedTransport(httpx.BaseTransport):
         mailbox: str,
         forward_to: str | None = None,
         digest_to: str | None = None,
+        standin: bool = False,
     ) -> None:
         self._inner = inner
         self._origin = (base_url.scheme, base_url.host, base_url.port)
         base_path = base_url.raw_path.decode("ascii")
-        self._allowed = allowed_paths(base_path, mailbox, forward_to, digest_to)
+        self._allowed = allowed_paths(base_path, mailbox, forward_to, digest_to, standin)
         self._new_message = re.compile(
             re.escape(f"{base_path.rstrip('/')}/users/{quote(mailbox, safe='@')}/messages")
         )
@@ -299,10 +330,11 @@ class GraphClient:
         self._deleted_items: str | None = None
         self._inbox: str | None = None
         self._sleep = sleep
+        self.standin = standin
         self._http = httpx.Client(
             base_url=url,
             transport=_GuardedTransport(
-                transport or httpx.HTTPTransport(), url, mailbox, forward_to, digest_to
+                transport or httpx.HTTPTransport(), url, mailbox, forward_to, digest_to, standin
             ),
             timeout=timeout,
             follow_redirects=False,
@@ -520,6 +552,47 @@ class GraphClient:
             if item.get("displayName") == name:
                 return str(item["id"])
         return None
+
+    def folders(self, parent_id: str | None) -> list[MailFolder]:
+        """The folders directly under ``parent_id``, or at the top of the mailbox when it is
+        None. Reads at most FOLDER_PAGE of them, which is plenty for the demo mailbox (#135)."""
+        page = self._get(
+            self._folders_url(parent_id), {"$select": "id,displayName", "$top": str(FOLDER_PAGE)}
+        ).json()
+        return [
+            MailFolder(id=str(item["id"]), name=str(item.get("displayName") or ""))
+            for item in page.get("value", [])
+        ]
+
+    def folder_messages(self, folder_id: str) -> tuple[list[FolderMessage], bool]:
+        """The newest emails in the folder, newest first, and whether there are more than were
+        read. Only against the fake Graph: the demo mailbox page (#135) uses it, and for the
+        real mailbox people look in Outlook."""
+        if not self.standin:
+            raise GraphCallRefused("refused Graph call: folder listings are for the demo only")
+        _check_id(folder_id)
+        page = self._get(
+            f"{self._user}/mailFolders/{folder_id}/messages",
+            {
+                "$select": "subject,from,receivedDateTime",
+                "$orderby": "receivedDateTime desc",
+                "$top": str(FOLDER_PAGE),
+            },
+        ).json()
+        found = []
+        for item in page.get("value", []):
+            sender = item.get("from") if isinstance(item.get("from"), dict) else {}
+            address = sender.get("emailAddress") if isinstance(sender, dict) else None
+            address = address if isinstance(address, dict) else {}
+            found.append(
+                FolderMessage(
+                    subject=str(item.get("subject") or ""),
+                    sender_name=str(address.get("name") or ""),
+                    sender_address=str(address.get("address") or ""),
+                    received_at=_parse_time(item.get("receivedDateTime")),
+                )
+            )
+        return found, bool(page.get("@odata.nextLink"))
 
     def create_folder(self, parent_id: str | None, name: str) -> str:
         """Create the folder and return its ID. If it was created meanwhile (Graph answers

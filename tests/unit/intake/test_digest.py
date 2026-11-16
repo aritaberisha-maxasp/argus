@@ -189,8 +189,11 @@ def test_without_a_digest_address_no_new_message_can_be_written(app: FastAPI) ->
 
 @pytest.mark.req("NF-06")
 def test_new_messages_are_only_allowed_with_a_digest_address() -> None:
-    def methods(**kwargs: str | None) -> set[tuple[str, str]]:
-        return {(m, p.pattern) for m, p in allowed_paths("/v1.0", MAILBOX, **kwargs)}
+    def methods(
+        forward_to: str | None = None, digest_to: str | None = None
+    ) -> set[tuple[str, str]]:
+        paths = allowed_paths("/v1.0", MAILBOX, forward_to=forward_to, digest_to=digest_to)
+        return {(m, p.pattern) for m, p in paths}
 
     plain, forward, digest = methods(), methods(forward_to=FORWARD_TO), methods(digest_to=DIGEST_TO)
     assert not any(p.endswith("/messages") and m == "POST" for m, p in plain | forward)
