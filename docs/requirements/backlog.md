@@ -16,7 +16,32 @@ Requirement coverage is in [coverage.md](coverage.md). Open business questions a
 
 Sizes: S is about one night, M is two or three nights. Nothing is L.
 
-## Sprint 3 (9 to 15 Nov 2026, approved by Arita on 10 Nov)
+## Sprint 4 (16 to 22 Nov 2026, approved by Arita on 16 Nov)
+
+**Sprint goal:** land the Sprint 3 PRs, then start the approval path on the assumed DATEV answers D1 to D9 (ADR 0002 provisional), so an invoice is matched to its vendor and its IBAN is checked.
+
+Arita merged all waiting Sprint 3 PRs (154 to 162 and the retro PR 164) on the morning of 16 Nov, so new stories can start on the night of 16 Nov. Ranks 1 to 8 are core, 9 to 12 are stretch. #165 is action item 1 of the Sprint 3 retro. #165 to #170 are follow ups found while building and reviewing Sprint 3.
+
+| Rank | Issue | Story | Requirement IDs | Size | Depends on | Stretch |
+|---|---|---|---|---|---|---|
+| 1 | [#165](https://github.com/aritaberisha-maxasp/argus/issues/165) | Check the whole merge list against main before Arita merges | none, team tooling | S | nothing |  |
+| 2 | [#166](https://github.com/aritaberisha-maxasp/argus/issues/166) | Import a Wise statement as soon as Benjamin emails it, and send the daily reminder | BA-01, BA-07, BA-08 | S | #56 done |  |
+| 3 | [#34](https://github.com/aritaberisha-maxasp/argus/issues/34) | Keep the approver, deputy and direct debit flag for each vendor | AP-01, AP-06, PY-13, VM-02 | M | #23, #33 done |  |
+| 4 | [#35](https://github.com/aritaberisha-maxasp/argus/issues/35) | Match each invoice to its vendor account, on the assumed DATEV answers | PR-02, VM-02, VM-03 | M | #34 |  |
+| 5 | [#36](https://github.com/aritaberisha-maxasp/argus/issues/36) | Block invoices whose IBAN differs from the one on file | PR-05, VM-04 | S | #35 |  |
+| 6 | [#63](https://github.com/aritaberisha-maxasp/argus/issues/63) | Show the full trail of a case from receipt to payment | NF-01, AP-08 | S | #62 list part done |  |
+| 7 | [#62](https://github.com/aritaberisha-maxasp/argus/issues/62) | Invoices page, second part: resolve an exception from the page | EX-01, NF-05 | S | #62 list part and #112 done |  |
+| 8 | [#167](https://github.com/aritaberisha-maxasp/argus/issues/167) | Let Arita set the digest and statement reminder addresses for go live | EX-03, BA-08 | S | #61, #56 done |  |
+| 9 | [#37](https://github.com/aritaberisha-maxasp/argus/issues/37) | Propose the G/L account and tax key from the vendor's history | PR-04 | M | #35 | yes |
+| 10 | [#169](https://github.com/aritaberisha-maxasp/argus/issues/169) | Make the CI check catch a switched off backup alert | NF-01 | S | #115 done | yes |
+| 11 | [#168](https://github.com/aritaberisha-maxasp/argus/issues/168) | Give each mailbox job only the mailbox actions it needs | NF-03, NF-01 | S | #61, #56 done | yes |
+| 12 | [#170](https://github.com/aritaberisha-maxasp/argus/issues/170) | Refuse a blank mode switch reason made of tabs or line breaks | NF-01, NF-03 | S | #134 done | yes |
+
+Carry over: the DATEV spike #2, open until Benjamin answers. Next in line, refinement only: #38, #64, #116 (#64 and #116 moved back to the backlog from Sprint 3, where they did not start).
+
+Numbers for this sprint: next free ADR is 0010; new migrations start at 0015 and are chained to the highest one in main or any open PR.
+
+## Sprint 3 (9 to 15 Nov 2026, done)
 
 **Sprint goal:** ARGUS runs live in Azure with the stand ins and a fake mailbox, so Arita can show Benjamin everything built so far in a demo, and only the real mailbox, DATEV and Wise are left to plug in.
 
