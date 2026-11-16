@@ -236,14 +236,16 @@ def hand_over_from_folder(
 
 
 def _resolve_refused(db: Connection, email_id: int) -> None:
-    open_ids = db.execute(
-        text(
-            "select id from exception_item where email_id = :id and resolved_at is null"
-            " and facts ->> 'reason' = :reason"
-        ),
-        {"id": email_id, "reason": SENDER_NOT_CONFIRMED},
-    ).scalars()
-    for exception_id in list(open_ids):
+    open_ids: list[int] = list(
+        db.execute(
+            text(
+                "select id from exception_item where email_id = :id and resolved_at is null"
+                " and facts ->> 'reason' = :reason"
+            ),
+            {"id": email_id, "reason": SENDER_NOT_CONFIRMED},
+        ).scalars()
+    )
+    for exception_id in open_ids:
         resolve_exception(
             db,
             exception_id,
