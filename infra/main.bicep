@@ -238,6 +238,20 @@ module backup 'modules/backup.bicep' = {
   }
 }
 
+// Alerts on the long term backups (#115): a failed backup job, or no backup for 8 days. They
+// go to the operations action group, and only once the backups are switched on.
+module backupAlerts 'modules/backup-alerts.bicep' = {
+  name: 'backup-alerts'
+  params: {
+    location: location
+    tags: tags
+    vaultName: backup.outputs.name
+    workspaceId: monitoring.outputs.id
+    actionGroupId: alerts.outputs.actionGroupId
+    watchBackups: databaseBackupProtected
+  }
+}
+
 module ai 'modules/ai.bicep' = {
   name: 'ai'
   params: {

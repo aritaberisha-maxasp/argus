@@ -293,6 +293,8 @@ The alert email names the rule. Open the job in the portal (resource group `rg-a
 
 Each alert clears by itself once the runs are clean again.
 
+Alerts about the long term database backup (a failed backup job, or no backup for 8 days, #115) go to the same address. What to do is in [backup-and-restore.md](backup-and-restore.md#when-a-backup-alert-arrives).
+
 ## When a deploy fails
 
 Open the failed run under Actions, Deploy. The step that failed says what happened.

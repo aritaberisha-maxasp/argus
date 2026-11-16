@@ -69,6 +69,13 @@ resource vault 'Microsoft.DataProtection/backupVaults@2024-04-01' = {
         retentionDurationInDays: 14
       }
     }
+    // A failed backup or restore job raises a built in Azure Monitor alert. backup-alerts.bicep
+    // sends those alerts to the operations action group (#115).
+    monitoringSettings: {
+      azureMonitorAlertSettings: {
+        alertsForAllJobFailures: 'Enabled'
+      }
+    }
   }
 }
 

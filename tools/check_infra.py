@@ -14,6 +14,10 @@ Azure sign in is needed. The script fails when:
   ``databaseBackupYears`` parameter), or the vault could be locked any other way than through
   ``retentionLocked``, or is not immutable (Unlocked) before that lock, or soft delete is
   off (#82, ADR 0007, NF-01);
+- the Backup vault raises no alert for a failed job, no alert processing rule sends Azure
+  Backup alerts to an action group, the vault's job records do not reach Log Analytics, no log
+  alert catches a week without a completed backup, or that alert checks on another day than the
+  one after the weekly backup (#115, NF-01);
 - a secret could end up in the code, a parameter default or a deployment output, or an app or
   a job gets a secret any other way than as a Key Vault reference, including through a loop
   or as a plain setting such as a connection string, key or token (NF-06, #103);
@@ -39,6 +43,7 @@ import json
 import re
 import sys
 from collections.abc import Iterator
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -111,8 +116,19 @@ SIGN_IN_SETTINGS = (
 FAKE_AUTHORITY_SETTING = "ARGUS_ENTRA_AUTHORITY"
 ACTION_GROUP = "Microsoft.Insights/actionGroups"
 LOG_ALERT = "Microsoft.Insights/scheduledQueryRules"
-# Action groups exist only as global resources; they hold the address and send the email.
-GLOBAL_TYPES = frozenset({ACTION_GROUP})
+ALERT_PROCESSING_RULE = "Microsoft.AlertsManagement/actionRules"
+DIAGNOSTIC_SETTING = "Microsoft.Insights/diagnosticSettings"
+# Action groups and alert processing rules exist only as global resources. The group holds the
+# address and sends the email, the rule holds a filter and a link to the group (#115).
+GLOBAL_TYPES = frozenset({ACTION_GROUP, ALERT_PROCESSING_RULE})
+# The table the vault writes its job records to, read by the "no backup" alert (#115).
+BACKUP_JOBS_TABLE = "AddonAzureBackupJobs"
+_WEEKLY_START = re.compile(r"^R/(\d{4}-\d{2}-\d{2})T[^/]+/P1W$")
+_KUSTO_DAY = re.compile(r"dayofweek\(now\(\)\)\s*==\s*(\d)d")
+_KUSTO_HOUR = re.compile(r"hourofday\(now\(\)\)\s*==\s*(\d+)")
+# The hour (UTC) the "no backup" alert checks: late enough that a Sunday backup has finished
+# and its record has reached Log Analytics, early enough that the 2 day window still covers it.
+BACKUP_CHECK_HOUR = 23
 EMAIL = re.compile(r"[\w.+-]+@[\w-]+(\.[\w-]+)+")
 _COPY_VARIABLE = re.compile(r"variables\('(\w+)'\)")
 _VARIABLE_FIELD = re.compile(r"^\[variables\('(\w+)'\)\.(\w+)\]$")
@@ -325,6 +341,128 @@ def backup_problems(main: dict[str, Any], parameters: dict[str, Any] | None) -> 
             "no backup policy keeps backups for a period set by a parameter "
             f"({BACKUP_YEARS_PARAMETER})"
         )
+    return problems
+
+
+def _resolve(template: dict[str, Any], value: Any) -> Any:
+    """A plain variable reference read from the template's variables, anything else as is."""
+    found = re.fullmatch(r"\[variables\('(\w+)'\)\]", value) if isinstance(value, str) else None
+    return template.get("variables", {}).get(found[1], value) if found else value
+
+
+def _switched_off(resource: dict[str, Any]) -> bool:
+    """A resource that can never be deployed or is disabled."""
+    condition = resource.get("condition", True)
+    return (
+        condition is False
+        or condition == "[false()]"
+        or (resource.get("properties", {}).get("enabled", True) is False)
+    )
+
+
+def _backup_weekday(main: dict[str, Any]) -> int | None:
+    """The weekday of the weekly backup, Sunday 0 as in Kusto, or None when not readable."""
+    for template in templates(main):
+        found = template.get("resources", [])
+        for resource in found.values() if isinstance(found, dict) else found:
+            if resource.get("type") != BACKUP_POLICY:
+                continue
+            for rule in resource.get("properties", {}).get("policyRules", []):
+                schedule = rule.get("trigger", {}).get("schedule", {})
+                for interval in schedule.get("repeatingTimeIntervals", []):
+                    start = _WEEKLY_START.match(str(_resolve(template, interval)))
+                    if start:
+                        return (date.fromisoformat(start[1]).isoweekday()) % 7
+    return None
+
+
+def backup_alert_problems(main: dict[str, Any]) -> list[str]:
+    """A failed backup job and a week without a completed backup both reach an action group
+    (#115, NF-01)."""
+    problems = []
+    vaults = [r for r in resources(main) if r.get("type") == BACKUP_VAULT]
+    for vault in vaults:
+        setting = (
+            vault.get("properties", {})
+            .get("monitoringSettings", {})
+            .get("azureMonitorAlertSettings", {})
+            .get("alertsForAllJobFailures")
+        )
+        if setting != "Enabled":
+            problems.append(
+                f"backup vault {vault.get('name', '?')} raises no alert when a backup job fails"
+            )
+    if not vaults:
+        return problems
+
+    routed = False
+    for rule in (r for r in resources(main) if r.get("type") == ALERT_PROCESSING_RULE):
+        properties = rule.get("properties", {})
+        backup = any(
+            c.get("field") == "MonitorService"
+            and c.get("operator") == "Equals"
+            and "Azure Backup" in c.get("values", [])
+            for c in properties.get("conditions", [])
+        )
+        sends = any(
+            a.get("actionType") == "AddActionGroups" and a.get("actionGroupIds")
+            for a in properties.get("actions", [])
+        )
+        scoped = properties.get("scopes") == ["[resourceGroup().id]"]
+        routed = routed or (backup and sends and scoped and not _switched_off(rule))
+    if not routed:
+        problems.append(
+            "no alert processing rule sends the Azure Backup alerts (a failed backup job) of this "
+            "resource group to an action group"
+        )
+
+    logged = any(
+        r.get("type") == DIAGNOSTIC_SETTING
+        and "backupVaults" in str(r.get("scope", ""))
+        and not _switched_off(r)
+        and r.get("properties", {}).get("workspaceId")
+        and any(
+            log.get("category") == BACKUP_JOBS_TABLE and log.get("enabled")
+            for log in r.get("properties", {}).get("logs", [])
+        )
+        for r in resources(main)
+    )
+    if not logged:
+        problems.append(f"the backup vault sends no {BACKUP_JOBS_TABLE} records to Log Analytics")
+
+    watchers = []
+    for template in templates(main):
+        found = template.get("resources", [])
+        for resource in found.values() if isinstance(found, dict) else found:
+            if resource.get("type") != LOG_ALERT:
+                continue
+            properties = resource.get("properties", {})
+            for item in properties.get("criteria", {}).get("allOf", []):
+                query = str(_resolve(template, item.get("query", "")))
+                if BACKUP_JOBS_TABLE in query:
+                    watchers.append((resource, query))
+    if not watchers:
+        problems.append("no alert fires when no backup job completed for 8 days")
+    weekday = _backup_weekday(main)
+    for resource, query in watchers:
+        name = resource.get("name", "?")
+        if not resource.get("properties", {}).get("actions", {}).get("actionGroups"):
+            problems.append(f"alert {name} sends to no action group")
+        if _switched_off(resource):
+            problems.append(f"alert {name} is switched off")
+        hour = _KUSTO_HOUR.search(query)
+        if hour is None or int(hour[1]) != BACKUP_CHECK_HOUR:
+            problems.append(
+                f"alert {name} must check in one hour, hourofday(now()) == {BACKUP_CHECK_HOUR}"
+            )
+        day = _KUSTO_DAY.search(query)
+        if weekday is None:
+            problems.append("the weekly backup schedule cannot be read (R/<date>T<time>/P1W)")
+        elif day is None or int(day[1]) != (weekday + 1) % 7:
+            problems.append(
+                f"alert {name} must check on the day after the weekly backup "
+                f"(dayofweek(now()) == {(weekday + 1) % 7}d)"
+            )
     return problems
 
 
@@ -900,6 +1038,7 @@ def check(folder: Path) -> list[str]:
         *location_problems(main),
         *retention_problems(main, parameters),
         *backup_problems(main, parameters),
+        *backup_alert_problems(main),
         *secret_problems(main, parameters),
         *deployment_type_problems(main, policy, parameters),
         *demo_problems(main, parameters),
@@ -919,7 +1058,7 @@ def main(argv: list[str]) -> int:
     if problems:
         return 1
     print(
-        "Infrastructure code keeps to the rules of #65, #82, #103, #124, #125 and #133 "
+        "Infrastructure code keeps to the rules of #65, #82, #103, #115, #124, #125 and #133 "
         "(NF-01, NF-03, NF-06)."
     )
     return 0
