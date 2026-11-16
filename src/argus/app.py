@@ -77,9 +77,12 @@ class CaseView(BaseModel):
 
 
 class ModeView(BaseModel):
-    """Whether ARGUS only proposes routes (shadow) or acts on the mailbox (live) (#72)."""
+    """Whether ARGUS only proposes routes (shadow) or acts on the mailbox (live) (#72), and
+    whether the person asking may switch it, so the page shows the switch only to the admin
+    (#134). The server checks the role again on every switch."""
 
     mode: IntakeMode
+    may_switch: bool
 
 
 class ModeChange(BaseModel):
@@ -95,7 +98,8 @@ class ModeChanged(BaseModel):
 
 # Only the admin (Arita) may switch to live mode, and back (#72, ADR 0008).
 Admin = Annotated[SignedInUser, Depends(require_role(Role.ADMIN))]
-# The shadow report shows which emails ARGUS got wrong, so only finance and admin see it.
+# The shadow report shows which emails ARGUS got wrong, so only finance and admin see it. The
+# mode itself is shown to the same two roles on the queue page (#134).
 FinanceOrAdmin = Annotated[SignedInUser, Depends(require_role(Role.FINANCE, Role.ADMIN))]
 
 
@@ -205,10 +209,12 @@ def create_app(
         )
 
     @app.get("/intake/mode")
-    def read_mode(user: CurrentUser) -> ModeView:
-        """Whether ARGUS runs in shadow or live mode."""
+    def read_mode(user: FinanceOrAdmin) -> ModeView:
+        """Whether ARGUS runs in shadow or live mode. Finance and admin see it on the queue
+        page; a person without either role gets nothing (#134, NF-03)."""
         with engine().connect() as connection:
-            return ModeView(mode=intake_mode(connection))
+            mode = intake_mode(connection)
+        return ModeView(mode=mode, may_switch=Role.ADMIN in user.roles)
 
     @app.put("/intake/mode")
     def change_mode(change: ModeChange, user: Admin) -> ModeChanged:

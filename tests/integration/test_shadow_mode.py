@@ -403,7 +403,7 @@ def test_only_the_admin_can_switch_in_the_app(app: Engine) -> None:
     assert switched.status_code == 200
     assert switched.json() == {"mode": "live", "changed": True}
     read = client.get("/intake/mode", headers=token_for(entra, FINANCE, Role.FINANCE))
-    assert read.json() == {"mode": "live"}
+    assert read.json() == {"mode": "live", "may_switch": False}
     assert put(TEST_ADMIN.name, Role.ADMIN, "shadow").json() == {"mode": "shadow", "changed": True}
     assert put(TEST_ADMIN.name, Role.ADMIN, "half").status_code == 422
     assert put(TEST_ADMIN.name, Role.ADMIN, "live", reason="").status_code == 422
