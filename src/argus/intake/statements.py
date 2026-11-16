@@ -19,10 +19,14 @@ Two ways in, as agreed on #56:
 A CSV file with Wise's columns from anyone else, or from a statement sender whose email fails
 the strict check, is not imported. The import writes the refusal to the audit log with the
 file's SHA-256, and the email gets one exception ``uncertain_classification`` that says why and
-what to do: move the email into the statement folder if the statement is genuine. When that
-email is then imported from the folder, the exception is resolved. Mail Benjamin sends from
-inside the tenant often carries no SPF, DKIM or DMARC result, so this is the expected way for
-his genuine internal mail until the go live check shows otherwise (docs/design/bank-import.md).
+what to do: move the email into the statement folder if the statement is genuine, then close
+the exception in the queue with a reason. ARGUS never closes it itself, because the move
+overrides the check and Graph does not say who moved the email (compliance review of PR 176).
+An email in the folder without a CSV file gets an ``unreadable_document`` exception.
+
+Mail Benjamin sends from inside the tenant often carries no SPF, DKIM or DMARC result, so this
+is the expected way for his genuine internal mail until the go live check shows otherwise
+(docs/design/bank-import.md).
 
 Every file goes to the import with the ``email_id`` of its email, so each imported statement
 links back to the email it came in and an unreadable file always lands in the queue (QA on PR
@@ -49,15 +53,14 @@ from sqlalchemy import Connection, Engine, text
 
 from argus.bank.importer import (
     BankSettings,
-    ImportOutcome,
     ImportResult,
     StatementSource,
     import_statement,
 )
 from argus.bank.notices import Notifier
 from argus.bank.statement import REQUIRED_COLUMNS
-from argus.cases.model import Actor, ExceptionReason, Outcome
-from argus.cases.store import open_exception, record_event, resolve_exception, unit_of_work
+from argus.cases.model import Actor, ExceptionReason
+from argus.cases.store import open_exception, record_event, unit_of_work
 from argus.documents.email import Attachment, attachments_of
 from argus.documents.store import DocumentStore
 from argus.intake.digest import berlin_today
@@ -71,6 +74,7 @@ STATEMENTS_ACTOR = Actor.system("statement-handover")
 FROM_FOLDER_EVENT = "bank_import_from_folder"
 # What the exception about a refused statement carries in its facts, to find it again.
 SENDER_NOT_CONFIRMED = "statement_sender_not_confirmed"
+NO_CSV_IN_FOLDER = "no_csv_in_folder"
 
 CSV_TYPES = frozenset({"text/csv", "application/csv", "text/comma-separated-values"})
 # How much of a file is read to see whether it has Wise's columns. The header is one line.
@@ -142,7 +146,8 @@ def refused_detail(folder: str) -> str:
         "Diese E-Mail enthält einen Wise Kontoauszug, kommt aber nicht nachweislich von einer "
         "für Kontoauszüge freigegebenen Adresse (Absenderprüfung nicht bestanden). Der Auszug "
         f"wurde nicht importiert. Ist er echt, die E-Mail in den Ordner {folder} verschieben; "
-        "ARGUS importiert ihn dann von dort."
+        "ARGUS importiert ihn dann von dort. Danach diese Meldung hier mit Begründung "
+        "schließen: ARGUS schließt sie nicht selbst, weil das Verschieben die Prüfung ersetzt."
     )
 
 
@@ -213,12 +218,29 @@ def handed_over_from_folder(connection: Connection, email_id: int) -> bool:
     return found
 
 
+def no_csv_detail(folder: str) -> str:
+    """What the person reads when an email in the statement folder holds no CSV file."""
+    return (
+        f"In dieser E-Mail im Ordner {folder} wurde keine CSV Datei gefunden. ARGUS importiert "
+        "Wise Kontoauszüge nur als CSV. Bitte den Auszug als CSV aus Wise herunterladen und "
+        "erneut senden; eine E-Mail ohne Kontoauszug gehört nicht in diesen Ordner."
+    )
+
+
 def hand_over_from_folder(
     engine: Engine, statements: Statements, email_id: int, raw: bytes
 ) -> list[ImportResult]:
     """Hand every CSV file of an email in the statement folder to the import, then mark the
-    email as handed over and resolve the exception about its unconfirmed sender, if any."""
+    email as handed over. An email without a CSV file gets an exception, so a person sees it
+    (EX-01, compliance review of PR 176).
+
+    An exception about an unconfirmed sender stays open: moving the email into the folder
+    overrides that check, and Graph does not say who moved it, so a signed in person closes
+    it in the queue with a reason (the rule of PR 109). The audit event says whether the
+    email passed the sender check."""
     files = csv_files(raw)
+    address, passed = _sender(raw)
+    confirmed = passed and address in statements.settings.statement_senders
     source = StatementSource.folder(statements.settings.statement_folder, email_id=email_id)
     results = _import_all(engine, statements, source, files)
     with unit_of_work(engine, STATEMENTS_ACTOR) as db:
@@ -226,29 +248,33 @@ def hand_over_from_folder(
             db,
             FROM_FOLDER_EVENT,
             email_id=email_id,
-            # Fingerprints and outcomes only (NF-03).
-            details={"files": [{"sha256": r.sha256, "outcome": r.outcome} for r in results]},
+            # Fingerprints, outcomes and a yes or no only, never the address (NF-03).
+            details={
+                "files": [{"sha256": r.sha256, "outcome": r.outcome} for r in results],
+                "sender_confirmed": confirmed,
+            },
         )
-        if any(r.outcome is not ImportOutcome.REFUSED for r in results):
-            _resolve_refused(db, email_id)
+        if not files:
+            _flag_no_csv(db, statements, email_id)
     log.info("Email record %s: %d files handed over from the folder", email_id, len(results))
     return results
 
 
-def _resolve_refused(db: Connection, email_id: int) -> None:
-    open_ids: list[int] = list(
-        db.execute(
-            text(
-                "select id from exception_item where email_id = :id and resolved_at is null"
-                " and facts ->> 'reason' = :reason"
-            ),
-            {"id": email_id, "reason": SENDER_NOT_CONFIRMED},
-        ).scalars()
+def _flag_no_csv(db: Connection, statements: Statements, email_id: int) -> None:
+    already_open: bool = db.execute(
+        text(
+            "select exists (select 1 from exception_item where email_id = :id"
+            " and reason = :reason and resolved_at is null)"
+        ),
+        {"id": email_id, "reason": ExceptionReason.UNREADABLE_DOCUMENT.value},
+    ).scalar_one()
+    if already_open:
+        return
+    open_exception(
+        db,
+        ExceptionReason.UNREADABLE_DOCUMENT,
+        no_csv_detail(statements.settings.statement_folder),
+        email_id=email_id,
+        facts={"bank_statement": True, "reason": NO_CSV_IN_FOLDER},
     )
-    for exception_id in open_ids:
-        resolve_exception(
-            db,
-            exception_id,
-            Outcome.CATEGORY_CHOSEN,
-            resolution="Der Auszug wurde aus dem Ordner für Kontoauszüge übernommen.",
-        )
+    log.warning("Email record %s in the statement folder holds no CSV file", email_id)

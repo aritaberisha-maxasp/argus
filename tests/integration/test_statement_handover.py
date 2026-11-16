@@ -69,7 +69,10 @@ def statement_email(
     message["Date"] = "Tue, 01 Dec 2026 08:00:00 +0100"
     message.set_content("Anbei der Auszug.")
     for name, data in files:
-        message.add_attachment(data, maintype="text", subtype="csv", filename=name)
+        if name.endswith(".csv"):
+            message.add_attachment(data, maintype="text", subtype="csv", filename=name)
+        else:
+            message.add_attachment(data, maintype="application", subtype="pdf", filename=name)
     return message.as_bytes()
 
 
@@ -204,6 +207,11 @@ def test_the_folder_listing_follows_graphs_paging(
 
     assert (result.statement_files, result.failed) == (1, 0)
     assert len(rows(app, "select id from mailbox_email")) == 61
+    # The 60 emails without a CSV file each go to the queue once.
+    no_csv = rows(
+        app, "select id from exception_item where facts ->> 'reason' = 'no_csv_in_folder'"
+    )
+    assert len(no_csv) == 60
 
 
 @pytest.mark.req("NF-06")
@@ -323,7 +331,7 @@ def test_a_csv_from_anyone_else_without_wise_columns_is_left_alone(
 
 
 @pytest.mark.req("BA-01")
-def test_moving_a_refused_statement_into_the_folder_imports_it_and_closes_the_exception(
+def test_moving_a_refused_statement_into_the_folder_imports_it_and_a_person_closes_it(
     app: Engine, fake: FastAPI, documents: MemoryDocumentStore, statements_setup: Statements
 ) -> None:
     fake.state.mailbox.add(statement_email(auth=NO_RESULT))
@@ -338,9 +346,34 @@ def test_moving_a_refused_statement_into_the_folder_imports_it_and_closes_the_ex
 
     [statement] = statements_of(app)
     assert (statement.outcome, statement.source) == ("imported", "folder")
-    assert open_exceptions(app, email) == []
-    [resolved] = rows(app, "select outcome from exception_item where email_id = :id", id=email)
-    assert resolved.outcome == "category_chosen"
+    # The move overrides the sender check and Graph does not say who moved the email, so the
+    # exception stays open until a signed in person closes it (compliance review of PR 176).
+    [still_open] = open_exceptions(app, email)
+    assert still_open.facts["reason"] == SENDER_NOT_CONFIRMED
+    assert "mit Begründung schließen" in still_open.detail
+    [mark] = rows(
+        app,
+        "select details from audit_event where email_id = :id"
+        " and event_type = 'bank_import_from_folder'",
+        id=email,
+    )
+    assert mark.details["sender_confirmed"] is False
+
+
+@pytest.mark.req("BA-01", "NF-01")
+def test_an_email_in_the_folder_without_a_csv_file_goes_to_the_queue(
+    app: Engine, fake: FastAPI, documents: MemoryDocumentStore, statements_setup: Statements
+) -> None:
+    into_folder(fake, statement_email(files=(("auszug.pdf", b"%PDF-1.4 not a csv"),)))
+
+    first = run_sweep(app, fake, documents, statements_setup)
+    again = run_sweep(app, fake, documents, statements_setup)
+
+    assert (first.statement_files, first.failed, again.failed) == (0, 0, 0)
+    [exception] = open_exceptions(app, email_id(app))
+    assert exception.reason == "unreadable_document"
+    assert exception.facts["reason"] == "no_csv_in_folder"
+    assert "keine CSV Datei" in exception.detail
 
 
 @pytest.mark.req("BA-01")
