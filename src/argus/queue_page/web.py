@@ -58,12 +58,22 @@ log = logging.getLogger(__name__)
 STATIC = files("argus.queue_page") / "static"
 
 # The page and the files it loads. Fixed files without business data, open like /health.
-PAGE_PATHS = frozenset({"/queue", "/queue/app.js", "/queue/app.css", "/queue/msal-browser.min.js"})
+# The fonts are Geist and Geist Mono (SIL Open Font License, geist.LICENSE), served from here
+# so the page loads nothing from another site (#152).
 _ASSETS = {
     "/queue/app.js": ("app.js", "text/javascript; charset=utf-8"),
     "/queue/app.css": ("app.css", "text/css; charset=utf-8"),
     "/queue/msal-browser.min.js": ("msal-browser.min.js", "text/javascript; charset=utf-8"),
+    "/queue/favicon.svg": ("favicon.svg", "image/svg+xml"),
+    "/queue/favicon-16.svg": ("favicon-16.svg", "image/svg+xml"),
+    "/queue/Geist-Regular.woff2": ("Geist-Regular.woff2", "font/woff2"),
+    "/queue/Geist-Medium.woff2": ("Geist-Medium.woff2", "font/woff2"),
+    "/queue/Geist-SemiBold.woff2": ("Geist-SemiBold.woff2", "font/woff2"),
+    "/queue/GeistMono-Regular.woff2": ("GeistMono-Regular.woff2", "font/woff2"),
+    "/queue/GeistMono-Medium.woff2": ("GeistMono-Medium.woff2", "font/woff2"),
+    "/queue/geist.LICENSE": ("geist.LICENSE", "text/plain; charset=utf-8"),
 }
+PAGE_PATHS = frozenset({"/queue"} | set(_ASSETS))
 
 # Benjamin works the queue (#18, question 6); Arita runs ARGUS. Approvers do not see it.
 QueueReader = Annotated[SignedInUser, Depends(require_role(Role.FINANCE, Role.ADMIN))]
@@ -114,6 +124,7 @@ def _page_headers() -> dict[str, str]:
     return {
         "Content-Security-Policy": (
             "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
+            "font-src 'self'; "
             f"connect-src 'self' {login}; frame-src {login}; base-uri 'none'; "
             "form-action 'none'; frame-ancestors 'none'"
         ),
