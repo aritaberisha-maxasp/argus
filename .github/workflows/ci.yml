@@ -476,6 +476,38 @@ jobs:
           # Errors as type and codes only, never a traceback with the error's text (NF-03).
           grep -q "error: OperationalError" failed.log
           if grep -q "Traceback" failed.log; then echo "::error::the job log holds a traceback"; exit 1; fi
+      # The nightly audit copy from #103, with the same command as in Azure
+      # (infra/modules/apps.bicep). Azure creates the documents container; here Azurite stands
+      # in for the storage.
+      - name: Start Azurite for the audit copy
+        run: |
+          docker run -d --name azurite -p 10000:10000 mcr.microsoft.com/azure-storage/azurite:3.37.0 \
+            azurite-blob --blobHost 0.0.0.0 --skipApiVersionCheck
+          for _ in $(seq 1 30); do
+            curl -s -o /dev/null http://localhost:10000/ && break
+            sleep 1
+          done
+          docker run --rm --network host argus:ci python -c \
+            "from azure.storage.blob import BlobServiceClient as S; S.from_connection_string('UseDevelopmentStorage=true').create_container('documents')"
+      - name: Run the nightly audit copy job like Azure does
+        run: |
+          docker run --rm --network host --env-file intake.env argus:ci python -m argus.audit | tee audit.log
+          grep -q "argus-job ok audit-copy" audit.log
+      # What the audit copy alert in infra/modules/alerts.bicep looks for when the database is
+      # down and so not even the exception can be written (review of PR 102).
+      - name: An audit copy that cannot reach the database fails and says so
+        run: |
+          set +e
+          docker run --rm --network host --env-file intake.env \
+            -e ARGUS_DATABASE_URL=postgresql+psycopg://argus_owner@localhost:1/argus_demo \
+            argus:ci python -m argus.audit > audit-failed.log 2>&1
+          code=$?
+          set -e
+          cat audit-failed.log
+          test "$code" = 1
+          grep -q "argus-job failed audit-copy" audit-failed.log
+          grep -q "error: OperationalError" audit-failed.log
+          if grep -q "Traceback" audit-failed.log; then echo "::error::the job log holds a traceback"; exit 1; fi
       - name: Stand in logs
         if: always()
         run: |

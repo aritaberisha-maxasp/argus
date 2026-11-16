@@ -35,12 +35,12 @@ from contextlib import ExitStack
 from dataclasses import dataclass, field
 from typing import Final
 
-from sqlalchemy import Engine, make_url
-from sqlalchemy.exc import ArgumentError
+from sqlalchemy import Engine
 
 from argus.connections import connections_from_env
-from argus.db import DATABASE_URL_ENV, engine_from_env
-from argus.demo.reset import DEMO_SUFFIX
+from argus.db import engine_from_env
+from argus.db.mode import DatabaseModeError
+from argus.db.mode import check_database_for_mode as _check_database_for_mode
 from argus.documents.store import AzureDocumentStore
 from argus.intake.digest import app_url_from_environment, send_daily_digest
 from argus.intake.email_text import EmailReader
@@ -48,7 +48,9 @@ from argus.intake.filing import Folders, remove_due
 from argus.intake.graph import GraphClient
 from argus.intake.invoices import Invoicing
 from argus.intake.sweep import DocumentArchive, Sorting, sweep
-from argus.logsafe import use_safe_logging
+from argus.logsafe import FAILED_MARK as FAILED_MARK
+from argus.logsafe import OK_MARK as OK_MARK
+from argus.logsafe import log_outcome, use_safe_logging
 from argus.reading.document_intelligence import AzureDocumentIntelligence
 from argus.reading.language_model import AzureOpenAIFieldModel
 from argus.secrets import EnvironmentSecretStore
@@ -62,9 +64,6 @@ SWEEP: Final = "sweep"
 REMOVAL: Final = "removal"
 DIGEST: Final = "digest"
 JOBS: Final = (SWEEP, REMOVAL, DIGEST)
-# What the Azure alerts look for in the job logs (infra/modules/alerts.bicep).
-OK_MARK: Final = "argus-job ok"
-FAILED_MARK: Final = "argus-job failed"
 
 # Who Max ASP is, for the sorting (#25, #70) and the invoice reading (#30, #106). Plain values,
 # not secrets. In demo mode the templates set the synthetic values of the test fixtures.
@@ -184,21 +183,11 @@ def _setting(environ: Mapping[str, str], name: str) -> str:
 
 def check_database_for_mode(environ: Mapping[str, str], *, demo: bool) -> None:
     """Demo data only in the demo database, real data never in it (#124, ADR 0009, QA on PR
-    130): in demo mode the database name must end in ``_demo``, otherwise it must not. Names
-    the setting, never the URL, which can hold a user name."""
-    url = _setting(environ, DATABASE_URL_ENV)
+    130). The rule lives in :mod:`argus.db.mode`, shared with the nightly audit copy."""
     try:
-        name = make_url(url).database or ""
-    except ArgumentError:
-        raise JobSettingsError(f"{DATABASE_URL_ENV} is not a database URL") from None
-    if demo and not name.endswith(DEMO_SUFFIX):
-        raise JobSettingsError(
-            f"demo mode is on but the database in {DATABASE_URL_ENV} does not end in {DEMO_SUFFIX}"
-        )
-    if not demo and name.endswith(DEMO_SUFFIX):
-        raise JobSettingsError(
-            f"demo mode is off but the database in {DATABASE_URL_ENV} ends in {DEMO_SUFFIX}"
-        )
+        _check_database_for_mode(environ, demo=demo)
+    except DatabaseModeError as error:
+        raise JobSettingsError(str(error).replace("the job", "the intake jobs")) from None
 
 
 def services_from_env(environ: Mapping[str, str]) -> Services:
@@ -318,10 +307,7 @@ def run_job(
         ok = _run(job, environ, build, build_digest)
     except Exception:
         log.exception("The %s job could not finish", job)
-    if ok:
-        log.info("%s %s", OK_MARK, job)
-    else:
-        log.error("%s %s", FAILED_MARK, job)
+    log_outcome(log, job, ok)
     return ok
 
 
