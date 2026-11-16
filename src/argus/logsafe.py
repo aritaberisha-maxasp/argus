@@ -12,10 +12,17 @@ import logging
 import sys
 import traceback
 from types import TracebackType
+from typing import Final
 
 from sqlalchemy.exc import DBAPIError
 
 ExcInfo = tuple[type[BaseException], BaseException, TracebackType | None]
+
+# Every scheduled job ends each run with exactly one of these lines, followed by the job's
+# name. The Azure alerts look for them (infra/modules/alerts.bicep): a failed line, or no ok
+# line for too long, emails Arita. The lines name the job only, never what it worked on.
+OK_MARK: Final = "argus-job ok"
+FAILED_MARK: Final = "argus-job failed"
 
 
 def database_error_summary(error: DBAPIError) -> str:
@@ -86,3 +93,11 @@ def use_safe_logging(level: int = logging.INFO) -> None:
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(SafeFormatter("%(asctime)s %(name)s %(message)s"))
     logging.basicConfig(level=level, handlers=[handler])
+
+
+def log_outcome(log: logging.Logger, job: str, ok: bool) -> None:
+    """Write the one outcome line of a scheduled job run."""
+    if ok:
+        log.info("%s %s", OK_MARK, job)
+    else:
+        log.error("%s %s", FAILED_MARK, job)

@@ -13,6 +13,7 @@ import argparse
 import hashlib
 import json
 import logging
+import os
 import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -38,13 +39,19 @@ from argus.audit.copies import (
 )
 from argus.cases.model import Actor, ExceptionReason
 from argus.cases.store import DuplicateRefused, open_exception, unit_of_work, verify_chain
+from argus.connections import demo_from_env
 from argus.db import engine_from_env
+from argus.db.mode import check_database_for_mode
+from argus.logsafe import log_outcome, use_safe_logging
 from argus.secrets import EnvironmentSecretStore
 from argus.working_days import BERLIN, berlin_date
 
 log = logging.getLogger("argus.audit")
 
 ACTOR = Actor.system("audit-copy")
+# The name in the job's outcome line, ``argus-job ok audit-copy`` or ``argus-job failed
+# audit-copy``, which the Azure alerts watch (#103, infra/modules/alerts.bicep).
+JOB = "audit-copy"
 _COLUMNS = ", ".join(EVENT_COLUMNS)
 
 
@@ -529,7 +536,10 @@ def main(argv: list[str] | None = None, store: CopyStore | None = None) -> int:
 
     The database comes from ``ARGUS_DATABASE_URL`` and the storage from the document store
     secret, both set by the environment (Key Vault in Azure). Exits with 1 when anything
-    failed, after the exception is in the queue.
+    failed. Normally the exception is in the queue by then, but when the database cannot be
+    reached it cannot be, so every run also ends with one outcome line that the Azure alerts
+    watch: ``argus-job ok audit-copy`` or ``argus-job failed audit-copy`` (#103). Errors are
+    logged as their type and codes only, never their text (NF-03).
     """
     parser = argparse.ArgumentParser(
         prog="python -m argus.audit",
@@ -537,24 +547,38 @@ def main(argv: list[str] | None = None, store: CopyStore | None = None) -> int:
     )
     parser.add_argument("--night", type=date.fromisoformat, default=None)
     args = parser.parse_args(argv)
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
+    use_safe_logging()
+    # One line per storage call would fill the log; failures still show.
+    logging.getLogger("azure").setLevel(logging.WARNING)
     night: date = args.night or berlin_date(datetime.now().astimezone())
-    engine = engine_from_env()
+    ok = False
     try:
-        store = store or AzureCopyStore.from_secrets(EnvironmentSecretStore())
-        result = run_nightly(engine, store, night)
-    finally:
-        engine.dispose()
-    if result.copy is not None:
-        log.info("Copy %s holds %s event(s)", result.copy.name, result.copy.event_count)
-    if result.report is not None:
-        log.info(
-            "Checked %s copies with %s events: %s problem(s)",
-            result.report.copies,
-            result.report.events_checked,
-            len(result.report.findings),
-        )
-    return 0 if result.ok else 1
+        # Before anything is written: demo audit events must never reach the locked store,
+        # and real ones never the demo store that every reset empties (ADR 0009, compliance
+        # review of PR 157). A mismatch fails the run like any other error.
+        check_database_for_mode(os.environ, demo=demo_from_env(os.environ))
+        engine = engine_from_env()
+        try:
+            store = store or AzureCopyStore.from_secrets(EnvironmentSecretStore())
+            result = run_nightly(engine, store, night)
+        finally:
+            engine.dispose()
+        if result.copy is not None:
+            log.info("Copy %s holds %s event(s)", result.copy.name, result.copy.event_count)
+        if result.report is not None:
+            log.info(
+                "Checked %s copies with %s events: %s problem(s)",
+                result.report.copies,
+                result.report.events_checked,
+                len(result.report.findings),
+            )
+        ok = result.ok
+    except Exception:
+        # For example the database cannot be reached, so not even the exception could be
+        # written. The failed line is then the only sign (review of PR 102, on #103).
+        log.exception("The nightly audit copy could not finish")
+    log_outcome(log, JOB, ok)
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":  # pragma: no cover
