@@ -1,8 +1,8 @@
-vendor_account,vendor_name,approver_name,approver_email,deputy_name,deputy_email,direct_debit
-70001,Muster Bürobedarf GmbH,Anna Muster,anna.muster@maxasp.example,Lea Probe,lea.probe@maxasp.example,no
-70002,Beispiel Cloud Hosting GmbH,Jonas Beispiel,jonas.beispiel@maxasp.example,Tom Test,tom.test@maxasp.example,no
-70003,Muster Immobilien Verwaltung KG,Anna Muster,anna.muster@maxasp.example,Erika Mustermann,erika.mustermann@maxasp.example,yes
-70004,Example Software Ltd,Jonas Beispiel,jonas.beispiel@maxasp.example,Tom Test,tom.test@maxasp.example,no
-70005,Beispiel Beratung Partner mbB,Lea Probe,lea.probe@maxasp.example,Anna Muster,anna.muster@maxasp.example,no
-70006,Muster Telekom Service GmbH,Tom Test,tom.test@maxasp.example,Jonas Beispiel,jonas.beispiel@maxasp.example,no
-70007,Beispiel Reinigung GmbH,Anna Muster,anna.muster@maxasp.example,Lea Probe,lea.probe@maxasp.example,no
+vendor_account,vendor_name,approver_name,approver_email,deputy_name,deputy_email,direct_debit,approver_object_id,deputy_object_id
+70001,Muster Bürobedarf GmbH,Anna Muster,anna.muster@maxasp.example,Lea Probe,lea.probe@maxasp.example,no,a0000000-0000-4000-8000-000000000002,a0000000-0000-4000-8000-000000000004
+70002,Beispiel Cloud Hosting GmbH,Jonas Beispiel,jonas.beispiel@maxasp.example,Tom Test,tom.test@maxasp.example,no,a0000000-0000-4000-8000-000000000003,a0000000-0000-4000-8000-000000000005
+70003,Muster Immobilien Verwaltung KG,Anna Muster,anna.muster@maxasp.example,Erika Mustermann,erika.mustermann@maxasp.example,yes,a0000000-0000-4000-8000-000000000002,a0000000-0000-4000-8000-000000000001
+70004,Example Software Ltd,Jonas Beispiel,jonas.beispiel@maxasp.example,Tom Test,tom.test@maxasp.example,no,a0000000-0000-4000-8000-000000000003,a0000000-0000-4000-8000-000000000005
+70005,Beispiel Beratung Partner mbB,Lea Probe,lea.probe@maxasp.example,Anna Muster,anna.muster@maxasp.example,no,a0000000-0000-4000-8000-000000000004,a0000000-0000-4000-8000-000000000002
+70006,Muster Telekom Service GmbH,Tom Test,tom.test@maxasp.example,Jonas Beispiel,jonas.beispiel@maxasp.example,no,a0000000-0000-4000-8000-000000000005,a0000000-0000-4000-8000-000000000003
+70007,Beispiel Reinigung GmbH,Anna Muster,anna.muster@maxasp.example,Lea Probe,lea.probe@maxasp.example,no,a0000000-0000-4000-8000-000000000002,a0000000-0000-4000-8000-000000000004

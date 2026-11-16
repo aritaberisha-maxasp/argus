@@ -60,14 +60,15 @@ def may_view_case(user: SignedInUser, approvers: frozenset[str]) -> bool:
 
 class CaseApprovers(Protocol):
     """Who decides on a case: the Entra object IDs of its approver and, if one stands in, the
-    deputy. The approver table (#34) and approval (#38) provide the real one."""
+    deputy. ``argus.approvers.ApproverTable`` is the real one (#34); approval (#38) may later
+    fix who decides on a case when it goes to approval."""
 
     def approvers_of(self, connection: Connection, case_id: int) -> frozenset[str]: ...
 
 
 class NoApproversYet:
-    """Until #34 and #38 store who decides on a case, no case has an approver. So a person with
-    only the approver role sees no case at all, which is the safe side."""
+    """No case has an approver, so a person with only the approver role sees no case at all,
+    which is the safe side. The app used it until the approver table (#34) came."""
 
     def approvers_of(self, connection: Connection, case_id: int) -> frozenset[str]:
         return frozenset()

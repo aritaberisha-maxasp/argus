@@ -36,7 +36,7 @@ from reportlab.pdfgen import canvas
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from email_data import EMAILS, EXTRA_SENDERS, ROUTES  # noqa: E402
 from fixture_data import (  # noqa: E402
-    ACCOUNTS_MAILBOX, CUSTOMERS, INVOICES, LETTERS, MAX_ASP, PEOPLE, ROLES,
+    ACCOUNTS_MAILBOX, CUSTOMERS, INVOICES, LETTERS, MAX_ASP, OBJECT_IDS, PEOPLE, ROLES,
     UNKNOWN_CUSTOMER, UNKNOWN_PARTIES, VENDORS, money,
 )
 
@@ -648,10 +648,11 @@ def build_master_data():
             continue  # VM-02: this vendor has no approver on purpose
         approver, deputy = PEOPLE[v["approver"]], PEOPLE[v["deputy"]]
         rows.append([v["account"], v["name"], approver[0], approver[1], deputy[0], deputy[1],
-                     "yes" if v["direct_debit"] else "no"])
+                     "yes" if v["direct_debit"] else "no",
+                     OBJECT_IDS[v["approver"]], OBJECT_IDS[v["deputy"]]])
     write_csv(MASTER_DIR / "approvers.csv",
               ["vendor_account", "vendor_name", "approver_name", "approver_email", "deputy_name", "deputy_email",
-               "direct_debit"], rows)
+               "direct_debit", "approver_object_id", "deputy_object_id"], rows)
     write_csv(MASTER_DIR / "roles.csv", ["role", "description", "name", "email"],
               [[role, description, *PEOPLE[person]] for role, description, person in ROLES])
 
