@@ -77,9 +77,10 @@ def case_of(app: Engine, email_id: int) -> dict[str, Any]:
             connection.execute(
                 text(
                     "select id, status, document_number, gross_minor, currency, duplicate_key"
-                    " from invoice_case where source_email_id = :id"
+                    " from invoice_case where source_email_id = :id and document_number = :number"
                 ),
-                {"id": email_id},
+                # Other tests open cases with made up email IDs that may equal this record's.
+                {"id": email_id, "number": "R-2026-0961"},
             )
             .mappings()
             .one()
