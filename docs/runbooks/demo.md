@@ -23,13 +23,13 @@ Start the demo from a clean state:
 5. Click **Switch to live mode**, type a reason such as "Demo for Benjamin", and click **Switch to live mode** again. The box now says **Live mode**. The switch goes into the audit log with your name and the reason.
 6. Start the job `caj-argus-sweep` by hand in the portal (**Run now**), or wait up to 5 minutes. Then reload the queue page.
 
-The run empties the demo database, the demo document store and the stand ins, then puts the ten demo emails into the fake mailbox.
+The run empties the demo database, the demo document store and the stand ins, then puts the eleven demo emails into the fake mailbox.
 
 The order of seeding and switching does not matter. If the sweep picked the emails up in shadow mode before you switched, it only noted a suggestion for each one and left them in the Inbox. The first sweep after the switch sorts them for real and opens the cases and exceptions.
 
 ## During the demo
 
-The fake mailbox holds ten emails, one for each thing ARGUS can show:
+The fake mailbox holds eleven emails, one for each thing ARGUS can show:
 
 | Email | What it shows |
 |---|---|
@@ -41,6 +41,7 @@ The fake mailbox holds ten emails, one for each thing ARGUS can show:
 | E25 | Payment reminder |
 | E15 | The invoice of E01 sent a second time |
 | E49 | Invoice that fails the §14 UStG check: addressed to another company |
+| E51 | Invoice whose amounts carry no currency, so a person enters the amount and currency (demo only) |
 | E43 | Doubtful sender: SPF, DKIM and DMARC fail |
 | E32 | Marketing mail from a known supplier |
 
@@ -55,6 +56,17 @@ You can also show the switch itself: start in shadow mode, show that the queue s
 The fake mailbox has no public address, so ARGUS has a read only page for it, in demo mode only (#135): open `https://<argus address>/mailbox` in the same browser tab where you signed in to the queue. If you open it in a new tab, it sends you through the Microsoft sign in once and then back to the mailbox. Benjamin needs the finance or admins group, as for the queue.
 
 The page lists every folder of the fake mailbox, Inbox first, then the ARGUS folders (Incoming invoices, Outgoing invoices, Payment reminders, Manual review, Removed) and Deleted Items, with the subject, sender and received time of each email. It changes nothing in the mailbox. Press **Refresh** to read it again.
+
+### Show a correction of amount and currency
+
+E51 is an invoice from Beispiel Reinigung GmbH, written straight into the email text, whose amounts have no currency. ARGUS reads the vendor and the invoice number, but it never guesses a currency, not even EUR. So it opens the case without an amount and currency and puts it in the exception queue as **values to check**, with the correction form (#112).
+
+1. Open the queue page and find the item for invoice R-2026-0961.
+2. Show the reason: ARGUS could not read the gross amount and the currency.
+3. In the form, enter number `R-2026-0961`, amount `934,15`, currency `EUR` and a short reason such as "Amount from the email, currency agreed with the vendor", then save.
+4. The item leaves the queue. ARGUS checks for duplicates again and the case carries on, which the **Invoices** page shows. The correction, with your name and the reason, is in the audit log.
+
+E51 is in the seed, so it is there after every **reset and seed**. To show it arriving instead, pick E51 under **send one email**. E12 is not the email for this: its amount and currency are printed clearly, so ARGUS reads them without doubt.
 
 ### Show every invoice and its status
 
@@ -78,11 +90,11 @@ To show Benjamin an email coming in while you watch, drop one more test email in
 
 Try it once before the meeting, after the one time setup: run **send one email**, check the green tick, then **reset and seed** so the demo starts clean. Sending is new in Azure, so a problem shows up then and not in front of Benjamin.
 
-The email lands in the Inbox of the fake mailbox. The sweep picks it up within 5 minutes; start `caj-argus-sweep` by hand to show it at once. All 50 synthetic test emails in `tests/fixtures/emails/` can be picked. [manifest.csv](../../tests/fixtures/emails/manifest.csv) says what each one is and what ARGUS should do with it. Good ones to show that are not in the ten above:
+The email lands in the Inbox of the fake mailbox. The sweep picks it up within 5 minutes; start `caj-argus-sweep` by hand to show it at once. All 50 synthetic test emails in `tests/fixtures/emails/` can be picked, and the demo only email E51 in `tests/fixtures/emails/demo/`. [manifest.csv](../../tests/fixtures/emails/manifest.csv) says what each one is and what ARGUS should do with it. Good ones to show that are not in the eleven above:
 
 | Email | What it shows |
 |---|---|
-| E12 | Invoice from a vendor that is not in DATEV, so it goes to the exception queue (the default) |
+| E12 | Invoice from a vendor that is not in DATEV (the default). Today it shows as Received in Incoming invoices: the check against the DATEV vendor list is not built yet, so it does not reach the queue |
 | E14 | Three invoices in one email, so three cases |
 | E05 | Incoming invoice over EUR 5,000 |
 | E04 | English invoice in GBP from a UK vendor |

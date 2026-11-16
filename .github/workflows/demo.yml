@@ -27,7 +27,7 @@ on:
           - send one email
         default: reset and seed
       email:
-        description: 'Email, only for "send one email" (tests/fixtures/emails, for example E12 from an unknown vendor)'
+        description: 'Email, only for "send one email" (tests/fixtures/emails, for example E12 from an unknown vendor; E51 is demo only, an invoice with no currency)'
         type: choice
         options:
           - E01
@@ -80,6 +80,7 @@ on:
           - E48
           - E49
           - E50
+          - E51
         default: E12
 
 permissions:
