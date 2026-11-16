@@ -200,7 +200,7 @@ def test_while_the_approver_is_away_the_deputy_decides_too(app: Engine) -> None:
     assert set_absent(app, ADMIN, approver, True) is False  # already away, nothing logged
     with app.connect() as connection:
         assert approvers_for_vendor(connection, vendor) == {approver, deputy}
-        since = connection.execute(
+        since: object = connection.execute(
             text("select absent_since from approver where object_id = :id"), {"id": approver}
         ).scalar_one()
         assert since is not None
