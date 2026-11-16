@@ -156,12 +156,20 @@ def direct_debit_of(connection: Connection, vendor_account: str) -> bool | None:
 
 class ApproverTable:
     """Who decides on a case, for sign in (ADR 0008): the approvers of the case's vendor
-    account. A case without a vendor account, or whose vendor has no approver, has none, so an
-    approver does not see it. Finance and admin see every case anyway."""
+    account. Only incoming invoices and credit notes have approvers. A case without a vendor
+    account, or whose vendor has no approver, has none, so an approver does not see it.
+    Finance and admin see every case anyway."""
 
     def approvers_of(self, connection: Connection, case_id: int) -> frozenset[str]:
+        # Only invoices and credit notes from vendors. Outgoing invoices and bank transactions
+        # also carry an account, and a customer number typed into the table by mistake must not
+        # open them to an approver (NF-03, compliance review of PR 175).
         account = connection.execute(
-            text("select partner_account from invoice_case where id = :id"), {"id": case_id}
+            text(
+                "select partner_account from invoice_case where id = :id "
+                "and kind in ('incoming_invoice', 'incoming_credit_note')"
+            ),
+            {"id": case_id},
         ).scalar_one_or_none()
         if account is None:
             return frozenset()

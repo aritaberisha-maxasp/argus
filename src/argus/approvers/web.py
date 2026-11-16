@@ -35,7 +35,11 @@ log = logging.getLogger(__name__)
 
 Admin = Annotated[SignedInUser, Depends(require_role(Role.ADMIN))]
 FinanceOrAdmin = Annotated[SignedInUser, Depends(require_role(Role.FINANCE, Role.ADMIN))]
-ObjectId = Annotated[str, Path(pattern=OBJECT_ID.pattern)]
+# Taken in either case, as pasted from the Azure portal, and lowercased before use.
+ObjectId = Annotated[
+    str,
+    Path(pattern=r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"),
+]
 VendorAccount = Annotated[str, Path(pattern=VENDOR_ACCOUNT.pattern)]
 
 
@@ -132,7 +136,7 @@ def install_approver_routes(app: FastAPI, engine: Callable[[], Engine]) -> None:
         """Add a person who can approve, by Entra object ID, or change their name or address."""
         try:
             changed = save_approver(
-                engine(), _by(user), object_id, body.name.strip(), body.email.strip()
+                engine(), _by(user), object_id.lower(), body.name.strip(), body.email.strip()
             )
         except CaseRuleBroken as error:
             raise _refused(error) from None
@@ -142,7 +146,7 @@ def install_approver_routes(app: FastAPI, engine: Callable[[], Engine]) -> None:
     def delete_approver(object_id: ObjectId, user: Admin) -> Response:
         """Remove a person. Refused (409) while they approve or stand in for a vendor."""
         try:
-            removed = remove_approver(engine(), _by(user), object_id)
+            removed = remove_approver(engine(), _by(user), object_id.lower())
         except CaseRuleBroken as error:
             raise _refused(error) from None
         if not removed:
@@ -153,7 +157,7 @@ def install_approver_routes(app: FastAPI, engine: Callable[[], Engine]) -> None:
     def put_absence(object_id: ObjectId, body: AbsenceIn, user: Admin) -> Changed:
         """Mark a person away, so their deputies decide in their place (AP-06), or back."""
         try:
-            changed = set_absent(engine(), _by(user), object_id, body.absent)
+            changed = set_absent(engine(), _by(user), object_id.lower(), body.absent)
         except CaseRuleBroken as error:
             raise _refused(error) from None
         if changed is None:

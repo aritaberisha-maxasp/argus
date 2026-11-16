@@ -17,6 +17,7 @@ from sqlalchemy import Engine, text
 
 from argus.app import create_app
 from argus.approvers import (
+    ApproverTable,
     ChangedBy,
     approvers_for_vendor,
     direct_debit_of,
@@ -29,8 +30,14 @@ from argus.approvers import (
     vendor_approver,
 )
 from argus.auth import Role
-from argus.cases.model import Actor
-from argus.cases.store import CaseRuleBroken, DuplicateRefused, record_event, unit_of_work
+from argus.cases.model import Actor, CaseKind
+from argus.cases.store import (
+    CaseRuleBroken,
+    DuplicateRefused,
+    create_case,
+    record_event,
+    unit_of_work,
+)
 from standins.entra.app import FakeEntra
 from tests.integration.test_case_store import new_case
 
@@ -173,19 +180,23 @@ def test_a_person_still_in_use_cannot_be_removed(app: Engine) -> None:
     assert removed["actor"] == f"user:{ARITA}"
 
 
-def test_changing_a_persons_name_or_address_is_logged_without_the_address(app: Engine) -> None:
+def test_changing_a_persons_name_or_address_is_logged_with_old_and_new(app: Engine) -> None:
     object_id = person(app, "Old Name")
+    first_address = f"{object_id[:8]}@maxasp.example"
 
     assert save_approver(app, ADMIN, object_id, "  New Name ", "NEW@maxasp.example")
     assert not save_approver(app, ADMIN, object_id, "New Name", "new@maxasp.example")
+    assert save_approver(app, ADMIN, object_id, "New Name", "third@maxasp.example")
 
     (added,) = events(app, "approver_added", "approver", object_id)
-    (changed,) = events(app, "approver_changed", "approver", object_id)
+    first, second = events(app, "approver_changed", "approver", object_id)
     assert added["approver_name"] == "Old Name"
-    assert changed["approver_name"] == {"old": "Old Name", "new": "New Name"}
-    assert changed["email_changed"] is True
-    for address in (f"{object_id[:8]}@maxasp.example", "new@maxasp.example"):
-        assert address not in str(added) + str(changed)
+    assert added["email"] == first_address
+    assert first["approver_name"] == {"old": "Old Name", "new": "New Name"}
+    # Where approval requests go must stay traceable, even after a later change.
+    assert first["email"] == {"old": first_address, "new": "new@maxasp.example"}
+    assert second["email"] == {"old": "new@maxasp.example", "new": "third@maxasp.example"}
+    assert first["actor"] == second["actor"] == f"user:{ARITA}"
 
 
 # ---------------------------------------------------------------------------- absence (AP-06)
@@ -340,6 +351,23 @@ def test_the_admin_keeps_the_table_through_the_routes(
     assert logged["name"] == "Arita Test"
 
 
+def test_the_routes_take_an_uppercase_object_id_and_refuse_an_invisible_name(
+    client: TestClient, entra: FakeEntra
+) -> None:
+    object_id = str(uuid.uuid4())
+    body = {"name": "Upper Case", "email": "upper@maxasp.example"}
+
+    put = call(client, entra, ARITA, Role.ADMIN, "PUT", f"/approvers/{object_id.upper()}", body)
+    assert put.json() == {"changed": True}
+    table = call(client, entra, ARITA, Role.ADMIN, "GET", "/approvers").json()
+    assert object_id in {p["object_id"] for p in table["approvers"]}
+
+    invisible = {"name": "\u200b", "email": "x@maxasp.example"}
+    refused = call(client, entra, ARITA, Role.ADMIN, "PUT", f"/approvers/{uuid.uuid4()}", invisible)
+    assert refused.status_code == 409
+    assert refused.json() == {"detail": "an approver needs a name"}
+
+
 @pytest.mark.parametrize(
     ("path", "body"),
     [
@@ -411,3 +439,25 @@ def test_an_approver_sees_their_vendors_cases_and_the_deputy_only_while_standing
 
     remove_vendor_approver(app, ADMIN, vendor)
     assert not sees(approver)
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [CaseKind.OUTGOING_INVOICE, CaseKind.OUTGOING_CREDIT_NOTE, CaseKind.BANK_TRANSACTION],
+)
+def test_an_approver_never_sees_a_case_that_is_not_an_incoming_invoice(
+    app: Engine, client: TestClient, entra: FakeEntra, kind: CaseKind
+) -> None:
+    # A customer number typed into the table by mistake (compliance review of PR 175).
+    approver = person(app)
+    vendor = account()
+    set_vendor_approver(app, ADMIN, vendor, approver, None, False)
+    with unit_of_work(app, Actor.system("intake")) as db:
+        case_id = create_case(db, kind, partner_account=vendor)
+    credit_note = new_case(app, CaseKind.INCOMING_CREDIT_NOTE, partner_account=vendor)
+
+    with app.connect() as connection:
+        assert ApproverTable().approvers_of(connection, case_id) == frozenset()
+        assert ApproverTable().approvers_of(connection, credit_note) == {approver}
+    response = call(client, entra, approver, Role.APPROVER, "GET", f"/cases/{case_id}")
+    assert response.status_code == 404

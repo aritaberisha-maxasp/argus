@@ -25,7 +25,9 @@ The database holds these rules:
 - Every change is written into the audit log by the database: ``approver_added``,
   ``approver_changed``, ``approver_removed``, ``approver_absence_changed``,
   ``vendor_approver_set`` and ``vendor_approver_removed``. Old and new values go in, with the
-  approver's name but never an email address. The app cannot write these events itself.
+  approver's name and work email address: the address decides where approval requests go, so
+  an auditor must be able to see every address it ever had (compliance review of PR 175). The
+  app cannot write these events itself.
 - A person who is still approver or deputy of a vendor cannot be removed.
 
 Revision ID: 0015
@@ -99,6 +101,10 @@ begin
   end if;
   new.name := correction_trim(new.name);
   new.email := lower(btrim(new.email));
+  -- A plain sentence instead of the check constraint's own message (code review of PR 175).
+  if coalesce(length(new.name), 0) = 0 then
+    raise exception 'an approver needs a name';
+  end if;
   if tg_op = 'UPDATE' then
     new.object_id := old.object_id;
     if new.absent is distinct from old.absent then
@@ -115,7 +121,8 @@ end $$;
 create trigger approver_guard before insert or update or delete on approver
   for each row execute function approver_guard();
 
--- Runs as the owner, like the other audit triggers. No email address goes into the log.
+-- Runs as the owner, like the other audit triggers. The work address goes into the log, old and
+-- new, because it decides where approval requests go (compliance review of PR 175).
 create function approver_audit() returns trigger language plpgsql security definer
 set search_path = pg_catalog, public, pg_temp as $$
 declare by_whom jsonb := approver_table_changed_by();
@@ -124,11 +131,13 @@ begin
     insert into audit_event (event_type, details)
     values ('approver_added', jsonb_build_object('approver', new.object_id,
                                                  'approver_name', new.name,
+                                                 'email', new.email,
                                                  'absent', new.absent) || by_whom);
   elsif tg_op = 'DELETE' then
     insert into audit_event (event_type, details)
     values ('approver_removed', jsonb_build_object('approver', old.object_id,
-                                                   'approver_name', old.name) || by_whom);
+                                                   'approver_name', old.name,
+                                                   'email', old.email) || by_whom);
   else
     if (new.name, new.email) is distinct from (old.name, old.email) then
       insert into audit_event (event_type, details)
@@ -136,7 +145,8 @@ begin
               jsonb_build_object('approver', new.object_id,
                                  'approver_name', jsonb_build_object('old', old.name,
                                                                      'new', new.name),
-                                 'email_changed', new.email is distinct from old.email)
+                                 'email', jsonb_build_object('old', old.email,
+                                                             'new', new.email))
               || by_whom);
     end if;
     if new.absent is distinct from old.absent then
