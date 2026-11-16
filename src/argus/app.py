@@ -34,6 +34,8 @@ from argus.documents.store import AzureDocumentStore, DocumentStore
 from argus.intake.graph import GraphClient
 from argus.intake.mode import IntakeMode, SwitchedBy, intake_mode, switch_intake_mode
 from argus.intake.shadow import PersonFolders, ShadowReport, shadow_report
+from argus.invoices_page.web import PAGE_PATHS as INVOICES_PAGE_PATHS
+from argus.invoices_page.web import install_invoices_page
 from argus.mailbox_page.web import install_mailbox_page
 from argus.queue_page.web import PAGE_PATHS, install_queue_page
 from argus.secrets import EnvironmentSecretStore
@@ -104,10 +106,10 @@ FinanceOrAdmin = Annotated[SignedInUser, Depends(require_role(Role.FINANCE, Role
 
 
 # Routes anyone may call. They carry no business data: the health checks, and the exception
-# queue page with its script and style, which is the same fixed file for everyone and fetches
-# its data with the person's token (#126). Every other route needs sign in, and a test walks
-# all routes to make sure (#23).
-PUBLIC_PATHS = frozenset({"/health", "/health/database"}) | PAGE_PATHS
+# queue page and the invoice status page (#62) with their script and style, which are the same
+# fixed files for everyone and fetch their data with the person's token (#126). Every other
+# route needs sign in, and a test walks all routes to make sure (#23).
+PUBLIC_PATHS = frozenset({"/health", "/health/database"}) | PAGE_PATHS | INVOICES_PAGE_PATHS
 
 
 def migrations_head() -> str | None:
@@ -153,6 +155,7 @@ def create_app(
         return stores[0]
 
     install_queue_page(app, engine, documents)
+    install_invoices_page(app, engine)
     # The fake mailbox page exists in demo mode only; otherwise its routes answer 404 (#135).
     if connections.demo:
         install_mailbox_page(app, demo_graph or connections.graph_client)
