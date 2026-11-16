@@ -143,6 +143,7 @@ var runIntakeJobs = intakeJobs && appImage != 'mcr.microsoft.com/k8se/quickstart
 var intakeJobNames = {
   sweep: 'caj-${prefix}-sweep'
   removal: 'caj-${prefix}-removal'
+  digest: 'caj-${prefix}-digest'
 }
 
 resource appIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {

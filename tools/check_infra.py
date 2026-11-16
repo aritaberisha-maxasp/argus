@@ -82,7 +82,7 @@ STANDINS_MODULE = "standins"
 # The scheduled intake jobs (#125) and the log lines their alerts look for.
 INTAKE_COMMAND = "argus.intake"
 INTAKE_SCHEDULES = {"sweep": "*/5 * * * *"}
-INTAKE_DAILY = ("removal",)
+INTAKE_DAILY = ("removal", "digest")
 # Sign in with Microsoft (#23, ADR 0008, #133). The web app needs all five, from a parameter.
 SIGN_IN_SETTINGS = (
     "ARGUS_ENTRA_TENANT_ID",
@@ -537,8 +537,9 @@ def _daily(cron: str) -> bool:
 
 
 def intake_job_problems(main: dict[str, Any]) -> list[str]:
-    """The sweep runs every 5 minutes and the removal once a day, one run at a time and
-    without retries, only when switched on, and every run is watched by an alert (#125)."""
+    """The sweep runs every 5 minutes, the removal and the digest once a day, one run at a time
+    and without retries, only when switched on, and every run is watched by an alert (#125,
+    #61)."""
     problems = []
     scheduled: dict[str, str] = {}
     for template in templates(main):
