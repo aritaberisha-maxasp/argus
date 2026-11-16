@@ -1,0 +1,30 @@
+/* The fake mailbox page (#135). Builds on the queue page style (/queue/app.css). */
+
+.demo-badge {
+  margin-left: 8px;
+  font-size: 12px;
+  padding: 1px 8px;
+  border-radius: 10px;
+  background: #fff4e0;
+  color: #9a4a00;
+  border: 1px solid #f0d2a8;
+}
+
+header a + #who { margin-left: 16px; }
+
+.toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 4px 0 8px; }
+
+.folders { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 4px; padding: 0; list-style: none; }
+.folders a {
+  display: inline-block;
+  padding: 4px 10px;
+  border: 1px solid #d8dce4;
+  border-radius: 6px;
+  text-decoration: none;
+}
+.folders a.empty { color: #5b6475; }
+.folders .count { font-weight: 600; margin-left: 6px; }
+
+section.folder h2 { scroll-margin-top: 12px; }
+section.folder td.when { white-space: nowrap; }
+section.folder td.subject { overflow-wrap: anywhere; }

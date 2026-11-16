@@ -2,11 +2,12 @@
 
 It serves the accounts mailbox from the synthetic fixture emails in ``tests/fixtures/emails``
 and answers the Graph calls ARGUS makes the way Graph does: listing the Inbox with paging,
-reading an email as its raw .eml file, finding and creating folders, moving an email into a
-folder and deleting it, forwarding an email through a saved draft that can be sent only
-once (#27), and saving a new message as a draft, for the daily digest (#61). Like Graph, a
-deleted email moves to Deleted Items and can still be found there; only deleting it again from
-Deleted Items makes it unfindable (404). Like Graph with RBAC for
+reading an email as its raw .eml file, listing, finding and creating folders, listing the
+emails of a folder for the demo mailbox page (#135), moving an email into a folder and
+deleting it, forwarding an email through a saved draft that can be sent only once (#27), and
+saving a new message as a draft, for the daily digest (#61). Like Graph, a deleted email moves
+to Deleted Items and can still be found there; only deleting it again from Deleted Items makes
+it unfindable (404). Like Graph with RBAC for
 Applications, it only lets the app into its one mailbox. IDs are immutable only when the
 request asks for them with ``Prefer: IdType="ImmutableId"``, so a client that forgets the
 header gets different IDs.
@@ -24,7 +25,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from email import message_from_bytes, policy
-from email.utils import parsedate_to_datetime
+from email.utils import parseaddr, parsedate_to_datetime
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -397,6 +398,46 @@ def create_app(
         prefer: Annotated[str | None, Header()] = None,
     ) -> Response:
         return check(request, user, authorization, prefer) or list_folders(folder_id, filter_)
+
+    @app.get("/v1.0/users/{user}/mailFolders/{folder_id}/messages")
+    def folder_messages(
+        request: Request,
+        user: str,
+        folder_id: str,
+        top: Annotated[int, Query(alias="$top", ge=1, le=1000)] = 10,
+        authorization: Annotated[str | None, Header()] = None,
+        prefer: Annotated[str | None, Header()] = None,
+    ) -> Response:
+        """The emails of any folder, newest first, with subject, sender and received time, as
+        the demo mailbox page asks for them (#135). Paging is faked as a next link only."""
+        refused = check(request, user, authorization, prefer)
+        if refused:
+            return refused
+        folder = box.folders.get(WELL_KNOWN.get(folder_id.lower(), folder_id))
+        if folder is None:
+            return _error(404, "ErrorItemNotFound", "The specified folder was not found.")
+        ordered = sorted(
+            (m for i, m in box.messages.items() if box.location[i] == folder.id),
+            key=lambda m: (m.received, m.immutable_id),
+            reverse=True,
+        )
+        body: dict[str, Any] = {"value": [summary(m, prefer) for m in ordered[:top]]}
+        if len(ordered) > top:
+            base = str(request.base_url).rstrip("/")
+            body["@odata.nextLink"] = (
+                f"{base}/v1.0/users/{user}/mailFolders/{folder.id}/messages?%24skip={top}"
+            )
+        return JSONResponse(body)
+
+    def summary(message: Message, prefer: str | None) -> dict[str, Any]:
+        parsed = message_from_bytes(message.raw, policy=policy.default)
+        name, address = parseaddr(str(parsed.get("From", "")))
+        return {
+            "id": wire_id(message, prefer),
+            "subject": str(parsed.get("Subject", "")),
+            "from": {"emailAddress": {"name": name, "address": address}},
+            "receivedDateTime": message.received.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
 
     @app.post("/v1.0/users/{user}/mailFolders")
     async def new_top_folder(
