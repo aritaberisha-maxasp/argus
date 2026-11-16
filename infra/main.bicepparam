@@ -43,6 +43,12 @@ param modelDeployments = [
 // together with the real addresses and secrets. ARGUS refuses to start with both.
 param demo = true
 
+// Keep one copy of the web app running at all times. With 0, Azure stops the app after a few
+// quiet minutes, and the next visit waits for it to start again (pull the image, start Python,
+// fetch the database token and the Entra keys), which made the pages feel very slow. One
+// always running copy of 0.5 CPU and 1 GiB costs a few euros a month while it is idle.
+param appMinReplicas = 1
+
 // The pipeline passes the argus-demo image when it deploys a new version (#124). Without it the
 // running stand ins stay as they are.
 param demoImage = readEnvironmentVariable('ARGUS_DEMO_IMAGE', '')
