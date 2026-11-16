@@ -245,14 +245,18 @@
   // --- talking to ARGUS -----------------------------------------------------------------
 
   // A GET by default. ``body`` is sent as JSON with ``method`` (the mode switch uses PUT).
-  async function call(token, path, method, body) {
-    const headers = { Authorization: "Bearer " + (await token()) };
-    const options = { method: method || "GET", headers, cache: "no-store" };
-    if (body !== undefined) {
-      headers["Content-Type"] = "application/json";
-      options.body = JSON.stringify(body);
+  // ``sent`` is a response already fetched, by send(), that only needs checking.
+  async function call(token, path, method, body, sent) {
+    let response = sent;
+    if (!response) {
+      const headers = { Authorization: "Bearer " + (await token()) };
+      const options = { method: method || "GET", headers, cache: "no-store" };
+      if (body !== undefined) {
+        headers["Content-Type"] = "application/json";
+        options.body = JSON.stringify(body);
+      }
+      response = await fetch(path, options);
     }
-    const response = await fetch(path, options);
     if (response.ok) return response;
     if (response.status === 401) {
       sessionStorage.removeItem(DEV_TOKEN_KEY);
@@ -264,6 +268,22 @@
     if (response.status === 404) throw new Error("This exception is not open any more, or it does not exist.");
     if (response.status === 422) throw new Error("ARGUS did not accept this. Check what you typed and try again.");
     throw new Error("ARGUS could not answer right now (" + response.status + "). Try again in a moment.");
+  }
+
+  // Sends a change to ARGUS. A refusal the person can fix (422) or that the database gave
+  // (409) comes back with a sentence in "problem", shown as it is.
+  async function send(token, path, body) {
+    const response = await fetch(path, {
+      method: "POST",
+      headers: { Authorization: "Bearer " + (await token()), "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      cache: "no-store",
+    });
+    if (response.status === 409 || response.status === 422) {
+      const answer = await response.json().catch(() => ({}));
+      if (typeof answer.problem === "string") throw new Error(answer.problem);
+    }
+    return call(async () => "", path, undefined, undefined, response);
   }
 
   // --- the queue ------------------------------------------------------------------------
@@ -604,6 +624,8 @@
       ])));
     }
 
+    if (x.correctable) parts.push(correction(x));
+
     if (x.email_id !== null) {
       const email = x.email
         ? [pairs([
@@ -622,6 +644,93 @@
       parts.push(block("Files as stored", files(x)));
     }
     return parts;
+  }
+
+  // --- correcting the values of an invoice (#112) ----------------------------------------
+
+  // The form for the invoice number, gross amount and currency, filled with what the case has
+  // or what ARGUS read. The invoice itself is under "Files as stored", marked "this case".
+  function correction(x) {
+    const c = x.case;
+    const read = x.read_values || {};
+    const readValue = (name) => (read[name] && read[name].value) || "";
+    const amount = c.gross_cents !== null && c.gross_cents !== undefined
+      ? (c.gross_cents / 100).toFixed(2) : readValue("gross_amount");
+    const form = el("form", null, "correction");
+    const fields = [
+      ["document_number", "Invoice number", c.document_number || readValue("invoice_number"), "text"],
+      ["gross_amount", "Gross amount", amount, "text"],
+      ["currency", "Currency (three letters)", c.currency || readValue("currency"), "text"],
+    ];
+    const inputs = {};
+    for (const [name, label, value, type] of fields) {
+      const id = "correct-" + name;
+      const input = el("input");
+      input.id = id;
+      input.name = name;
+      input.type = type;
+      input.value = value || "";
+      input.required = true;
+      if (name === "gross_amount") input.inputMode = "decimal";
+      if (name === "currency") input.maxLength = 3;
+      const labelNode = el("label", label);
+      labelNode.htmlFor = id;
+      const row = el("p", null, "field");
+      row.append(labelNode, input);
+      const r = read[name];
+      if (r && (r.flag || r.note)) {
+        row.append(el("span", "ARGUS read " + (r.value === null ? "nothing" : "\u201c" + r.value + "\u201d") +
+          (r.note ? ": " + r.note : ""), "muted hint"));
+      }
+      form.append(row);
+      inputs[name] = input;
+    }
+    const reason = el("textarea");
+    reason.id = "correct-reason";
+    reason.required = true;
+    reason.maxLength = 500;
+    reason.className = "reason";
+    const reasonLabel = el("label", "Why (kept in the audit log for ten years, so no personal details)");
+    reasonLabel.htmlFor = reason.id;
+    const reasonRow = el("p", null, "field");
+    reasonRow.append(reasonLabel, reason);
+    const button = el("button", "Save and let the case carry on", "button primary");
+    button.type = "submit";
+    const result = el("p");
+    result.setAttribute("role", "status");
+    form.append(reasonRow, button, result);
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      button.disabled = true;
+      result.className = "muted";
+      result.textContent = "Saving…";
+      try {
+        const answer = await (await send(state.token, "/exceptions/" + encodeURIComponent(x.exception_id) +
+          "/correction", {
+          document_number: inputs.document_number.value,
+          gross_amount: inputs.gross_amount.value,
+          currency: inputs.currency.value,
+          reason: reason.value,
+        })).json();
+        const back = el("a", "Back to all open exceptions");
+        back.href = "/queue";
+        const done = answer.outcome === "duplicate"
+          ? el("p", "Saved. With these values the invoice looks like a second copy of case " +
+            answer.duplicate_of + ", so it is back in the queue as a possible duplicate. ")
+          : el("p", "Saved. ARGUS found no duplicate, so case " + answer.case_id +
+            " carries on toward approval. ");
+        done.append(back);
+        form.replaceWith(done);
+      } catch (e) {
+        result.className = "problem";
+        result.textContent = e.message;
+        button.disabled = false;
+      }
+    });
+    return block("Correct the invoice values",
+      el("p", "Open the invoice under \u201cFiles as stored\u201d, then enter the values as printed. " +
+        "ARGUS checks for duplicates again before the case goes on.", "muted"),
+      form);
   }
 
   function sourceLink() {
