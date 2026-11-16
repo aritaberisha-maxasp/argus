@@ -56,6 +56,10 @@ The fake mailbox has no public address, so ARGUS has a read only page for it, in
 
 The page lists every folder of the fake mailbox, Inbox first, then the ARGUS folders (Incoming invoices, Outgoing invoices, Payment reminders, Manual review, Removed) and Deleted Items, with the subject, sender and received time of each email. It changes nothing in the mailbox. Press **Refresh** to read it again.
 
+### Show every invoice and its status
+
+The **Invoices** page (`https://<argus address>/invoices`, #62) lists every case ARGUS opened, newest first: its status (received, awaiting approval, approved, booked, in payment run, paid, exception or closed), the vendor or customer as read on the invoice, the number, the amount, the day it came in, and the invoice and due date. A clean invoice such as E01 shows as **Received** once the sweep has run in live mode. The tabs at the top narrow the list to one status; the search finds a name, number, DATEV account, sender domain or case number; the kind and the two dates narrow it further. A case in exception links to its item in the exception queue. Only the finance and admins groups see the list. In shadow mode ARGUS opens no cases, so the list stays empty until you switch to live mode.
+
 When to open it:
 
 1. Right after **reset and seed**, before the sweep runs: all demo emails sit in the Inbox. This is the "before" picture.
