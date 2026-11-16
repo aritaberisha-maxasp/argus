@@ -107,6 +107,11 @@
     const back = sessionStorage.getItem(RETURN_KEY);
     if (back !== null) {
       sessionStorage.removeItem(RETURN_KEY);
+      // The demo mailbox page (#135) signs in through this page and comes back here.
+      if (back === "/mailbox") {
+        window.location.replace("/mailbox");
+        return null;
+      }
       if (/^(\?exception=\d+)?$/.test(back)) history.replaceState(null, "", "/queue" + back);
     }
     app.setActiveAccount(account);
@@ -153,11 +158,19 @@
 
   // --- talking to ARGUS -----------------------------------------------------------------
 
-  async function call(token, path, sent) {
-    const response = sent || await fetch(path, {
-      headers: { Authorization: "Bearer " + (await token()) },
-      cache: "no-store",
-    });
+  // A GET by default. ``body`` is sent as JSON with ``method`` (the mode switch uses PUT).
+  // ``sent`` is a response already fetched, by send(), that only needs checking.
+  async function call(token, path, method, body, sent) {
+    let response = sent;
+    if (!response) {
+      const headers = { Authorization: "Bearer " + (await token()) };
+      const options = { method: method || "GET", headers, cache: "no-store" };
+      if (body !== undefined) {
+        headers["Content-Type"] = "application/json";
+        options.body = JSON.stringify(body);
+      }
+      response = await fetch(path, options);
+    }
     if (response.ok) return response;
     if (response.status === 401) {
       sessionStorage.removeItem(DEV_TOKEN_KEY);
@@ -167,6 +180,7 @@
       throw new Error("Your account has no access to the exception queue. Ask Arita if you need it.");
     }
     if (response.status === 404) throw new Error("This exception is not open any more, or it does not exist.");
+    if (response.status === 422) throw new Error("ARGUS did not accept this. Check what you typed and try again.");
     throw new Error("ARGUS could not answer right now (" + response.status + "). Try again in a moment.");
   }
 
@@ -183,7 +197,7 @@
       const answer = await response.json().catch(() => ({}));
       if (typeof answer.problem === "string") throw new Error(answer.problem);
     }
-    return call(async () => "", path, response);
+    return call(async () => "", path, undefined, undefined, response);
   }
 
   // --- the list -------------------------------------------------------------------------
@@ -191,11 +205,12 @@
   async function showList(token) {
     const data = await (await call(token, "/exceptions")).json();
     const rows = data.exceptions;
+    const mode = await modePanel(token);
     const heading = el("h1", "Open exceptions");
     const count = el("p", rows.length === 1 ? "1 open exception, oldest first."
       : rows.length + " open exceptions, oldest first.", "muted");
     if (!rows.length) {
-      show(heading, el("p", "Nothing waits for you. ARGUS handled everything on its own.", "muted"));
+      show(mode, heading, el("p", "Nothing waits for you. ARGUS handled everything on its own.", "muted"));
       return;
     }
     const table = el("table");
@@ -224,7 +239,92 @@
       body.append(tr);
     }
     table.append(body);
-    show(heading, count, table);
+    show(mode, heading, count, table);
+  }
+
+  // --- shadow or live mode (#72, #134) -------------------------------------------------
+
+  const MODE_TEXT = {
+    shadow: ["Shadow mode", "ARGUS only suggests where each email should go. It moves nothing and opens no cases, a person sorts the Inbox."],
+    live: ["Live mode", "ARGUS sorts and files every email on its own and opens cases for invoices."],
+  };
+
+  // The mode for finance and admin. Only the admin gets the switch; the server checks the
+  // role again on every switch, so hiding the button is for clarity, not for safety.
+  async function modePanel(token) {
+    const panel = el("section", null, "mode");
+    panel.setAttribute("aria-label", "Mode");
+    let data;
+    try {
+      data = await (await call(token, "/intake/mode")).json();
+    } catch (e) {
+      panel.append(el("p", "ARGUS could not say right now whether it runs in shadow or live mode.", "muted"));
+      return panel;
+    }
+    const [title, text] = MODE_TEXT[data.mode] || [words(data.mode), ""];
+    panel.classList.add(data.mode === "live" ? "live" : "shadow");
+    const line = el("p");
+    line.append(el("strong", title), " ", el("span", text));
+    panel.append(line);
+    if (data.may_switch) panel.append(switchForm(token, data.mode, panel));
+    return panel;
+  }
+
+  function switchForm(token, current, panel) {
+    const target = current === "live" ? "shadow" : "live";
+    const open = el("button", "Switch to " + MODE_TEXT[target][0].toLowerCase());
+    open.type = "button";
+    const form = el("form", null, "switch");
+    form.hidden = true;
+    const id = "mode-reason";
+    const label = el("label", "Why do you switch? This goes into the audit log with your name.");
+    label.htmlFor = id;
+    const reason = el("input");
+    reason.id = id;
+    reason.type = "text";
+    reason.required = true;
+    reason.minLength = 3;
+    reason.maxLength = 500;
+    reason.placeholder = target === "live" ? "For example: demo for Benjamin" : "For example: demo is over";
+    const confirm = el("button", "Switch to " + MODE_TEXT[target][0].toLowerCase());
+    confirm.type = "submit";
+    confirm.className = "primary";
+    const cancel = el("button", "Cancel");
+    cancel.type = "button";
+    const problem = el("p", null, "problem");
+    const actions = el("p");
+    actions.append(confirm, " ", cancel);
+    form.append(label, reason, actions, problem);
+    open.addEventListener("click", () => {
+      open.hidden = true;
+      form.hidden = false;
+      reason.focus();
+    });
+    cancel.addEventListener("click", () => {
+      form.hidden = true;
+      open.hidden = false;
+      problem.textContent = "";
+    });
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const why = reason.value.trim();
+      if (why.length < 3) {
+        problem.textContent = "Please give a reason of at least 3 characters.";
+        return;
+      }
+      confirm.disabled = true;
+      problem.textContent = "";
+      try {
+        await call(token, "/intake/mode", "PUT", { mode: target, reason: why });
+        await showList(token);
+      } catch (e) {
+        problem.textContent = e && e.message ? e.message : "The switch did not work. Try again.";
+        confirm.disabled = false;
+      }
+    });
+    const wrap = el("div");
+    wrap.append(open, form);
+    return wrap;
   }
 
   function subject(row) {

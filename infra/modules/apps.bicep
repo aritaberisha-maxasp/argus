@@ -3,7 +3,7 @@
 // The scheduled jobs from ADR 0001 (mailbox sweep, reminders, payment run, bank import,
 // exception digest) run in this environment as Container Apps jobs. Each job story adds its
 // job here once the app has a command for it. Today: the mailbox sweep and the daily removal
-// (#125). The nightly audit copy (#103) follows the same pattern.
+// (#125), the daily digest of open exceptions (#61), and the nightly audit copy (#103).
 //
 // Every secret comes from Key Vault through the app's managed identity. The pipeline from #81
 // builds the ARGUS image and passes it in. The very first deploy starts with a public
@@ -60,11 +60,17 @@ param standinNames object
 @description('The fake accounts mailbox, a reserved .example address (RFC 2606).')
 param demoMailbox string
 
-@description('Run the mailbox sweep and the daily removal as scheduled jobs (#125).')
+@description('Run the mailbox sweep, the daily removal and the daily digest as scheduled jobs (#125, #61).')
 param runIntakeJobs bool
 
-@description('Names of the two intake jobs, from main.bicep.')
+@description('Names of the intake jobs, from main.bicep.')
 param intakeJobNames object
+
+@description('Run the nightly audit copy as a scheduled job (#103).')
+param runAuditJob bool
+
+@description('Name of the nightly audit copy job, from main.bicep.')
+param auditJobName string
 
 @description('Who Max ASP is, for the sorting and the invoice reading. Used only with demo off.')
 param intakeSettings intakeSettingValues
@@ -150,6 +156,12 @@ var demoSettings = [
   {
     name: 'ARGUS_REMINDER_FORWARD_TO'
     value: 'reminders@maxasp.example'
+  }
+  {
+    // Where the daily digest of open exceptions goes (#61). Live it is Benjamin's address,
+    // set at go live (docs/runbooks/go-live.md).
+    name: 'ARGUS_DIGEST_TO'
+    value: 'digest@maxasp.example'
   }
   {
     name: 'ARGUS_DATEV_URL'
@@ -374,6 +386,21 @@ var intakeJobList = [
     // Once a day at 02:30 UTC, after the nightly audit copy at 01:00 (#103).
     cron: '30 2 * * *'
   }
+  {
+    job: 'digest'
+    // Once a day at 05:00 UTC: 06:00 in Berlin in winter, 07:00 in summer, before the working
+    // day starts (#61). The job sends at most one digest per Berlin date, so a late or second
+    // start sends nothing more.
+    cron: '0 5 * * *'
+  }
+]
+
+// The digest links to the queue page of this app (#61).
+var jobSettings = [
+  {
+    name: 'ARGUS_APP_URL'
+    value: 'https://${app.properties.configuration.ingress.fqdn}'
+  }
 ]
 
 resource intakeJobs 'Microsoft.App/jobs@2024-03-01' = [
@@ -433,6 +460,7 @@ resource intakeJobs 'Microsoft.App/jobs@2024-03-01' = [
               plainSettings,
               demo ? demoSettings : [],
               intakeEnv,
+              jobSettings,
               map(allSecrets, secret => {
                 name: secret.envName
                 secretRef: toLower(secret.secretName)
@@ -444,6 +472,88 @@ resource intakeJobs 'Microsoft.App/jobs@2024-03-01' = [
     }
   }
 ]
+
+// The nightly audit copy (#83, #103, NF-01): `python -m argus.audit` copies the new audit
+// events into `audit-log/<night>.jsonl` in the documents container, then compares the database
+// with every copy. Once a night at 01:00 UTC (02:00 Berlin in winter, 03:00 in summer), well
+// after midnight, because the copy and the check each read their own snapshot. No retries: a
+// failed run has normally put an item in the exception queue already, and it always logs
+// `argus-job failed audit-copy`, which the alert in alerts.bicep watches for the case where
+// the database could not be reached. The next night tries again.
+// Same image, identity and database sign in as the web app. It only needs the document store
+// secret, as a Key Vault reference like every other secret: the locked store live, the demo
+// store in demo mode (ADR 0009). Plain values only, so tools/check_infra.py can read them.
+var auditJob = {
+  job: 'audit-copy'
+  cron: '0 1 * * *'
+}
+// Picked by name, not by position, so reordering generatedSecrets cannot hand the job another
+// secret. tools/check_infra.py checks that the job gets exactly this one.
+var auditSecrets = filter(generatedSecrets, secret => secret.envName == 'ARGUS_DOCUMENTS_CONNECTION_STRING')
+
+resource auditCopyJob 'Microsoft.App/jobs@2024-03-01' = if (runAuditJob) {
+  name: auditJobName
+  location: location
+  tags: tags
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: {
+      '${identityId}': {}
+    }
+  }
+  properties: {
+    environmentId: environment.id
+    workloadProfileName: 'Consumption'
+    configuration: {
+      triggerType: 'Schedule'
+      // The check reads every copy each night, so it gets more time than the intake jobs.
+      replicaTimeout: 3600
+      replicaRetryLimit: 0
+      scheduleTriggerConfig: {
+        cronExpression: auditJob.cron
+        parallelism: 1
+        replicaCompletionCount: 1
+      }
+      registries: [
+        {
+          server: registryLoginServer
+          identity: identityId
+        }
+      ]
+      secrets: [
+        for secret in auditSecrets: {
+          name: toLower(secret.secretName)
+          keyVaultUrl: '${keyVaultUri}secrets/${secret.secretName}'
+          identity: identityId
+        }
+      ]
+    }
+    template: {
+      containers: [
+        {
+          name: auditJob.job
+          image: image
+          command: [
+            'python'
+            '-m'
+            'argus.audit'
+          ]
+          resources: {
+            cpu: json('0.5')
+            memory: '1Gi'
+          }
+          env: concat(
+            plainSettings,
+            map(auditSecrets, secret => {
+              name: secret.envName
+              secretRef: toLower(secret.secretName)
+            })
+          )
+        }
+      ]
+    }
+  }
+}
 
 output environmentId string = environment.id
 output appName string = app.name

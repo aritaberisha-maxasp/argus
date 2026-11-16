@@ -31,8 +31,10 @@ from argus.cases.store import get_case
 from argus.connections import connections_from_env
 from argus.db import engine_from_env
 from argus.documents.store import AzureDocumentStore, DocumentStore
+from argus.intake.graph import GraphClient
 from argus.intake.mode import IntakeMode, SwitchedBy, intake_mode, switch_intake_mode
 from argus.intake.shadow import PersonFolders, ShadowReport, shadow_report
+from argus.mailbox_page.web import install_mailbox_page
 from argus.queue_page.web import PAGE_PATHS, install_queue_page
 from argus.secrets import EnvironmentSecretStore
 
@@ -75,9 +77,12 @@ class CaseView(BaseModel):
 
 
 class ModeView(BaseModel):
-    """Whether ARGUS only proposes routes (shadow) or acts on the mailbox (live) (#72)."""
+    """Whether ARGUS only proposes routes (shadow) or acts on the mailbox (live) (#72), and
+    whether the person asking may switch it, so the page shows the switch only to the admin
+    (#134). The server checks the role again on every switch."""
 
     mode: IntakeMode
+    may_switch: bool
 
 
 class ModeChange(BaseModel):
@@ -93,7 +98,8 @@ class ModeChanged(BaseModel):
 
 # Only the admin (Arita) may switch to live mode, and back (#72, ADR 0008).
 Admin = Annotated[SignedInUser, Depends(require_role(Role.ADMIN))]
-# The shadow report shows which emails ARGUS got wrong, so only finance and admin see it.
+# The shadow report shows which emails ARGUS got wrong, so only finance and admin see it. The
+# mode itself is shown to the same two roles on the queue page (#134).
 FinanceOrAdmin = Annotated[SignedInUser, Depends(require_role(Role.FINANCE, Role.ADMIN))]
 
 
@@ -120,10 +126,13 @@ def create_app(
     sign_in: Callable[[], TokenVerifier | None] = verifier_from_env,
     case_approvers: CaseApprovers | None = None,
     documents_factory: Callable[[], DocumentStore] = documents_from_env,
+    demo_graph: Callable[[], GraphClient] | None = None,
 ) -> FastAPI:
+    """``demo_graph`` builds the Graph client for the demo mailbox page; tests pass one wired
+    to the fake Graph. By default it comes from the demo settings."""
     # Refuse to start when demo mode and the real Microsoft 365, DATEV or Wise settings mix
     # (#124, ADR 0009). The error names the settings, never their values.
-    connections_from_env()
+    connections = connections_from_env()
     # No generated API pages: they would be routes without sign in.
     app = FastAPI(
         title="ARGUS", version=__version__, docs_url=None, redoc_url=None, openapi_url=None
@@ -144,6 +153,9 @@ def create_app(
         return stores[0]
 
     install_queue_page(app, engine, documents)
+    # The fake mailbox page exists in demo mode only; otherwise its routes answer 404 (#135).
+    if connections.demo:
+        install_mailbox_page(app, demo_graph or connections.graph_client)
 
     @app.get("/health")
     def health() -> Health:
@@ -197,10 +209,12 @@ def create_app(
         )
 
     @app.get("/intake/mode")
-    def read_mode(user: CurrentUser) -> ModeView:
-        """Whether ARGUS runs in shadow or live mode."""
+    def read_mode(user: FinanceOrAdmin) -> ModeView:
+        """Whether ARGUS runs in shadow or live mode. Finance and admin see it on the queue
+        page; a person without either role gets nothing (#134, NF-03)."""
         with engine().connect() as connection:
-            return ModeView(mode=intake_mode(connection))
+            mode = intake_mode(connection)
+        return ModeView(mode=mode, may_switch=Role.ADMIN in user.roles)
 
     @app.put("/intake/mode")
     def change_mode(change: ModeChange, user: Admin) -> ModeChanged:

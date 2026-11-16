@@ -204,3 +204,35 @@ def test_the_static_files_ship_with_the_package() -> None:
     names = {p.name for p in Path(str(STATIC)).iterdir()}
 
     assert {"queue.html", "app.js", "app.css", "msal-browser.min.js"} <= names
+
+
+# Shadow or live mode on the page (#134)
+
+
+@pytest.mark.req("IN-01", "NF-01")
+def test_the_page_switches_the_mode_only_through_the_existing_route() -> None:
+    script = (STATIC / "app.js").read_text(encoding="utf-8")
+
+    assert '"/intake/mode"' in script
+    assert 'call(token, "/intake/mode", "PUT", { mode: target, reason: why })' in script
+    # The switch is shown only when ARGUS says this person may switch (the admin).
+    assert "if (data.may_switch)" in script
+    # No other route that writes. The only other write is the correction of a case (#112),
+    # one POST from send(), and send() is used for that one route only. Every other call is
+    # a GET.
+    assert script.count('"PUT"') == 1
+    assert script.count('"POST"') == 1
+    assert script.count("await send(token,") == 1
+    assert '/correction"' in script
+    for other in ('"PATCH"', '"DELETE"'):
+        assert other not in script
+
+
+@pytest.mark.req("NF-03")
+@pytest.mark.parametrize("role", [Role.APPROVER, None])
+def test_an_approver_or_a_person_without_a_role_sees_no_mode(
+    entra: FakeEntra, client: TestClient, role: Role | None
+) -> None:
+    token = entra.token(ALICE, roles=[role] if role else [])
+    assert client.get("/intake/mode", headers=bearer(token)).status_code == 403
+    assert client.get("/intake/mode").status_code == 401

@@ -14,8 +14,13 @@ Azure sign in is needed. The script fails when:
   ``databaseBackupYears`` parameter), or the vault could be locked any other way than through
   ``retentionLocked``, or is not immutable (Unlocked) before that lock, or soft delete is
   off (#82, ADR 0007, NF-01);
-- a secret could end up in the code, a parameter default or a deployment output, or the app
-  gets a secret any other way than from Key Vault (NF-06);
+- the Backup vault raises no alert for a failed job, no alert processing rule sends Azure
+  Backup alerts to an action group, the vault's job records do not reach Log Analytics, no log
+  alert catches a week without a completed backup, or that alert checks on another day than the
+  one after the weekly backup (#115, NF-01);
+- a secret could end up in the code, a parameter default or a deployment output, or an app or
+  a job gets a secret any other way than as a Key Vault reference, including through a loop
+  or as a plain setting such as a connection string, key or token (NF-06, #103);
 - a model deployment, the allowed deployment types or the Azure Policy would let a Global
   deployment type through (ADR 0006);
 - demo mode is on by default in the template, a stand in can be reached from the internet, the
@@ -24,6 +29,9 @@ Azure sign in is needed. The script fails when:
 - the mailbox sweep does not run every 5 minutes or the removal not once a day as scheduled
   jobs, a job retries or runs twice at once, either job can run with no alert watching it, an
   alert has no action group, or an alert email address is written in the code (#125);
+- the nightly audit copy does not run once a night at 01:00 UTC as a scheduled job, retries,
+  runs twice at once, runs with the placeholder image, or no alert watches its failed and its
+  missing runs (#103, NF-01);
 - the ARGUS web app does not always get the five sign in settings, or gets one as a fixed value
   instead of from a parameter, or ``ARGUS_ENTRA_AUTHORITY`` (the local fake only) shows up
   anywhere (#23, #133, NF-03).
@@ -35,6 +43,7 @@ import json
 import re
 import sys
 from collections.abc import Iterator
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -77,7 +86,24 @@ STANDINS_MODULE = "standins"
 # The scheduled intake jobs (#125) and the log lines their alerts look for.
 INTAKE_COMMAND = "argus.intake"
 INTAKE_SCHEDULES = {"sweep": "*/5 * * * *"}
-INTAKE_DAILY = ("removal",)
+INTAKE_DAILY = ("removal", "digest")
+# The nightly audit copy (#83, #103) and the job name in its outcome lines.
+AUDIT_COMMAND = "argus.audit"
+AUDIT_JOB = "audit-copy"
+AUDIT_SCHEDULE = "0 1 * * *"
+# Settings whose value is a secret. They may only come from a Key Vault reference (NF-06).
+SECRET_SETTING = re.compile(r"(CONNECTION_STRING|API_KEY|KEY|TOKEN|SECRET|PASSWORD)$")
+# The settings the audit copy job needs (#103, AC 2): the database from the plain settings and
+# the document store connection as a Key Vault reference.
+AUDIT_DATABASE_SETTING = "ARGUS_DATABASE_URL"
+AUDIT_STORE_SETTING = "ARGUS_DOCUMENTS_CONNECTION_STRING"
+# A map over a secrets list whose lambda turns each one into a secretRef setting, and the
+# names a filter over such a list keeps.
+_SECRET_REF_MAP = re.compile(
+    r"map\(variables\('(\w+)'\), lambda\('(\w+)', createObject\('name', "
+    r"lambdaVariables\('\2'\)\.envName, 'secretRef'"
+)
+_FILTER_KEEPS = re.compile(r"\.envName, '([A-Z0-9_]+)'\)")
 # Sign in with Microsoft (#23, ADR 0008, #133). The web app needs all five, from a parameter.
 SIGN_IN_SETTINGS = (
     "ARGUS_ENTRA_TENANT_ID",
@@ -90,10 +116,22 @@ SIGN_IN_SETTINGS = (
 FAKE_AUTHORITY_SETTING = "ARGUS_ENTRA_AUTHORITY"
 ACTION_GROUP = "Microsoft.Insights/actionGroups"
 LOG_ALERT = "Microsoft.Insights/scheduledQueryRules"
-# Action groups exist only as global resources; they hold the address and send the email.
-GLOBAL_TYPES = frozenset({ACTION_GROUP})
+ALERT_PROCESSING_RULE = "Microsoft.AlertsManagement/actionRules"
+DIAGNOSTIC_SETTING = "Microsoft.Insights/diagnosticSettings"
+# Action groups and alert processing rules exist only as global resources. The group holds the
+# address and sends the email, the rule holds a filter and a link to the group (#115).
+GLOBAL_TYPES = frozenset({ACTION_GROUP, ALERT_PROCESSING_RULE})
+# The table the vault writes its job records to, read by the "no backup" alert (#115).
+BACKUP_JOBS_TABLE = "AddonAzureBackupJobs"
+_WEEKLY_START = re.compile(r"^R/(\d{4}-\d{2}-\d{2})T[^/]+/P1W$")
+_KUSTO_DAY = re.compile(r"dayofweek\(now\(\)\)\s*==\s*(\d)d")
+_KUSTO_HOUR = re.compile(r"hourofday\(now\(\)\)\s*==\s*(\d+)")
+# The hour (UTC) the "no backup" alert checks: late enough that a Sunday backup has finished
+# and its record has reached Log Analytics, early enough that the 2 day window still covers it.
+BACKUP_CHECK_HOUR = 23
 EMAIL = re.compile(r"[\w.+-]+@[\w-]+(\.[\w-]+)+")
 _COPY_VARIABLE = re.compile(r"variables\('(\w+)'\)")
+_VARIABLE_FIELD = re.compile(r"^\[variables\('(\w+)'\)\.(\w+)\]$")
 # 10 years for the long term backups until the tax advisor confirms the period (ADR 0007).
 MIN_BACKUP_YEARS = 10
 
@@ -306,6 +344,128 @@ def backup_problems(main: dict[str, Any], parameters: dict[str, Any] | None) -> 
     return problems
 
 
+def _resolve(template: dict[str, Any], value: Any) -> Any:
+    """A plain variable reference read from the template's variables, anything else as is."""
+    found = re.fullmatch(r"\[variables\('(\w+)'\)\]", value) if isinstance(value, str) else None
+    return template.get("variables", {}).get(found[1], value) if found else value
+
+
+def _switched_off(resource: dict[str, Any]) -> bool:
+    """A resource that can never be deployed or is disabled."""
+    condition = resource.get("condition", True)
+    return (
+        condition is False
+        or condition == "[false()]"
+        or (resource.get("properties", {}).get("enabled", True) is False)
+    )
+
+
+def _backup_weekday(main: dict[str, Any]) -> int | None:
+    """The weekday of the weekly backup, Sunday 0 as in Kusto, or None when not readable."""
+    for template in templates(main):
+        found = template.get("resources", [])
+        for resource in found.values() if isinstance(found, dict) else found:
+            if resource.get("type") != BACKUP_POLICY:
+                continue
+            for rule in resource.get("properties", {}).get("policyRules", []):
+                schedule = rule.get("trigger", {}).get("schedule", {})
+                for interval in schedule.get("repeatingTimeIntervals", []):
+                    start = _WEEKLY_START.match(str(_resolve(template, interval)))
+                    if start:
+                        return (date.fromisoformat(start[1]).isoweekday()) % 7
+    return None
+
+
+def backup_alert_problems(main: dict[str, Any]) -> list[str]:
+    """A failed backup job and a week without a completed backup both reach an action group
+    (#115, NF-01)."""
+    problems = []
+    vaults = [r for r in resources(main) if r.get("type") == BACKUP_VAULT]
+    for vault in vaults:
+        setting = (
+            vault.get("properties", {})
+            .get("monitoringSettings", {})
+            .get("azureMonitorAlertSettings", {})
+            .get("alertsForAllJobFailures")
+        )
+        if setting != "Enabled":
+            problems.append(
+                f"backup vault {vault.get('name', '?')} raises no alert when a backup job fails"
+            )
+    if not vaults:
+        return problems
+
+    routed = False
+    for rule in (r for r in resources(main) if r.get("type") == ALERT_PROCESSING_RULE):
+        properties = rule.get("properties", {})
+        backup = any(
+            c.get("field") == "MonitorService"
+            and c.get("operator") == "Equals"
+            and "Azure Backup" in c.get("values", [])
+            for c in properties.get("conditions", [])
+        )
+        sends = any(
+            a.get("actionType") == "AddActionGroups" and a.get("actionGroupIds")
+            for a in properties.get("actions", [])
+        )
+        scoped = properties.get("scopes") == ["[resourceGroup().id]"]
+        routed = routed or (backup and sends and scoped and not _switched_off(rule))
+    if not routed:
+        problems.append(
+            "no alert processing rule sends the Azure Backup alerts (a failed backup job) of this "
+            "resource group to an action group"
+        )
+
+    logged = any(
+        r.get("type") == DIAGNOSTIC_SETTING
+        and "backupVaults" in str(r.get("scope", ""))
+        and not _switched_off(r)
+        and r.get("properties", {}).get("workspaceId")
+        and any(
+            log.get("category") == BACKUP_JOBS_TABLE and log.get("enabled")
+            for log in r.get("properties", {}).get("logs", [])
+        )
+        for r in resources(main)
+    )
+    if not logged:
+        problems.append(f"the backup vault sends no {BACKUP_JOBS_TABLE} records to Log Analytics")
+
+    watchers = []
+    for template in templates(main):
+        found = template.get("resources", [])
+        for resource in found.values() if isinstance(found, dict) else found:
+            if resource.get("type") != LOG_ALERT:
+                continue
+            properties = resource.get("properties", {})
+            for item in properties.get("criteria", {}).get("allOf", []):
+                query = str(_resolve(template, item.get("query", "")))
+                if BACKUP_JOBS_TABLE in query:
+                    watchers.append((resource, query))
+    if not watchers:
+        problems.append("no alert fires when no backup job completed for 8 days")
+    weekday = _backup_weekday(main)
+    for resource, query in watchers:
+        name = resource.get("name", "?")
+        if not resource.get("properties", {}).get("actions", {}).get("actionGroups"):
+            problems.append(f"alert {name} sends to no action group")
+        if _switched_off(resource):
+            problems.append(f"alert {name} is switched off")
+        hour = _KUSTO_HOUR.search(query)
+        if hour is None or int(hour[1]) != BACKUP_CHECK_HOUR:
+            problems.append(
+                f"alert {name} must check in one hour, hourofday(now()) == {BACKUP_CHECK_HOUR}"
+            )
+        day = _KUSTO_DAY.search(query)
+        if weekday is None:
+            problems.append("the weekly backup schedule cannot be read (R/<date>T<time>/P1W)")
+        elif day is None or int(day[1]) != (weekday + 1) % 7:
+            problems.append(
+                f"alert {name} must check on the day after the weekly backup "
+                f"(dayofweek(now()) == {(weekday + 1) % 7}d)"
+            )
+    return problems
+
+
 def secret_problems(main: dict[str, Any], parameters: dict[str, Any] | None) -> list[str]:
     problems = []
     sources = [main] if parameters is None else [main, parameters]
@@ -331,11 +491,184 @@ def secret_problems(main: dict[str, Any], parameters: dict[str, Any] | None) -> 
                 problems.append(f"Key Vault secret {name} has a value written in the code")
         if resource.get("type") in (CONTAINER_APP, CONTAINER_JOB):
             configuration = resource.get("properties", {}).get("configuration", {})
-            app_secrets = configuration.get("secrets", [])
-            for secret in app_secrets if isinstance(app_secrets, list) else [app_secrets]:
-                if "value" in secret or "keyVaultUrl" not in secret or "identity" not in secret:
+            for secret in _app_secrets(configuration):
+                if not _key_vault_reference(secret):
                     problems.append(f"app {name} gets a secret that is not a Key Vault reference")
+    for template in templates(main):
+        problems.extend(_plain_secret_setting_problems(template))
     return problems
+
+
+def _app_secrets(configuration: dict[str, Any]) -> list[Any]:
+    """The secrets of an app or a job: a plain list, an expression that builds the list, or the
+    input of the loop Bicep compiles a ``[for ...]`` list into (``configuration.copy`` named
+    ``secrets``). Earlier only the plain list was read, so the secrets of the web app and the
+    intake jobs, written as loops, were never checked (#103)."""
+    found = configuration.get("secrets", [])
+    secrets = list(found) if isinstance(found, list) else [found]
+    for loop in configuration.get("copy", []):
+        if isinstance(loop, dict) and loop.get("name") == "secrets":
+            secrets.append(loop.get("input", {}))
+    return secrets
+
+
+def _key_vault_reference(secret: Any) -> bool:
+    """A secret entry, or an expression that builds one, that names a Key Vault secret and the
+    identity that reads it, and holds no value."""
+    if isinstance(secret, str):
+        return (
+            "'keyVaultUrl'" in secret
+            and "secrets/" in secret
+            and "'identity'" in secret
+            and "'value'" not in secret
+        )
+    return (
+        isinstance(secret, dict)
+        and "value" not in secret
+        and "secrets/" in str(secret.get("keyVaultUrl", ""))
+        and "identity" in secret
+    )
+
+
+def _dicts(value: Any) -> Iterator[dict[str, Any]]:
+    if isinstance(value, dict):
+        yield value
+        for item in value.values():
+            yield from _dicts(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _dicts(item)
+
+
+def _calls(text: str, function: str) -> Iterator[str]:
+    """The text of each call of ``function`` in an expression, up to its own closing
+    parenthesis, for example every ``lambda(...)``."""
+    opening = f"{function}("
+    start = text.find(opening)
+    while start != -1:
+        depth = 0
+        for index in range(start + len(function), len(text)):
+            if text[index] == "(":
+                depth += 1
+            elif text[index] == ")":
+                depth -= 1
+                if depth == 0:
+                    yield text[start : index + 1]
+                    break
+        start = text.find(opening, start + 1)
+
+
+_OBJECT_NAME = re.compile(r"'name', '([A-Za-z0-9_]+)'")
+
+
+def _with_variables(template: dict[str, Any], value: Any) -> list[Any]:
+    """The value and every variable it uses, followed as deep as they go."""
+    variables = template.get("variables", {})
+    found: list[Any] = [value]
+    seen: set[str] = set()
+    index = 0
+    while index < len(found):
+        for text in strings(found[index]):
+            for name in _COPY_VARIABLE.findall(text):
+                if name not in seen:
+                    seen.add(name)
+                    found.append(variables.get(name))
+        index += 1
+    return found
+
+
+def _container_env(container: dict[str, Any]) -> list[Any]:
+    """The env of a container: the plain value, and the input of a loop that Bicep compiles an
+    ``env: [for ...]`` list into (``copy`` named ``env`` on the container)."""
+    sources: list[Any] = [container.get("env")]
+    for loop in container.get("copy", []):
+        if isinstance(loop, dict) and loop.get("name") == "env":
+            sources.append(loop.get("input"))
+    return sources
+
+
+def _plain_secret_setting_problems(template: dict[str, Any]) -> list[str]:
+    """No app or job gets a secret as a plain setting (NF-06, #103). Looks at the container env,
+    written out, as an expression or as a loop, and at every variable it uses, as deep as they
+    go. It reports a setting such as ``ARGUS_DOCUMENTS_CONNECTION_STRING`` with a value, and a
+    loop or lambda that turns a secret's ``envName`` into a setting with a value.
+
+    It cannot follow parameters or module outputs: a plain secret handed in from outside the
+    template is the job of the parameter rules in :func:`secret_problems`."""
+    problems = []
+    found = template.get("resources", [])
+    for resource in found.values() if isinstance(found, dict) else found:
+        if resource.get("type") not in (CONTAINER_APP, CONTAINER_JOB):
+            continue
+        name = resource.get("name", "?")
+        containers = resource.get("properties", {}).get("template", {}).get("containers", [])
+        for container in containers if isinstance(containers, list) else []:
+            if not isinstance(container, dict):
+                continue
+            used = _with_variables(template, _container_env(container))
+            loops_with_values = any(
+                ".envName" in body and "'value'" in body
+                for text in strings(used)
+                for body in _calls(text, "lambda")
+            ) or any(
+                "envName" in str(entry.get("name", "")) and "value" in entry
+                for entry in (e for value in used for e in _dicts(value))
+            )
+            if loops_with_values:
+                problems.append(f"app {name} hands secrets over as plain settings")
+            # A setting written as createObject('name', 'X', 'value', ...) inside an expression.
+            for text in strings(used):
+                for body in _calls(text, "createObject"):
+                    for setting in _OBJECT_NAME.findall(body):
+                        if SECRET_SETTING.search(setting) and "'value'" in body:
+                            problems.append(
+                                f"app {name} gets the secret setting {setting} as a plain value, "
+                                "not from Key Vault"
+                            )
+            for entry in (e for value in used for e in _dicts(value)):
+                setting = entry.get("name")
+                if (
+                    isinstance(setting, str)
+                    and SECRET_SETTING.search(setting)
+                    and ("value" in entry or "secretRef" not in entry)
+                ):
+                    problems.append(
+                        f"app {name} gets the secret setting {setting} as a plain value, "
+                        "not from Key Vault"
+                    )
+    return problems
+
+
+def _secret_ref_settings(template: dict[str, Any], container: dict[str, Any]) -> set[str]:
+    """The settings a container surely gets as a secretRef: written out, or through a map over
+    a list of secrets that is written out or filtered by name."""
+    variables = template.get("variables", {})
+    names: set[str] = set()
+    for value in _with_variables(template, _container_env(container)):
+        for entry in _dicts(value):
+            if "secretRef" in entry and isinstance(entry.get("name"), str):
+                names.add(entry["name"])
+        for text in strings(value):
+            for listed, _ in _SECRET_REF_MAP.findall(text):
+                source = variables.get(listed)
+                if isinstance(source, list):
+                    names |= {
+                        str(item["envName"])
+                        for item in source
+                        if isinstance(item, dict) and "envName" in item
+                    }
+                elif isinstance(source, str) and source.startswith("[filter("):
+                    names |= set(_FILTER_KEEPS.findall(source))
+    return names
+
+
+def _plain_settings(template: dict[str, Any], container: dict[str, Any]) -> set[str]:
+    return {
+        str(entry["name"])
+        for value in _with_variables(template, container.get("env"))
+        for entry in _dicts(value)
+        if "value" in entry and isinstance(entry.get("name"), str)
+    }
 
 
 def modules(template: dict[str, Any]) -> Iterator[tuple[str, dict[str, Any], dict[str, Any]]]:
@@ -399,8 +732,9 @@ def _daily(cron: str) -> bool:
 
 
 def intake_job_problems(main: dict[str, Any]) -> list[str]:
-    """The sweep runs every 5 minutes and the removal once a day, one run at a time and
-    without retries, only when switched on, and every run is watched by an alert (#125)."""
+    """The sweep runs every 5 minutes, the removal and the digest once a day, one run at a time
+    and without retries, only when switched on, and every run is watched by an alert (#125,
+    #61)."""
     problems = []
     scheduled: dict[str, str] = {}
     for template in templates(main):
@@ -416,14 +750,7 @@ def intake_job_problems(main: dict[str, Any]) -> list[str]:
             name = str(resource.get("name", "?"))
             configuration = properties.get("configuration", {})
             trigger = configuration.get("scheduleTriggerConfig", {})
-            if configuration.get("triggerType") != "Schedule":
-                problems.append(f"intake job {name} must run on a schedule")
-            if configuration.get("replicaRetryLimit") != 0:
-                problems.append(f"intake job {name} must not retry; the next run tries again")
-            if trigger.get("parallelism") != 1 or trigger.get("replicaCompletionCount") != 1:
-                problems.append(f"intake job {name} must run one replica at a time")
-            if not configuration.get("replicaTimeout"):
-                problems.append(f"intake job {name} needs a time limit per run")
+            problems.extend(_schedule_problems(f"intake job {name}", configuration))
             if "condition" not in resource:
                 problems.append(f"intake job {name} must only run when the intake jobs are on")
             items = _job_items(template, resource)
@@ -444,13 +771,86 @@ def intake_job_problems(main: dict[str, Any]) -> list[str]:
     unknown = sorted(set(scheduled) - set(INTAKE_SCHEDULES) - set(INTAKE_DAILY))
     if unknown:
         problems.append(f"unknown intake jobs {unknown}: add their schedule to this check")
-    problems.extend(alert_problems(main, sorted(scheduled)))
+    problems.extend(alert_problems(main, [*sorted(scheduled), AUDIT_JOB]))
+    return problems
+
+
+def _schedule_problems(what: str, configuration: dict[str, Any]) -> list[str]:
+    """A scheduled job runs on its schedule, one replica at a time, never retries and has a
+    time limit per run (ADR 0001)."""
+    problems = []
+    trigger = configuration.get("scheduleTriggerConfig", {})
+    if configuration.get("triggerType") != "Schedule":
+        problems.append(f"{what} must run on a schedule")
+    if configuration.get("replicaRetryLimit") != 0:
+        problems.append(f"{what} must not retry; the next run tries again")
+    if trigger.get("parallelism") != 1 or trigger.get("replicaCompletionCount") != 1:
+        problems.append(f"{what} must run one replica at a time")
+    if not configuration.get("replicaTimeout"):
+        problems.append(f"{what} needs a time limit per run")
+    return problems
+
+
+def _plain(template: dict[str, Any], value: Any) -> Any:
+    """A value, or the field of a plain variable it points to (``[variables('x').cron]``)."""
+    found = _VARIABLE_FIELD.match(value) if isinstance(value, str) else None
+    if not found:
+        return value
+    variable = template.get("variables", {}).get(found[1])
+    return variable.get(found[2]) if isinstance(variable, dict) else None
+
+
+def audit_job_problems(main: dict[str, Any]) -> list[str]:
+    """Exactly one job runs the nightly audit copy, at 01:00 UTC, one run at a time and
+    without retries, and never with the placeholder image (#103, NF-01). Its alerts are
+    checked with the intake jobs' in :func:`alert_problems`."""
+    problems = []
+    found_jobs = []
+    for template in templates(main):
+        found = template.get("resources", [])
+        for resource in found.values() if isinstance(found, dict) else found:
+            if resource.get("type") != CONTAINER_JOB:
+                continue
+            properties = resource.get("properties", {})
+            containers = properties.get("template", {}).get("containers", [])
+            command = [str(part) for c in containers for part in c.get("command", [])]
+            if AUDIT_COMMAND not in command:
+                continue
+            name = str(resource.get("name", "?"))
+            found_jobs.append(name)
+            configuration = properties.get("configuration", {})
+            problems.extend(_schedule_problems(f"audit copy job {name}", configuration))
+            if resource.get("copy"):
+                problems.append(f"audit copy job {name} must be one job, not a loop")
+            if "condition" not in resource:
+                problems.append(f"audit copy job {name} must not run with the placeholder image")
+            cron = _plain(
+                template, configuration.get("scheduleTriggerConfig", {}).get("cronExpression")
+            )
+            for container in containers if isinstance(containers, list) else []:
+                if not isinstance(container, dict):
+                    continue
+                if AUDIT_STORE_SETTING not in _secret_ref_settings(template, container):
+                    problems.append(
+                        f"audit copy job {name} must get {AUDIT_STORE_SETTING} as a Key Vault "
+                        "reference"
+                    )
+                if AUDIT_DATABASE_SETTING not in _plain_settings(template, container):
+                    problems.append(f"audit copy job {name} must get {AUDIT_DATABASE_SETTING}")
+            if cron != AUDIT_SCHEDULE:
+                problems.append(
+                    f"audit copy job {name} must run on the schedule {AUDIT_SCHEDULE!r}"
+                )
+    if not found_jobs:
+        problems.append(f"no job runs the nightly audit copy (python -m {AUDIT_COMMAND})")
+    elif len(found_jobs) > 1:
+        problems.append(f"more than one job runs the nightly audit copy: {found_jobs}")
     return problems
 
 
 def alert_problems(main: dict[str, Any], jobs: list[str]) -> list[str]:
-    """Every intake job has a rule for a failed run and one for no run, each sending to an
-    action group, and no alert address is written in the code (#125)."""
+    """Every scheduled job has a rule for a failed run and one for no run, each sending to an
+    action group, and no alert address is written in the code (#125, #103)."""
     problems = []
     queries: list[str] = []
     groups = 0
@@ -639,10 +1039,12 @@ def check(folder: Path) -> list[str]:
         *location_problems(main),
         *retention_problems(main, parameters),
         *backup_problems(main, parameters),
+        *backup_alert_problems(main),
         *secret_problems(main, parameters),
         *deployment_type_problems(main, policy, parameters),
         *demo_problems(main, parameters),
         *intake_job_problems(main),
+        *audit_job_problems(main),
         *sign_in_problems(main),
     ]
 
@@ -657,7 +1059,7 @@ def main(argv: list[str]) -> int:
     if problems:
         return 1
     print(
-        "Infrastructure code keeps to the rules of #65, #82, #124, #125 and #133 "
+        "Infrastructure code keeps to the rules of #65, #82, #103, #115, #124, #125 and #133 "
         "(NF-01, NF-03, NF-06)."
     )
     return 0
