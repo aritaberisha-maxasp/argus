@@ -31,7 +31,7 @@ param workspaceId string
 @description('Watch the intake jobs. Off while the jobs are off, so a job that does not exist never raises a "no run" alert.')
 param watchIntakeJobs bool
 
-@description('Names of the intake jobs by job, from main.bicep: sweep and removal.')
+@description('Names of the intake jobs by job, from main.bicep: sweep, removal and digest.')
 param intakeJobNames object
 
 @description('Watch the nightly audit copy job (#103). Off while the job is off.')
@@ -99,6 +99,26 @@ var intakeRules = [
     kind: 'silent'
     description: 'The daily removal from ARGUS/Removed has not finished in the last 26 hours.'
     query: 'ContainerAppConsoleLogs_CL | where TimeGenerated > ago(26h) | where Log_s contains "argus-job ok removal"'
+    frequency: 'PT1H'
+    window: 'P2D'
+    operator: 'LessThan'
+    threshold: 1
+  }
+  {
+    job: 'digest'
+    kind: 'failed'
+    description: 'The daily digest of open exceptions failed, or its saved draft was gone or changed and nothing was sent. The next day tries again.'
+    query: 'ContainerAppConsoleLogs_CL | where Log_s contains "argus-job failed digest"'
+    frequency: 'PT1H'
+    window: 'PT2H'
+    operator: 'GreaterThan'
+    threshold: 0
+  }
+  {
+    job: 'digest'
+    kind: 'silent'
+    description: 'The daily digest of open exceptions has not finished in the last 26 hours.'
+    query: 'ContainerAppConsoleLogs_CL | where TimeGenerated > ago(26h) | where Log_s contains "argus-job ok digest"'
     frequency: 'PT1H'
     window: 'P2D'
     operator: 'LessThan'

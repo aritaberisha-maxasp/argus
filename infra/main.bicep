@@ -143,6 +143,7 @@ var runIntakeJobs = intakeJobs && appImage != 'mcr.microsoft.com/k8se/quickstart
 var intakeJobNames = {
   sweep: 'caj-${prefix}-sweep'
   removal: 'caj-${prefix}-removal'
+  digest: 'caj-${prefix}-digest'
 }
 
 // The nightly audit copy (#103). It needs only the database and the document store, so it runs

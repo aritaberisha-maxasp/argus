@@ -5,6 +5,8 @@ systems is a change of settings, not of code (ADR 0009):
 
 - ``ARGUS_DEMO``: ``true`` while ARGUS runs against the stand ins, ``false`` or unset otherwise.
 - ``ARGUS_GRAPH_URL`` and ``ARGUS_MAILBOX``: Microsoft Graph and the accounts mailbox.
+- ``ARGUS_REMINDER_FORWARD_TO`` and ``ARGUS_DIGEST_TO``: the one address payment reminders are
+  forwarded to (#27) and the one address the daily digest of open exceptions goes to (#61).
 - ``ARGUS_DATEV_URL`` and ``ARGUS_DATEV_CLIENT``: DATEVconnect and the DATEV client (Mandant).
 - ``ARGUS_WISE_URL`` and ``ARGUS_WISE_PROFILE_ID``: Wise and the Max ASP profile.
 - ``ARGUS_GRAPH_STANDIN_TOKEN`` and ``ARGUS_WISE_STANDIN_TOKEN``: the tokens of the stand ins.
@@ -39,6 +41,7 @@ DEMO_ENV: Final = "ARGUS_DEMO"
 GRAPH_URL_ENV: Final = "ARGUS_GRAPH_URL"
 MAILBOX_ENV: Final = "ARGUS_MAILBOX"
 REMINDER_FORWARD_TO_ENV: Final = "ARGUS_REMINDER_FORWARD_TO"
+DIGEST_TO_ENV: Final = "ARGUS_DIGEST_TO"
 DATEV_URL_ENV: Final = "ARGUS_DATEV_URL"
 DATEV_CLIENT_ENV: Final = "ARGUS_DATEV_CLIENT"
 WISE_URL_ENV: Final = "ARGUS_WISE_URL"
@@ -119,15 +122,21 @@ class Connections:
     graph_standin_token: SecretStr | None
     wise_standin_token: SecretStr | None
     wise_token: SecretStr | None
+    digest_to: str | None = None
 
     def graph_client(
         self,
         tokens: TokenProvider | None = None,
         transport: httpx.BaseTransport | None = None,
+        *,
+        digest: bool = False,
     ) -> GraphClient:
         """The Graph client for the accounts mailbox. In demo mode it signs in to the fake
         Graph with the stand in token. Live, ``tokens`` signs in to Microsoft 365.
-        ``transport`` is for tests."""
+        ``transport`` is for tests.
+
+        Each client may send only what its job sends: the intake client forwards reminders,
+        the ``digest=True`` client sends the daily digest and nothing else (#61)."""
         if not self.graph_url or not self.mailbox:
             raise NotConnected(f"set {GRAPH_URL_ENV} and {MAILBOX_ENV} to read the mailbox")
         if self.demo:
@@ -142,7 +151,8 @@ class Connections:
             base_url=self.graph_url,
             transport=transport,
             standin=self.demo,
-            forward_to=self.reminder_forward_to,
+            forward_to=None if digest else self.reminder_forward_to,
+            digest_to=self.digest_to if digest else None,
         )
 
     def datev_gateway(self) -> DatevConnectGateway:
@@ -217,4 +227,5 @@ def connections_from_env(environ: Mapping[str, str] | None = None) -> Connection
         graph_standin_token=_secret(environ, GRAPH_STANDIN_TOKEN_ENV),
         wise_standin_token=_secret(environ, WISE_STANDIN_TOKEN_ENV),
         wise_token=_secret(environ, WISE_TOKEN_SECRET),
+        digest_to=_value(environ, DIGEST_TO_ENV),
     )
