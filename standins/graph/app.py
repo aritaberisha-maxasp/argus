@@ -129,6 +129,7 @@ class Mailbox:
     fail_next: list[tuple[int, int]] = field(default_factory=list)
     drafts: dict[str, Draft] = field(default_factory=dict)
     sent: list[Draft] = field(default_factory=list)
+    notices: list[dict[str, Any]] = field(default_factory=list)  # sendMail bodies (#56)
 
     @property
     def inbox(self) -> dict[str, Message]:
@@ -159,6 +160,7 @@ class Mailbox:
         self.fail_next.clear()
         self.drafts.clear()
         self.sent.clear()
+        self.notices.clear()
         self.folders[INBOX_ID] = Folder(INBOX_ID, "Inbox", None)
         self.folders[DELETED_ITEMS_ID] = Folder(DELETED_ITEMS_ID, "Deleted Items", None)
         for raw in emails:
@@ -537,6 +539,24 @@ def create_app(
             return _error(400, "ErrorInvalidRequest", "Only draft messages can be sent.")
         draft.is_draft = False
         box.sent.append(draft)
+        return Response(status_code=202)
+
+    @app.post("/v1.0/users/{user}/sendMail")
+    async def send_mail(
+        request: Request,
+        user: str,
+        authorization: Annotated[str | None, Header()] = None,
+        prefer: Annotated[str | None, Header()] = None,
+    ) -> Response:
+        """A new email from the mailbox, as ARGUS sends a statement notice (#56)."""
+        refused = check(request, user, authorization, prefer)
+        if refused:
+            return refused
+        body = await request.json()
+        message = body.get("message") if isinstance(body, dict) else None
+        if not isinstance(message, dict) or not message.get("toRecipients"):
+            return _error(400, "ErrorInvalidRecipients", "At least one recipient is required.")
+        box.notices.append(message)
         return Response(status_code=202)
 
     @app.patch("/_standin/drafts/{draft_id}")

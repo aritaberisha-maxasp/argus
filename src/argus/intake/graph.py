@@ -1,9 +1,10 @@
 """The Microsoft Graph client that reads the accounts mailbox (ADR 0003, IN-01, NF-06).
 
 It signs in as the ARGUS app and needs only two application permissions, Mail.ReadWrite and
-Mail.Send, limited by Exchange to the one mailbox. Mail.Send is used for two things only:
-forwarding payment reminders to the one address set for them (IN-05, #27), and sending the daily
-digest of open exceptions to the one address set for it (EX-03, #61). Every token is
+Mail.Send, limited by Exchange to the one mailbox. Mail.Send is used for three things only:
+forwarding payment reminders to the one address set for them (IN-05, #27), short notices about
+Wise statements to that same address (BA-01, BA-08, #56), and sending the daily digest of open
+exceptions to the one address set for it (EX-03, #61). Every token is
 checked before use: if it carries any other Graph permission, the client refuses to send
 anything, so a too wide grant is noticed at once instead of going unused and unseen.
 
@@ -154,6 +155,8 @@ def allowed_paths(
     forward as a draft and send a draft. Reading a message, which shows whether it is still a
     draft and who it goes to, is already allowed for #26.
 
+    A notice about a Wise statement (#56) goes to the same forward address with sendMail.
+
     Sending the daily digest of open exceptions (#61) is only allowed when a digest address is
     set: save a new message as a draft and send a draft.
 
@@ -174,7 +177,11 @@ def allowed_paths(
     if standin:
         paths += (("GET", re.compile(f"{user}/mailFolders/{_MESSAGE_ID}/messages")),)
     if forward_to:
-        paths += (("POST", re.compile(f"{user}/messages/{_MESSAGE_ID}/createForward")),)
+        paths += (
+            ("POST", re.compile(f"{user}/messages/{_MESSAGE_ID}/createForward")),
+            # A notice about a Wise statement (#56); checked by notice_body_problem.
+            ("POST", re.compile(f"{user}/sendMail")),
+        )
     if digest_to:
         paths += (("POST", re.compile(f"{user}/messages")),)
     if forward_to or digest_to:
@@ -182,13 +189,76 @@ def allowed_paths(
     return paths
 
 
+# What a statement notice may carry. No attachment, no copy, no reply address.
+MAX_NOTICE_SUBJECT = 200
+MAX_NOTICE_TEXT = 5000
+
+
+def notice_body_problem(content: bytes, forward_to: str) -> str | None:
+    """Why a sendMail body is refused, or None when it is fine. A notice (#56) is a plain text
+    email with a subject, to the one address set for reminders, and nothing else."""
+    try:
+        body = _strict_json(content)
+    except ValueError:
+        return "the notice body is not JSON with each key once"
+    if not isinstance(body, dict) or set(body) - {"message", "saveToSentItems"}:
+        return "the notice may only carry a message"
+    message = body.get("message")
+    if not isinstance(message, dict) or set(message) != {"subject", "body", "toRecipients"}:
+        return "the notice may only carry a subject, a text and its recipient"
+    subject, text_body = message["subject"], message["body"]
+    if not isinstance(subject, str) or not 0 < len(subject) <= MAX_NOTICE_SUBJECT:
+        return "the notice subject is missing or too long"
+    if (
+        not isinstance(text_body, dict)
+        or set(text_body) != {"contentType", "content"}
+        or text_body["contentType"] != "Text"
+        or not isinstance(text_body["content"], str)
+        or not 0 < len(text_body["content"]) <= MAX_NOTICE_TEXT
+    ):
+        return "the notice must be plain text of a sensible length"
+    recipients = message["toRecipients"]
+    if not isinstance(recipients, list) or len(recipients) != 1:
+        return "the notice must have exactly one recipient"
+    recipient = recipients[0]
+    if not isinstance(recipient, dict) or set(recipient) != {"emailAddress"}:
+        return "the notice recipient is not an address"
+    address = recipient["emailAddress"]
+    if not isinstance(address, dict) or set(address) != {"address"}:
+        return "the notice recipient is not an address"
+    if (
+        not isinstance(address["address"], str)
+        or not forward_to
+        or address["address"].lower() != forward_to.lower()
+    ):
+        return "the notice goes to an address that is not the one set for reminders"
+    return None
+
+
+class _RepeatedKey(ValueError):
+    pass
+
+
+def _refuse_repeated_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    keys = [key for key, _ in pairs]
+    if len(keys) != len(set(keys)):
+        raise _RepeatedKey("a JSON key appears twice")
+    return dict(pairs)
+
+
+def _strict_json(content: bytes) -> Any:
+    """JSON with every key once. Plain json.loads keeps the last of two equal keys, so a guard
+    would check one value while Graph might act on the other (code review of PR 162)."""
+    return json.loads(content, object_pairs_hook=_refuse_repeated_keys)
+
+
 def forward_body_problem(content: bytes, forward_to: str) -> str | None:
     """Why a createForward body is refused, or None when it is fine. A forward goes to the one
     set address and nowhere else: no other recipient, no copy, no changed message."""
     try:
-        body = json.loads(content)
+        body = _strict_json(content)
     except ValueError:
-        return "the forward body is not JSON"
+        return "the forward body is not JSON with each key once"
     if not isinstance(body, dict) or set(body) - {"comment", "toRecipients"}:
         return "the forward may only carry a comment and its recipient"
     recipients = body.get("toRecipients")
@@ -282,6 +352,11 @@ class _GuardedTransport(httpx.BaseTransport):
             if problem:
                 log.warning("Refused Graph forward: %s", problem)
                 raise GraphCallRefused(f"refused Graph forward: {problem}")
+        if path.endswith("/sendMail"):
+            problem = notice_body_problem(request.read(), self._forward_to or "")
+            if problem:
+                log.warning("Refused Graph notice: %s", problem)
+                raise GraphCallRefused(f"refused Graph notice: {problem}")
         if request.method == "POST" and self._new_message.fullmatch(path):
             problem = digest_body_problem(request.read(), self._digest_to or "")
             if problem:
@@ -480,6 +555,22 @@ class GraphClient:
         if not isinstance(draft_id, str) or not re.fullmatch(_MESSAGE_ID, draft_id):
             raise GraphApiError("POST", "createForward", 200, "no draft ID in the answer")
         return draft_id
+
+    def send_notice(self, subject: str, text: str) -> None:
+        """Send a short plain text notice about a Wise statement to the reminder address
+        (Benjamin, #56). Sent once, without retries: a notice sent twice is better than none,
+        but the caller decides about trying again."""
+        if not self.forward_to:
+            raise GraphCallRefused("refused Graph notice: no reminder address is set")
+        body = {
+            "message": {
+                "subject": subject,
+                "body": {"contentType": "Text", "content": text},
+                "toRecipients": [{"emailAddress": {"address": self.forward_to}}],
+            },
+            "saveToSentItems": True,
+        }
+        self._post(f"{self._user}/sendMail", body)
 
     def is_draft(self, message_id: str) -> bool:
         """Whether this message is still an unsent draft."""
