@@ -88,5 +88,11 @@ textarea { width: 100%; min-height: 120px; font: 13px ui-monospace, Menlo, Conso
 .mode.live { border-color: var(--accent); }
 .mode form.switch label { display: block; margin: 8px 0 4px; }
 .mode form.switch input { width: 100%; max-width: 480px; font: inherit; padding: 4px 8px; }
+form.correction { max-width: 520px; }
+form.correction label { display: block; font-weight: 600; margin-bottom: 4px; }
+form.correction input { font: inherit; width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; }
+form.correction textarea.reason { font: inherit; min-height: 72px; padding: 6px 8px; }
+form.correction .hint { display: block; font-size: 13px; margin-top: 4px; }
 button.primary { background: var(--accent); color: #ffffff; border-color: var(--accent); }
 button.primary:hover { background: var(--accent); opacity: 0.9; }
+button:disabled { opacity: 0.6; cursor: default; }

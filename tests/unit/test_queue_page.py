@@ -217,9 +217,14 @@ def test_the_page_switches_the_mode_only_through_the_existing_route() -> None:
     assert 'call(token, "/intake/mode", "PUT", { mode: target, reason: why })' in script
     # The switch is shown only when ARGUS says this person may switch (the admin).
     assert "if (data.may_switch)" in script
-    # No other route that writes: every other call is a GET.
+    # No other route that writes. The only other write is the correction of a case (#112),
+    # one POST from send(), and send() is used for that one route only. Every other call is
+    # a GET.
     assert script.count('"PUT"') == 1
-    for other in ('"POST"', '"PATCH"', '"DELETE"'):
+    assert script.count('"POST"') == 1
+    assert script.count("await send(token,") == 1
+    assert '/correction"' in script
+    for other in ('"PATCH"', '"DELETE"'):
         assert other not in script
 
 
