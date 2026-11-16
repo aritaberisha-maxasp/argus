@@ -154,14 +154,7 @@ def refused_detail(folder: str) -> str:
 def _flag_refused(engine: Engine, statements: Statements, email_id: int, files: int) -> None:
     """One exception per email, ever: a person who resolved it is not asked again."""
     with unit_of_work(engine, STATEMENTS_ACTOR) as db:
-        flagged: bool = db.execute(
-            text(
-                "select exists (select 1 from exception_item where email_id = :id"
-                " and facts ->> 'reason' = :reason)"
-            ),
-            {"id": email_id, "reason": SENDER_NOT_CONFIRMED},
-        ).scalar_one()
-        if flagged:
+        if _already_flagged(db, email_id):
             return
         # The sorting may have opened one already for this email; one is enough (EX-01).
         open_one: bool = db.execute(
@@ -183,14 +176,44 @@ def _flag_refused(engine: Engine, statements: Statements, email_id: int, files: 
     log.warning("Email record %s holds a statement from an unconfirmed sender", email_id)
 
 
+@dataclass(frozen=True)
+class InboxHandover:
+    """What became of the statement files of one Inbox email. ``handled`` is True when the
+    email is a statement from a confirmed sender: every CSV file went to the import, which
+    put any file it could not read in the queue itself, so the email needs no sorting."""
+
+    results: tuple[ImportResult, ...] = ()
+    handled: bool = False
+
+
+def imported_from(connection: Connection, email_id: int) -> bool:
+    """Whether a statement from this email is already recorded."""
+    found: bool = connection.execute(
+        text("select exists (select 1 from bank_statement where source_email_id = :id)"),
+        {"id": email_id},
+    ).scalar_one()
+    return found
+
+
+def _already_flagged(connection: Connection, email_id: int) -> bool:
+    found: bool = connection.execute(
+        text(
+            "select exists (select 1 from exception_item where email_id = :id"
+            " and facts ->> 'reason' = :reason)"
+        ),
+        {"id": email_id, "reason": SENDER_NOT_CONFIRMED},
+    ).scalar_one()
+    return found
+
+
 def hand_over_from_inbox(
     engine: Engine, statements: Statements, email_id: int, raw: bytes
-) -> list[ImportResult]:
+) -> InboxHandover:
     """Hand the CSV files of an email in the Inbox to the import, when its sender is a
-    confirmed statement sender. Safe to repeat. Returns one result per file handed over."""
+    confirmed statement sender. Safe to repeat."""
     files = csv_files(raw)
     if not files:
-        return []
+        return InboxHandover()
     address, passed = _sender(raw)
     confirmed = passed and address in statements.settings.statement_senders
     if not confirmed:
@@ -198,13 +221,18 @@ def hand_over_from_inbox(
         # sorting, as before.
         files = [f for f in files if has_wise_columns(f.data)]
         if not files:
-            return []
+            return InboxHandover()
+        with engine.connect() as connection:
+            if _already_flagged(connection, email_id):
+                # Refused and flagged before: no second refusal in the audit log on every
+                # sweep while the sorting of this email is still pending (code review).
+                return InboxHandover()
     source = StatementSource.email(address, authenticated=passed, email_id=email_id)
     results = _import_all(engine, statements, source, files)
     if not confirmed:
         _flag_refused(engine, statements, email_id, len(files))
     log.info("Email record %s: %d statement files handed over", email_id, len(results))
-    return results
+    return InboxHandover(tuple(results), handled=confirmed)
 
 
 def handed_over_from_folder(connection: Connection, email_id: int) -> bool:

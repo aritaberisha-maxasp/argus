@@ -82,6 +82,7 @@ from argus.intake.statements import (
     hand_over_from_folder,
     hand_over_from_inbox,
     handed_over_from_folder,
+    imported_from,
 )
 from argus.sorting import EmailToSort, LanguageModel, Route, SortingConfig, SortingDecision
 from argus.sorting.gates import gate_labels
@@ -343,20 +344,40 @@ def _current(engine: Engine, record: EmailRecord) -> EmailRecord:
 
 
 def hand_over_statements(
-    engine: Engine, statements: Statements, record: EmailRecord, live: bool
-) -> int:
+    engine: Engine,
+    graph: GraphClient,
+    statements: Statements,
+    record: EmailRecord,
+    live: bool,
+) -> tuple[int, bool]:
     """Hand the statement files of a stored email to the import, right before it is sorted
-    (#166). Runs once per email in practice, because an email is sorted once: classified in
-    live mode, proposed in shadow mode. A run that fails leaves the email unsorted, so the
-    next sweep tries both again; the import adds nothing twice. Returns the files handed over."""
+    (#166). Returns the files handed over and whether the email is done: a statement from a
+    confirmed sender is not sorted, so it never lands in manual review (code review of PR
+    176). In live mode it is moved into the statement folder, where it stays at step stored;
+    in shadow mode it stays in the Inbox, moves nothing and gets no proposal.
+
+    Otherwise this runs once per email in practice, because an email is sorted once. A run
+    that fails leaves the email unsorted, so the next sweep tries both again; the import adds
+    nothing twice."""
     if record.step is not EmailStep.STORED or record.raw_sha256 is None:
-        return 0
-    if not live:
-        with engine.connect() as connection:
-            if has_proposal(connection, record.id):
-                return 0
-    raw = statements.documents.get(record.raw_sha256)
-    return len(hand_over_from_inbox(engine, statements, record.id, raw))
+        return 0, False
+    with engine.connect() as connection:
+        if imported_from(connection, record.id):
+            files, handled = 0, True  # handed over before, only the move may be missing
+        elif not live and has_proposal(connection, record.id):
+            return 0, False
+        else:
+            files, handled = None, False
+    if files is None:
+        raw = statements.documents.get(record.raw_sha256)
+        handover = hand_over_from_inbox(engine, statements, record.id, raw)
+        files, handled = len(handover.results), handover.handled
+    if handled and live:
+        # Outside any unit of work; a move to the folder the email is in changes nothing.
+        folder = Folders(graph).id_of(statements.settings.statement_folder)
+        graph.move(record.graph_message_id, folder)
+        log.info("Email record %s moved to the statement folder", record.id)
+    return files, handled
 
 
 def sweep_statement_folder(
@@ -367,6 +388,10 @@ def sweep_statement_folder(
     handed over and the emails that failed; a failed email is tried again by the next sweep."""
     files = failed = 0
     try:
+        if is_live(engine):
+            # Live, ARGUS creates the folder like its other folders, so the text of the
+            # exception that asks people to move mail there is never wrong (code review).
+            Folders(graph).id_of(statements.settings.statement_folder)
         messages = list(graph.list_statement_folder())
     except Exception:
         log.exception("Statement folder could not be listed, next sweep retries")
@@ -425,7 +450,10 @@ def sweep(
                 record = _current(engine, record)
                 live = is_live(engine)
                 if statements is not None:
-                    result.statement_files += hand_over_statements(engine, statements, record, live)
+                    files, handled = hand_over_statements(engine, graph, statements, record, live)
+                    result.statement_files += files
+                    if handled:
+                        continue
                 if sorting is None:
                     continue
                 if not live:

@@ -297,6 +297,8 @@ def test_a_statement_from_anyone_else_or_failing_the_check_goes_to_the_queue(
 ) -> None:
     fake.state.mailbox.add(statement_email(sender=sender, auth=auth))
 
+    # Swept twice while still unsorted: refused and flagged once, not on every sweep.
+    run_sweep(app, fake, documents, statements_setup)
     run_sweep(app, fake, documents, statements_setup)
 
     assert statements_of(app) == []
@@ -421,6 +423,73 @@ def test_in_live_mode_the_sorting_adds_no_second_exception(
     assert record.route == "manual_review"
     [exception] = open_exceptions(app, email_id(app))
     assert exception.facts["reason"] == SENDER_NOT_CONFIRMED
+
+
+class CountingSureModel:
+    """A model that is sure every email is "other", counting how often it is asked."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def propose(self, email: EmailToSort) -> ModelAnswer:
+        self.calls += 1
+        return ModelAnswer(category=Category.OTHER, confidence=0.99, invoices=(), evidence=())
+
+
+def sure_sorting(documents: MemoryDocumentStore, model: CountingSureModel) -> Sorting:
+    return Sorting(
+        documents=documents,
+        model=model,
+        config=fixture_config(),
+        read=EmailReader(FixtureDocumentReader()),
+    )
+
+
+@pytest.mark.req("BA-01", "IN-09")
+@pytest.mark.usefixtures("live")
+def test_in_live_mode_an_imported_statement_is_not_sorted_and_moves_to_the_folder(
+    app: Engine, fake: FastAPI, documents: MemoryDocumentStore, statements_setup: Statements
+) -> None:
+    model = CountingSureModel()
+    message = fake.state.mailbox.add(statement_email())
+
+    first = run_sweep(app, fake, documents, statements_setup, sure_sorting(documents, model))
+    again = run_sweep(app, fake, documents, statements_setup, sure_sorting(documents, model))
+
+    assert (first.failed, again.failed, first.classified, model.calls) == (0, 0, 0, 0)
+    [statement] = statements_of(app)
+    assert (statement.outcome, statement.source) == ("imported", "email")
+    assert open_exceptions(app, email_id(app)) == []
+    [record] = rows(app, "select step, route from mailbox_email")
+    assert (record.step, record.route) == ("stored", None)
+    assert message.immutable_id in fake.state.mailbox.in_folder(FOLDER)
+
+
+@pytest.mark.req("BA-01", "IN-09")
+def test_in_shadow_mode_an_imported_statement_gets_no_proposal_and_stays_in_the_inbox(
+    app: Engine, fake: FastAPI, documents: MemoryDocumentStore, statements_setup: Statements
+) -> None:
+    model = CountingSureModel()
+    message = fake.state.mailbox.add(statement_email())
+
+    result = run_sweep(app, fake, documents, statements_setup, sure_sorting(documents, model))
+
+    assert (result.failed, result.proposed, model.calls) == (0, 0, 0)
+    assert [s.outcome for s in statements_of(app)] == ["imported"]
+    assert message.immutable_id in fake.state.mailbox.inbox
+    assert fake.state.mailbox.moves == []
+
+
+@pytest.mark.req("BA-01")
+@pytest.mark.usefixtures("live")
+def test_in_live_mode_the_sweep_creates_the_statement_folder(
+    app: Engine, fake: FastAPI, documents: MemoryDocumentStore, statements_setup: Statements
+) -> None:
+    result = run_sweep(app, fake, documents, statements_setup)
+
+    assert result.failed == 0
+    names = {f.name for f in fake.state.mailbox.folders.values()}
+    assert {"ARGUS", "Kontoauszüge"} <= names
 
 
 # 4. The daily statement job.
