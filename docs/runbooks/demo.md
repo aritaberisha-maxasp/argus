@@ -42,6 +42,20 @@ ARGUS picks the emails up on its own: the job `caj-argus-sweep` runs every 5 min
 
 Since shadow mode (#72), a fresh database starts in shadow mode: the sweep only proposes where each email should go and opens no cases. To show sorted emails and cases, a person switches the demo database to live mode before the demo, as #72 describes. A reset starts the demo database in shadow mode again.
 
+### Show where ARGUS sorted the emails
+
+The fake mailbox has no public address, so ARGUS has a read only page for it, in demo mode only (#135): open `https://<argus address>/mailbox` in the same browser tab where you signed in to the queue. If you open it in a new tab, it sends you through the Microsoft sign in once and then back to the mailbox. Benjamin needs the finance or admins group, as for the queue.
+
+The page lists every folder of the fake mailbox, Inbox first, then the ARGUS folders (Incoming invoices, Outgoing invoices, Payment reminders, Manual review, Removed) and Deleted Items, with the subject, sender and received time of each email. It changes nothing in the mailbox. Press **Refresh** to read it again.
+
+When to open it:
+
+1. Right after **reset and seed**, before the sweep runs: all demo emails sit in the Inbox. This is the "before" picture.
+2. After `caj-argus-sweep` has run (in live mode): the Inbox is empty or nearly so and each email is in its ARGUS folder. Point at the invoices in Incoming invoices, the reminder E25 in Payment reminders and the marketing mail E32 in Removed.
+3. After **send one email** and a sweep: the new email moved from the Inbox into its folder.
+
+The page and its data do not exist when demo mode is off, so at go live it disappears on its own. People then look at the real mailbox in Outlook.
+
 ### Show an email arriving
 
 To show Benjamin an email coming in while you watch, drop one more test email into the fake mailbox (#136):
