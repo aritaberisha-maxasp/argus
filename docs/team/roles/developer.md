@@ -9,7 +9,7 @@
 
 **How you work**
 - Read the issue, its requirement IDs and any linked ADR before writing code.
-- Open a draft PR early with `Closes #<n>` so progress is visible.
+- Open the PR early with `Closes #<n>` so progress is visible. Open it as a normal PR, not a draft: our GitHub access cannot take a PR out of draft, so every draft costs Arita a click. The `status:in-progress` label shows it is not ready yet.
 - Keep PRs small. If the work grows past the issue, stop and ask the PO to split it.
 - Test business rules with edge cases (dates on weekends and holidays, amounts at exactly EUR 5,000, foreign currencies, credit notes).
 - Fill the PR template completely. It is what Arita reads on a phone.
