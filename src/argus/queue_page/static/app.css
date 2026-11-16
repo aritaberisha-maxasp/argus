@@ -439,3 +439,24 @@ textarea {
 .mode-switch .problem { margin: 0; font-size: 14px; }
 .mode-switch .problem:empty { display: none; }
 [hidden] { display: none !important; }
+
+/* --- correcting the invoice values (#112) -------------------------------------------------- */
+
+.correction { display: flex; flex-direction: column; gap: 14px; max-width: 520px; }
+.correction .field { display: flex; flex-direction: column; gap: 6px; margin: 0; }
+.correction label { font-size: 13px; color: var(--muted); }
+.correction input {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px;
+  background: var(--page);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font: 14px var(--mono);
+}
+.correction textarea.reason { min-height: 88px; font: 14px var(--sans); }
+.correction .hint { font-size: 13px; }
+.correction .button { align-self: flex-start; }
+.correction [role="status"] { margin: 0; font-size: 14px; }
+.correction [role="status"]:empty { display: none; }

@@ -250,9 +250,10 @@ def move_case(
 
 
 def change_case(connection: Connection, case_id: int, **fields: Any) -> None:
-    """Change data on a case without moving it, for example a corrected amount while it waits
-    for approval. The database refuses changes it does not allow (booking data is frozen after
-    approval) and logs ``case_changed`` with old and new values."""
+    """Change data on a case without moving it, for example the matched DATEV account. The
+    database refuses changes it does not allow (booking data is frozen after approval) and logs
+    ``case_changed`` with old and new values. The number, amount and currency only change
+    through :func:`correct_case` (migration 0013); the database refuses them here."""
     unknown = set(fields) - set(CHANGEABLE)
     if unknown:
         raise ValueError(f"cannot change {', '.join(sorted(unknown))} with change_case")
@@ -265,6 +266,53 @@ def change_case(connection: Connection, case_id: int, **fields: Any) -> None:
     assignments = ", ".join(f"{CHANGEABLE[name]} = :{name}" for name in fields)
     sql = f"update invoice_case set {assignments} where id = :id"  # noqa: S608
     _run(connection, sql, {**fields, "id": case_id})
+
+
+def correct_case(
+    connection: Connection,
+    case_id: int,
+    *,
+    document_number: str,
+    gross_cents: int,
+    currency: str,
+    reason: str,
+    name: str,
+    sign_in_address: str | None = None,
+    exception_id: int | None = None,
+) -> int:
+    """A person corrects the invoice number, gross amount and currency of a case (#112).
+    Returns the correction's ID.
+
+    Run in a unit of work under that person. The database refuses a job as actor, a blank
+    reason and a correction that changes nothing, keeps the old values, puts the new ones on
+    the case and writes ``case_corrected`` into the audit log with the person's name (ADR 0008)
+    and the reason. The duplicate key is cleared, so call
+    :func:`argus.intake.duplicates.flag_if_duplicate` in the same unit of work afterwards.
+    """
+    if isinstance(gross_cents, bool) or not isinstance(gross_cents, int):
+        raise TypeError("gross_cents must be whole cents, use argus.cases.money.to_cents")
+    result = _run(
+        connection,
+        """
+        insert into case_correction (case_id, exception_id, document_number, gross_minor,
+                                     currency, reason, corrected_by_name, corrected_by_address)
+        values (:case_id, :exception_id, :document_number, :gross_minor, :currency, :reason,
+                :name, :address)
+        returning id
+        """,
+        {
+            "case_id": case_id,
+            "exception_id": exception_id,
+            "document_number": document_number,
+            "gross_minor": gross_cents,
+            "currency": currency,
+            "reason": reason,
+            "name": name,
+            "address": sign_in_address,
+        },
+    )
+    correction_id: int = result.scalar_one()
+    return correction_id
 
 
 def open_exception(

@@ -143,6 +143,7 @@ var runIntakeJobs = intakeJobs && appImage != 'mcr.microsoft.com/k8se/quickstart
 var intakeJobNames = {
   sweep: 'caj-${prefix}-sweep'
   removal: 'caj-${prefix}-removal'
+  digest: 'caj-${prefix}-digest'
 }
 
 resource appIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
@@ -230,6 +231,20 @@ module backup 'modules/backup.bicep' = {
     retentionYears: databaseBackupYears
     retentionLocked: retentionLocked
     protectDatabase: databaseBackupProtected
+  }
+}
+
+// Alerts on the long term backups (#115): a failed backup job, or no backup for 8 days. They
+// go to the operations action group, and only once the backups are switched on.
+module backupAlerts 'modules/backup-alerts.bicep' = {
+  name: 'backup-alerts'
+  params: {
+    location: location
+    tags: tags
+    vaultName: backup.outputs.name
+    workspaceId: monitoring.outputs.id
+    actionGroupId: alerts.outputs.actionGroupId
+    watchBackups: databaseBackupProtected
   }
 }
 

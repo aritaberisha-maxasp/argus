@@ -3,7 +3,8 @@
 // The scheduled jobs from ADR 0001 (mailbox sweep, reminders, payment run, bank import,
 // exception digest) run in this environment as Container Apps jobs. Each job story adds its
 // job here once the app has a command for it. Today: the mailbox sweep and the daily removal
-// (#125). The nightly audit copy (#103) follows the same pattern.
+// (#125), and the daily digest of open exceptions (#61). The nightly audit copy (#103) follows
+// the same pattern.
 //
 // Every secret comes from Key Vault through the app's managed identity. The pipeline from #81
 // builds the ARGUS image and passes it in. The very first deploy starts with a public
@@ -60,10 +61,10 @@ param standinNames object
 @description('The fake accounts mailbox, a reserved .example address (RFC 2606).')
 param demoMailbox string
 
-@description('Run the mailbox sweep and the daily removal as scheduled jobs (#125).')
+@description('Run the mailbox sweep, the daily removal and the daily digest as scheduled jobs (#125, #61).')
 param runIntakeJobs bool
 
-@description('Names of the two intake jobs, from main.bicep.')
+@description('Names of the intake jobs, from main.bicep.')
 param intakeJobNames object
 
 @description('Who Max ASP is, for the sorting and the invoice reading. Used only with demo off.')
@@ -150,6 +151,12 @@ var demoSettings = [
   {
     name: 'ARGUS_REMINDER_FORWARD_TO'
     value: 'reminders@maxasp.example'
+  }
+  {
+    // Where the daily digest of open exceptions goes (#61). Live it is Benjamin's address,
+    // set at go live (docs/runbooks/go-live.md).
+    name: 'ARGUS_DIGEST_TO'
+    value: 'digest@maxasp.example'
   }
   {
     name: 'ARGUS_DATEV_URL'
@@ -374,6 +381,21 @@ var intakeJobList = [
     // Once a day at 02:30 UTC, after the nightly audit copy at 01:00 (#103).
     cron: '30 2 * * *'
   }
+  {
+    job: 'digest'
+    // Once a day at 05:00 UTC: 06:00 in Berlin in winter, 07:00 in summer, before the working
+    // day starts (#61). The job sends at most one digest per Berlin date, so a late or second
+    // start sends nothing more.
+    cron: '0 5 * * *'
+  }
+]
+
+// The digest links to the queue page of this app (#61).
+var jobSettings = [
+  {
+    name: 'ARGUS_APP_URL'
+    value: 'https://${app.properties.configuration.ingress.fqdn}'
+  }
 ]
 
 resource intakeJobs 'Microsoft.App/jobs@2024-03-01' = [
@@ -433,6 +455,7 @@ resource intakeJobs 'Microsoft.App/jobs@2024-03-01' = [
               plainSettings,
               demo ? demoSettings : [],
               intakeEnv,
+              jobSettings,
               map(allSecrets, secret => {
                 name: secret.envName
                 secretRef: toLower(secret.secretName)
