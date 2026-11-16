@@ -22,6 +22,7 @@ from argus.cases.store import (
     CaseRuleBroken,
     DuplicateRefused,
     change_case,
+    correct_case,
     create_case,
     get_case,
     move_case,
@@ -68,6 +69,18 @@ def invoice(
             case_key=case_key,
         )
         return case_id, flag_if_duplicate(db, case_id)
+
+
+def correct(db: Connection, case_id: int, **changes: Any) -> None:
+    """A person corrects some of the number, amount and currency; the others stay (#112)."""
+    case = get_case(db, case_id)
+    values = {
+        "document_number": case.document_number,
+        "gross_cents": case.gross_cents,
+        "currency": case.currency,
+        **changes,
+    }
+    correct_case(db, case_id, **values, reason="checked against the invoice", name="A. Clerk")
 
 
 def row_of(app: Engine, case_id: int) -> dict[str, Any]:
@@ -259,8 +272,8 @@ def test_an_amount_a_person_still_has_to_check_gets_its_key_once_confirmed(app: 
     assert first is None
     assert row_of(app, second_id)["duplicate_key"] is None
 
-    with unit_of_work(app, INTAKE) as db:
-        change_case(db, second_id, gross_cents=11900)
+    with unit_of_work(app, CLERK) as db:
+        correct(db, second_id, gross_cents=11900)
         assert flag_if_duplicate(db, second_id) == first_id
 
 
@@ -445,7 +458,7 @@ def test_a_copy_whose_amount_is_confirmed_later_cannot_reach_approval_unchecked(
     copy_a, _ = invoice(app, key, gross_cents=None)
     copy_b, _ = invoice(app, key)
     with unit_of_work(app, CLERK) as db:
-        change_case(db, copy_a, gross_cents=11900)
+        correct(db, copy_a, gross_cents=11900)
 
     with pytest.raises(CaseRuleBroken, match="no duplicate key"):
         walk_to_approval(app, copy_a)
@@ -468,7 +481,7 @@ def test_a_correction_clears_the_key_so_the_case_is_checked_again(
     assert row_of(app, case_id)["duplicate_key"] is not None
 
     with unit_of_work(app, CLERK) as db:
-        change_case(db, case_id, **correction)
+        correct(db, case_id, **correction)
     assert row_of(app, case_id)["duplicate_key"] is None
     with pytest.raises(CaseRuleBroken, match="no duplicate key"):
         walk_to_approval(app, case_id)
@@ -485,7 +498,7 @@ def test_a_copy_at_the_corrected_amount_is_caught(app: Engine) -> None:
     key = f"{issuer()}|RE-94"
     first_id, _ = invoice(app, key, gross_cents=10000)
     with unit_of_work(app, CLERK) as db:
-        change_case(db, first_id, gross_cents=11900)
+        correct(db, first_id, gross_cents=11900)
         flag_if_duplicate(db, first_id)
     assert row_of(app, first_id)["duplicate_key"] == duplicate_key(key, 11900, "EUR")
 
@@ -500,7 +513,7 @@ def test_an_approved_case_whose_key_is_cleared_cannot_be_approved_again_unchecke
     case_id, _ = invoice(app, f"{issuer()}|RE-95")
     walk_to_approval(app, case_id)
     with unit_of_work(app, CLERK) as db:
-        change_case(db, case_id, gross_cents=12000)
+        correct(db, case_id, gross_cents=12000)
 
     with (
         pytest.raises(CaseRuleBroken, match="no duplicate key"),
@@ -515,15 +528,15 @@ def test_a_cleared_case_whose_amount_changes_is_checked_again(app: Engine) -> No
     first_id, _ = invoice(app, key)
     second_id, _ = invoice(app, key, gross_cents=12000)
     with unit_of_work(app, CLERK) as db:
-        change_case(db, second_id, gross_cents=11900)
+        correct(db, second_id, gross_cents=11900)
         assert flag_if_duplicate(db, second_id) == first_id
     [exception] = duplicate_exceptions(app, second_id)
     with unit_of_work(app, CLERK) as db:
         resolve_duplicate(db, exception["id"], confirmed=False, resolution="credit and rebill")
         # Cleared: it holds its own key and is no longer reported as a duplicate.
         assert flag_if_duplicate(db, second_id) is None
-        change_case(db, second_id, gross_cents=12000)
-        change_case(db, second_id, gross_cents=11900)
+        correct(db, second_id, gross_cents=12000)
+        correct(db, second_id, gross_cents=11900)
         # Same amount as the first again: back to the queue, the first link stays.
         assert flag_if_duplicate(db, second_id) == first_id
     assert row_of(app, second_id)["duplicate_of"] == first_id

@@ -17,7 +17,8 @@ its own document and with its own reading:
 Each case is keyed on its issuer plus its invoice number (:func:`case_key`): two vendors that
 both use number 1001 stay two cases. An invoice that already came with another email is
 flagged as a duplicate of the first case (:func:`argus.intake.duplicates.flag_if_duplicate`,
-#31, IN-10).
+#31, IN-10). An invoice whose amount or currency ARGUS could not confirm goes to the exception
+queue, where a person corrects it (:mod:`argus.intake.corrections`, #112).
 
 Only incoming invoices and credit notes get cases here; outgoing invoices are #52's.
 """
@@ -38,6 +39,7 @@ from argus.cases.store import create_case
 from argus.documents.email import attachments_of
 from argus.documents.records import link_document_to_case
 from argus.einvoice import pair, read_einvoices
+from argus.intake.corrections import FIELDS, queue_values_to_check
 from argus.intake.duplicates import flag_if_duplicate
 from argus.intake.email_text import body_of
 from argus.reading.fields import InvoiceReading
@@ -285,9 +287,21 @@ def open_cases(connection: Connection, email_id: int, found: EmailInvoices) -> l
                 link_document_to_case(connection, case_id, document_id)
                 linked.add(document_id)
             _store_reading(connection, case_id, document_id, role, source)
-        flag_if_duplicate(connection, case_id)
+        if flag_if_duplicate(connection, case_id) is None:
+            # No key because the amount or currency is not confirmed: a person corrects it
+            # in the exception queue (#112) instead of the case waiting unseen.
+            queue_values_to_check(connection, case_id, _notes(reading))
         case_ids.append(case_id)
     return case_ids
+
+
+def _notes(reading: InvoiceReading) -> dict[str, str]:
+    """What the reading says about the values a correction sets, for the person."""
+    return {
+        name: found.note
+        for name in FIELDS
+        if (found := reading.fields.get(name)) is not None and found.note
+    }
 
 
 def _gross_cents(reading: InvoiceReading) -> int | None:

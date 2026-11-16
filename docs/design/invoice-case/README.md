@@ -132,7 +132,7 @@ The audit log answers "what happened to this invoice, when, and who did it" for 
 
 Each event has: a running number, the time from the database clock (always, the application cannot give one), the case, email, statement, exception or payment run it belongs to, the event type, who did it (`system` plus job name, or `user` plus Entra object ID, always taken from `argus.actor`, so an approval decision is recorded under the person whose sign in made the request), the status before and after when it changed, and a small JSON with the details.
 
-**What does not go in:** document content, full IBANs (only the last four characters and whether it matched), passwords, tokens or anything from Key Vault, and no free text written for people. The text of an exception and the comment on its resolution stay on the exception itself. The log gets the reason, structured facts (such as `iban_last4`) and a fixed outcome code. The log is kept for ten years, so it holds only what the trace needs (GDPR, NF-03).
+**What does not go in:** document content, full IBANs (only the last four characters and whether it matched), passwords, tokens or anything from Key Vault, and no free text written for people. The text of an exception and the comment on its resolution stay on the exception itself. The log gets the reason, structured facts (such as `iban_last4`) and a fixed outcome code. The log is kept for ten years, so it holds only what the trace needs (GDPR, NF-03). **One exception, on purpose:** when a person makes a decision the law asks us to explain, the log keeps their short reason and their name as they were at that moment (ADR 0008, GoBD). Today that is the switch between shadow and live mode (`intake_mode_changed`, 0012) and a correction of number, amount or currency (`case_corrected`, 0013). The page asks people not to type personal details into that reason.
 
 ### Why nobody can change it
 
@@ -153,7 +153,7 @@ One queue holds everything ARGUS cannot finish on its own (EX-01). An exception 
 
 ### Reasons
 
-The ten reasons from EX-02, plus three that other requirements need:
+The ten reasons from EX-02, plus four that other requirements need:
 
 | Reason | Comes from | Belongs to | How it ends |
 |---|---|---|---|
@@ -171,6 +171,7 @@ The ten reasons from EX-02, plus three that other requirements need:
 | Number sequence gap or duplicate *(added)* | AR-07 | Case | A person confirms the gap is explained or fixes the numbering |
 | Payment failed *(added)* | PY-11 | Case | A person checks the vendor's bank details in DATEV and puts the invoice back in the pool. This is the one reason that may leave Exception somewhere other than where it came from: from Paid or In payment run back to Booked |
 | Customer query *(added)* | Decision on #9 (E44) | Email | A person answers the customer and closes it |
+| Values to check *(added, #112)* | IN-10, PR-01 | Case | A person corrects the invoice number, gross amount and currency with a reason (`data_corrected`), or rejects the invoice. See "Correcting the values" below |
 
 ### How an exception works
 
@@ -180,6 +181,15 @@ The ten reasons from EX-02, plus three that other requirements need:
 - Benjamin is told at once for the reasons the requirements name (BK-06, AR-03, VM-03, BA-06, BA-08) and gets the daily digest of everything still open (EX-03), grouped by reason, oldest first.
 - Benjamin and Arita can resolve exceptions. Approvers cannot. Roles come from Entra groups (ADR 0001).
 - An IBAN mismatch keeps the case out of every payment run until it is resolved, whatever its status was before, because an open exception stops every move. It can only end with the outcome `fixed_in_datev` (the IBAN was changed in DATEV and ARGUS checks again) or `rejected`. The database refuses any other outcome. This is the fraud guard of PR-05 and VM-04 and has no shortcut.
+
+### Correcting the values (#112, migration 0013)
+
+When ARGUS cannot read the gross amount or currency of an incoming invoice or credit note with confidence, the case has no duplicate key, and the database will not send it for approval. The intake therefore puts it in the queue as **values to check**, naming the missing values. Benjamin (finance role) or Arita (admin) opens it on the queue page, opens the invoice under "Files as stored" and enters the invoice number, gross amount and currency as printed, with a short reason.
+
+- The number, amount and currency of any case now change **only** through a correction (`case_correction`). The database refuses a job as actor, a reason shorter than three characters and a correction that changes nothing. It keeps the old values, the person's object ID, their name and sign in address as they were at that moment (ADR 0008), the time and the reason. A correction can never be changed or removed.
+- Every correction is in the audit log as `case_corrected`, with the old and new values, the name and the reason. Only the database writes that event. The usual `case_changed` event is written as well.
+- In the same unit of work the exception is resolved as `data_corrected` (the database refuses that outcome without a correction for it) and `flag_if_duplicate` runs again. A corrected invoice that matches a known one goes to the duplicate exception. Otherwise it gets its key and goes back to Received, ready for approval like any other case.
+- After approval nothing can be corrected (rule 5 in section 2).
 
 ## 5. Duplicate protection
 
