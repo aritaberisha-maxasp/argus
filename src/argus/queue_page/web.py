@@ -8,6 +8,9 @@ Two kinds of routes:
   routes below for the data, sending the access token.
 - **The data** (``/exceptions/...``). Only a signed in person with the finance role (Benjamin)
   or the admin role (Arita) gets it. An approver gets 403, someone without a token 401.
+- **The correction** (``POST /exceptions/{id}/correction``, #112). The same two roles correct
+  the invoice number, amount and currency of a case that waits with values to check. The
+  database keeps who, when and why and refuses a job or a blank reason (migration 0013).
 
 Logs name only IDs, never a sender, subject or file name (NF-03).
 """
@@ -19,17 +22,28 @@ import re
 from collections.abc import Callable
 from dataclasses import asdict
 from datetime import datetime
+from decimal import Decimal
 from importlib.resources import files
 from typing import Annotated, Any
 from urllib.parse import quote
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, Response
+from pydantic import BaseModel
 from sqlalchemy import Engine
 
 from argus.auth import Role, SignedInUser, require_role
 from argus.auth.tokens import LOCAL_HOSTS, TokenVerifier
+from argus.cases.money import to_cents
+from argus.cases.store import CaseRuleBroken, unit_of_work
 from argus.documents.store import DocumentStore
+from argus.intake.corrections import (
+    BadCorrection,
+    CorrectedBy,
+    Correction,
+    NotCorrectable,
+    correct_flagged_values,
+)
 from argus.queue_page.views import (
     ExceptionDetail,
     QueueRow,
@@ -44,17 +58,64 @@ log = logging.getLogger(__name__)
 STATIC = files("argus.queue_page") / "static"
 
 # The page and the files it loads. Fixed files without business data, open like /health.
-PAGE_PATHS = frozenset({"/queue", "/queue/app.js", "/queue/app.css", "/queue/msal-browser.min.js"})
+# The fonts are Geist and Geist Mono (SIL Open Font License, geist.LICENSE), served from here
+# so the page loads nothing from another site (#152).
 _ASSETS = {
     "/queue/app.js": ("app.js", "text/javascript; charset=utf-8"),
     "/queue/app.css": ("app.css", "text/css; charset=utf-8"),
     "/queue/msal-browser.min.js": ("msal-browser.min.js", "text/javascript; charset=utf-8"),
+    "/queue/favicon.svg": ("favicon.svg", "image/svg+xml"),
+    "/queue/favicon-16.svg": ("favicon-16.svg", "image/svg+xml"),
+    "/queue/Geist-Regular.woff2": ("Geist-Regular.woff2", "font/woff2"),
+    "/queue/Geist-Medium.woff2": ("Geist-Medium.woff2", "font/woff2"),
+    "/queue/Geist-SemiBold.woff2": ("Geist-SemiBold.woff2", "font/woff2"),
+    "/queue/GeistMono-Regular.woff2": ("GeistMono-Regular.woff2", "font/woff2"),
+    "/queue/GeistMono-Medium.woff2": ("GeistMono-Medium.woff2", "font/woff2"),
+    "/queue/geist.LICENSE": ("geist.LICENSE", "text/plain; charset=utf-8"),
 }
+PAGE_PATHS = frozenset({"/queue"} | set(_ASSETS))
 
 # Benjamin works the queue (#18, question 6); Arita runs ARGUS. Approvers do not see it.
 QueueReader = Annotated[SignedInUser, Depends(require_role(Role.FINANCE, Role.ADMIN))]
 
 _SAFE_CONTENT_TYPE = re.compile(r"^[a-z0-9][a-z0-9.+-]*/[a-z0-9][a-z0-9.+-]*$")
+
+# An amount as a person types it: 1190, 1190.00 or 1190,00. A credit note may carry a minus as
+# printed; an incoming invoice may not (checked against the case kind).
+# No thousands separators, so "1.190" is never read as 1.19 or 1190 by mistake.
+_AMOUNT = re.compile(r"^-?\d{1,12}(?:[.,]\d{1,2})?$")
+
+
+class CorrectionForm(BaseModel):
+    """What the person enters on the queue page (#112). Checked again by the database."""
+
+    document_number: str
+    gross_amount: str
+    currency: str
+    reason: str
+
+
+def parse_correction(form: CorrectionForm) -> Correction:
+    """The form as a correction, or ValueError with a sentence for the person."""
+    number = form.document_number.strip()
+    if not 1 <= len(number) <= 100 or "|" in number:
+        raise ValueError("Enter the invoice number as printed on the invoice.")
+    amount = form.gross_amount.strip().replace(" ", "")
+    if not _AMOUNT.match(amount):
+        raise ValueError(
+            "Enter the gross amount without thousands separators and with at most two"
+            " decimals, for example 1190,00."
+        )
+    cents = to_cents(Decimal(amount.replace(",", ".")))
+    if cents == 0:
+        raise ValueError("The gross amount cannot be zero.")
+    currency = form.currency.strip().upper()
+    if not re.fullmatch(r"[A-Z]{3}", currency):
+        raise ValueError("Enter the currency as its three letter code, for example EUR.")
+    reason = form.reason.strip()
+    if not 3 <= len(reason) <= 500:
+        raise ValueError("Say briefly why you correct the values (3 to 500 characters).")
+    return Correction(number, cents, currency, reason)
 
 
 def _page_headers() -> dict[str, str]:
@@ -63,6 +124,7 @@ def _page_headers() -> dict[str, str]:
     return {
         "Content-Security-Policy": (
             "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
+            "font-src 'self'; "
             f"connect-src 'self' {login}; frame-src {login}; base-uri 'none'; "
             "form-action 'none'; frame-ancestors 'none'"
         ),
@@ -179,6 +241,53 @@ def install_queue_page(
         log.info("user %s opened exception %s", user.object_id, exception_id)
         return _json(body)
 
+    @app.post("/exceptions/{exception_id}/correction")
+    def correct_values(exception_id: int, form: CorrectionForm, user: QueueReader) -> Response:
+        """Correct the invoice number, gross amount and currency of a case with values to check,
+        then check it for duplicates again (#112, EX-01, IN-10)."""
+        try:
+            correction = parse_correction(form)
+        except ValueError as problem:
+            return _json({"problem": str(problem)}, status.HTTP_422_UNPROCESSABLE_ENTITY)
+        by = CorrectedBy(user.actor, user.name, user.sign_in_address)
+        try:
+            with unit_of_work(engine(), user.actor) as db:
+                done = correct_flagged_values(db, exception_id, correction, by)
+        except BadCorrection as problem:
+            return _json({"problem": str(problem)}, status.HTTP_422_UNPROCESSABLE_ENTITY)
+        except NotCorrectable:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND, "no open exception with values to check"
+            ) from None
+        except CaseRuleBroken as refusal:
+            # The database's sentence names IDs only, never the values or the reason.
+            log.warning(
+                "user %s: correction for exception %s refused (%s)",
+                user.object_id,
+                exception_id,
+                type(refusal).__name__,
+            )
+            return _json(
+                {"problem": f"ARGUS refused the correction: {refusal}."},
+                status.HTTP_409_CONFLICT,
+            )
+        log.info(
+            "user %s corrected case %s (exception %s, correction %s, duplicate of %s)",
+            user.object_id,
+            done.case_id,
+            exception_id,
+            done.correction_id,
+            done.duplicate_of,
+        )
+        return _json(
+            {
+                "case_id": done.case_id,
+                "correction_id": done.correction_id,
+                "duplicate_of": done.duplicate_of,
+                "outcome": "duplicate" if done.duplicate_of is not None else "continues",
+            }
+        )
+
     @app.get("/exceptions/{exception_id}/files/{document_id}")
     def download_file(exception_id: int, document_id: int, user: QueueReader) -> Response:
         """One file of the exception's email, exactly as stored (#20). Always as a download,
@@ -229,7 +338,10 @@ def install_queue_page(
         )
 
 
-def _json(body: dict[str, Any]) -> Response:
+def _json(body: dict[str, Any], status_code: int = status.HTTP_200_OK) -> Response:
     return Response(
-        json.dumps(body, default=str), media_type="application/json", headers=_data_headers()
+        json.dumps(body, default=str),
+        status_code=status_code,
+        media_type="application/json",
+        headers=_data_headers(),
     )

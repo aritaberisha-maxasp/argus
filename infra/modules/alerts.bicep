@@ -1,11 +1,11 @@
 // Operations alerts: tell Arita when a scheduled job fails or stops running (#125).
 //
-// One action group emails the address from the GitHub variable ARGUS_ALERT_EMAIL. Other
-// operations alerts (the nightly audit copy job from #103, the backup alerts from #115) add
-// their rules to the same group.
+// One action group emails the address from the GitHub variable ARGUS_ALERT_EMAIL. Every
+// operations alert sends to it: the intake jobs (#125), the nightly audit copy (#103) and
+// later the backup alerts (#115).
 //
-// The intake jobs end every run with one log line, `argus-job ok <job>` or
-// `argus-job failed <job>` (src/argus/intake/jobs.py). The rules read those lines from the Log
+// The scheduled jobs end every run with one log line, `argus-job ok <job>` or
+// `argus-job failed <job>` (src/argus/logsafe.py). The rules read those lines from the Log
 // Analytics workspace the Container Apps environment writes to:
 // - a failed line: the run failed, or an email in it failed;
 // - no ok line for too long: the job crashed before it could log, did not start, or its
@@ -31,8 +31,14 @@ param workspaceId string
 @description('Watch the intake jobs. Off while the jobs are off, so a job that does not exist never raises a "no run" alert.')
 param watchIntakeJobs bool
 
-@description('Names of the intake jobs by job, from main.bicep: sweep and removal.')
+@description('Names of the intake jobs by job, from main.bicep: sweep, removal and digest.')
 param intakeJobNames object
+
+@description('Watch the nightly audit copy job (#103). Off while the job is off.')
+param watchAuditJob bool
+
+@description('Name of the nightly audit copy job, from main.bicep.')
+param auditJobName string
 
 resource actionGroup 'Microsoft.Insights/actionGroups@2023-01-01' = {
   name: actionGroupName
@@ -98,6 +104,26 @@ var intakeRules = [
     operator: 'LessThan'
     threshold: 1
   }
+  {
+    job: 'digest'
+    kind: 'failed'
+    description: 'The daily digest of open exceptions failed, or its saved draft was gone or changed and nothing was sent. The next day tries again.'
+    query: 'ContainerAppConsoleLogs_CL | where Log_s contains "argus-job failed digest"'
+    frequency: 'PT1H'
+    window: 'PT2H'
+    operator: 'GreaterThan'
+    threshold: 0
+  }
+  {
+    job: 'digest'
+    kind: 'silent'
+    description: 'The daily digest of open exceptions has not finished in the last 26 hours.'
+    query: 'ContainerAppConsoleLogs_CL | where TimeGenerated > ago(26h) | where Log_s contains "argus-job ok digest"'
+    frequency: 'PT1H'
+    window: 'P2D'
+    operator: 'LessThan'
+    threshold: 1
+  }
 ]
 
 resource intakeAlerts 'Microsoft.Insights/scheduledQueryRules@2023-12-01' = [
@@ -130,6 +156,69 @@ resource intakeAlerts 'Microsoft.Insights/scheduledQueryRules@2023-12-01' = [
         ]
       }
       // Fires once while the problem lasts and clears on its own once runs are clean again.
+      autoMitigate: true
+      actions: {
+        actionGroups: [
+          actionGroup.id
+        ]
+      }
+    }
+  }
+]
+
+// The nightly audit copy (#103). A failed run has normally put an item in the exception queue,
+// but when the database cannot be reached it cannot, and then this alert is the only sign
+// (review of PR 102). The job runs at 01:00 UTC.
+var auditRules = [
+  {
+    kind: 'failed'
+    description: 'The nightly audit copy or its check failed. Look in the exception queue; if nothing is there, the job could not reach the database. The next night tries again.'
+    query: 'ContainerAppConsoleLogs_CL | where Log_s contains "argus-job failed audit-copy"'
+    frequency: 'PT1H'
+    window: 'PT2H'
+    operator: 'GreaterThan'
+    threshold: 0
+  }
+  {
+    kind: 'silent'
+    description: 'The nightly audit copy has not finished in the last 26 hours.'
+    query: 'ContainerAppConsoleLogs_CL | where TimeGenerated > ago(26h) | where Log_s contains "argus-job ok audit-copy"'
+    frequency: 'PT1H'
+    window: 'P2D'
+    operator: 'LessThan'
+    threshold: 1
+  }
+]
+
+resource auditAlerts 'Microsoft.Insights/scheduledQueryRules@2023-12-01' = [
+  for rule in auditRules: if (watchAuditJob) {
+    name: 'alert-${auditJobName}-${rule.kind}'
+    location: location
+    tags: tags
+    properties: {
+      displayName: 'alert-${auditJobName}-${rule.kind}'
+      description: rule.description
+      severity: 2
+      enabled: true
+      scopes: [
+        workspaceId
+      ]
+      evaluationFrequency: rule.frequency
+      windowSize: rule.window
+      criteria: {
+        allOf: [
+          {
+            query: rule.query
+            timeAggregation: 'Count'
+            operator: rule.operator
+            threshold: rule.threshold
+            failingPeriods: {
+              numberOfEvaluationPeriods: 1
+              minFailingPeriodsToAlert: 1
+            }
+          }
+        ]
+      }
       autoMitigate: true
       actions: {
         actionGroups: [

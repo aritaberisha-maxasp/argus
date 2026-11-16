@@ -33,7 +33,8 @@ param retentionLocked bool
 @description('Start the long term backup. Only after the vault identity has its two roles.')
 param protectDatabase bool
 
-// Weekly, Sunday 01:00 UTC, after the nightly audit copy (#83) and well before office hours.
+// Weekly, Sunday 01:00 UTC, at the same time as the nightly audit copy (#103), which only
+// reads the database, and well before office hours.
 // The generally available long term backup takes at most one backup a week.
 var weeklySchedule = 'R/2026-11-08T01:00:00+00:00/P1W'
 
@@ -66,6 +67,13 @@ resource vault 'Microsoft.DataProtection/backupVaults@2024-04-01' = {
       softDeleteSettings: {
         state: retentionLocked ? 'AlwaysOn' : 'On'
         retentionDurationInDays: 14
+      }
+    }
+    // A failed backup or restore job raises a built in Azure Monitor alert. backup-alerts.bicep
+    // sends those alerts to the operations action group (#115).
+    monitoringSettings: {
+      azureMonitorAlertSettings: {
+        alertsForAllJobFailures: 'Enabled'
       }
     }
   }

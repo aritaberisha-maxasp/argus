@@ -10,6 +10,7 @@ back at the end, so the shared log stays whole for the other tests.
 """
 
 import json
+import logging
 import re
 import uuid
 from collections.abc import Iterator
@@ -771,9 +772,19 @@ def test_only_the_audit_reasons_may_have_no_case_email_or_statement(app: Engine)
 
 @pytest.mark.req("NF-01")
 def test_the_job_exits_with_1_when_something_failed(
-    app: Engine, copies: AzureCopyStore, database_url: str, monkeypatch: pytest.MonkeyPatch
+    app: Engine,
+    copies: AzureCopyStore,
+    database_url: str,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     monkeypatch.setenv("ARGUS_DATABASE_URL", database_url)
 
-    assert main(["--night", f"{N1}"], store=copies) == 0
-    assert main(["--night", f"{N2}"], store=FailingStore(copies)) == 1
+    with caplog.at_level(logging.INFO):
+        assert main(["--night", f"{N1}"], store=copies) == 0
+        assert main(["--night", f"{N2}"], store=FailingStore(copies)) == 1
+    # One outcome line per run, which the Azure alerts watch (#103).
+    assert [r.getMessage() for r in caplog.records if r.getMessage().startswith("argus-job")] == [
+        "argus-job ok audit-copy",
+        "argus-job failed audit-copy",
+    ]
