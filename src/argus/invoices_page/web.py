@@ -12,8 +12,13 @@ Like the exception queue page (#126), there are two kinds of routes:
   (Benjamin) and the admin role (Arita) see every case. An approver gets 403 here: approvers
   will see their own cases once #34 and #38 say who approves what. Someone without a token
   gets 401.
+- **Resolving an exception** (``GET /exceptions/{id}/choices`` and
+  ``POST /exceptions/{id}/resolution``, EX-01). The same two roles see how an open exception of
+  a case can end and pick one with a short comment. See ``argus.invoices_page.resolve`` for
+  which endings are offered; the database checks each one again and records who and when.
 
-Logs name only the person's ID and counts, never a vendor, customer or search word (NF-03).
+Logs name only the person's ID, case and exception IDs, counts and outcome codes, never a
+vendor, customer, search word or comment (NF-03).
 """
 
 import html
@@ -25,14 +30,24 @@ from datetime import date
 from importlib.resources import files
 from typing import Annotated, Any
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import Engine
 
 from argus.auth import Role, SignedInUser, require_role
 from argus.auth.tokens import TokenVerifier
-from argus.cases.model import CaseKind, CaseStatus
+from argus.cases.model import CaseKind, CaseStatus, Outcome
+from argus.cases.store import CaseRuleBroken, unit_of_work
+from argus.invoices_page.resolve import (
+    MAX_COMMENT,
+    AlreadyResolved,
+    BadResolution,
+    NotResolvable,
+    OpenCaseException,
+    open_case_exception,
+    resolve_from_page,
+)
 from argus.invoices_page.views import (
     MAX_ROWS,
     MAX_SEARCH,
@@ -74,6 +89,16 @@ class CaseQuery(BaseModel):
     received_to: date | None = None
 
 
+class ResolutionForm(BaseModel):
+    """How the person ends the exception, and why. Checked again by the database."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    outcome: Outcome
+    # Longer than the stored limit, so a long comment gets the plain sentence, not a 422 list.
+    comment: Annotated[str, Field(max_length=MAX_COMMENT * 4)]
+
+
 def render_page(verifier: TokenVerifier | None) -> str:
     """The page with the same sign in settings as the queue page."""
     meta = "\n".join(
@@ -103,6 +128,39 @@ def list_json(found: CaseList) -> dict[str, Any]:
         "truncated": found.truncated,
         "limit": MAX_ROWS,
     }
+
+
+def choices_json(found: OpenCaseException) -> dict[str, Any]:
+    return {
+        "exception_id": found.exception_id,
+        "case_id": found.case_id,
+        "kind": found.kind.value,
+        "reason": found.reason.value,
+        "reason_text": found.reason_text,
+        "detail": found.detail,
+        "resume_status": found.resume_status.value if found.resume_status else None,
+        "resume_text": STATUS_TEXT[found.resume_status] if found.resume_status else None,
+        "others_open": found.others_open,
+        "choices": [
+            {
+                "outcome": c.outcome.value,
+                "label": c.label,
+                "explain": c.explain,
+                "closes": c.closes.value if c.closes else None,
+            }
+            for c in found.choices
+        ],
+        "note": found.note,
+    }
+
+
+def _json(body: dict[str, Any], status_code: int = status.HTTP_200_OK) -> Response:
+    return Response(
+        json.dumps(body, default=str),
+        status_code=status_code,
+        media_type="application/json",
+        headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
+    )
 
 
 def install_invoices_page(app: FastAPI, engine: Callable[[], Engine]) -> None:
@@ -142,8 +200,65 @@ def install_invoices_page(app: FastAPI, engine: Callable[[], Engine]) -> None:
             found.total,
             "yes" if filters != CaseFilter() else "no",
         )
-        return Response(
-            json.dumps(list_json(found), default=str),
-            media_type="application/json",
-            headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
+        return _json(list_json(found))
+
+    @app.get("/exceptions/{exception_id}/choices")
+    def exception_choices(exception_id: int, user: CaseReader) -> Response:
+        """How this open exception of a case can end from the page (EX-01)."""
+        try:
+            with engine().connect() as connection:
+                found = open_case_exception(connection, exception_id)
+        except NotResolvable:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "no open exception of a case") from None
+        log.info(
+            "user %s looked at how exception %s of case %s can end (%d choices)",
+            user.object_id,
+            exception_id,
+            found.case_id,
+            len(found.choices),
+        )
+        return _json(choices_json(found))
+
+    @app.post("/exceptions/{exception_id}/resolution")
+    def resolve(exception_id: int, form: ResolutionForm, user: CaseReader) -> Response:
+        """Resolve one open exception of a case as the person chose, with their comment.
+        The case carries on or closes in the same transaction (EX-01)."""
+        try:
+            with unit_of_work(engine(), user.actor) as db:
+                done = resolve_from_page(db, exception_id, form.outcome, form.comment)
+        except BadResolution as problem:
+            return _json({"problem": str(problem)}, status.HTTP_422_UNPROCESSABLE_ENTITY)
+        except NotResolvable:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "no open exception of a case") from None
+        except AlreadyResolved:
+            return _json(
+                {"problem": "Someone resolved this exception a moment ago. Reload the list."},
+                status.HTTP_409_CONFLICT,
+            )
+        except CaseRuleBroken as refusal:
+            # The database's sentence names IDs only, never the comment.
+            log.warning(
+                "user %s: resolving exception %s as %s refused (%s)",
+                user.object_id,
+                exception_id,
+                form.outcome.value,
+                type(refusal).__name__,
+            )
+            return _json({"problem": f"ARGUS refused this: {refusal}."}, status.HTTP_409_CONFLICT)
+        log.info(
+            "user %s resolved exception %s of case %s as %s (case now %s)",
+            user.object_id,
+            exception_id,
+            done.case_id,
+            done.outcome.value,
+            done.case_status.value,
+        )
+        return _json(
+            {
+                "case_id": done.case_id,
+                "outcome": done.outcome.value,
+                "case_status": done.case_status.value,
+                "case_status_text": STATUS_TEXT[done.case_status],
+                "others_open": done.others_open,
+            }
         )

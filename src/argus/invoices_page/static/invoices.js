@@ -3,7 +3,9 @@
 // Lists every case with its status, vendor or customer, amount and dates, newest first, with
 // filters for status, kind, a search word and the day it came in. Status, kind and dates live
 // in the address (/invoices?status=booked), so a link opens the same list and the back button
-// works. A case with an open exception links to it in the exception queue.
+// works. A case with an open exception links to it in the exception queue and has a Resolve
+// button: the person picks how the exception ends, from the endings ARGUS offers for it, and
+// says why in a short comment (EX-01). ARGUS and its database check the choice again.
 //
 // Sign in goes through the exception queue page, the one address registered in Entra
 // (docs/operations/sign-in.md), like the mailbox page (#135). Everything from the server is put
@@ -182,6 +184,31 @@
     throw new Error("ARGUS could not answer right now (" + response.status + "). Try again in a moment.");
   }
 
+  // Asks ARGUS for JSON with the person's token. A refusal with a sentence for the person
+  // (422, 409) shows that sentence.
+  async function call(token, path, body) {
+    const response = await fetch(path, {
+      method: body === undefined ? "GET" : "POST",
+      headers: Object.assign({ Authorization: "Bearer " + (await token()) },
+        body === undefined ? {} : { "Content-Type": "application/json" }),
+      body: body === undefined ? undefined : JSON.stringify(body),
+      cache: "no-store",
+    });
+    if (response.ok) return response.json();
+    if (response.status === 401) {
+      sessionStorage.removeItem(DEV_TOKEN_KEY);
+      throw new Error("Your sign in has run out. Reload the page to sign in again.");
+    }
+    if (response.status === 403) throw new Error("Your account may not resolve exceptions. Ask Arita if you need it.");
+    if (response.status === 404) throw new Error("This exception is no longer open. Reload the list.");
+    if (response.status === 422 || response.status === 409) {
+      let problem = "";
+      try { problem = (await response.json()).problem || ""; } catch (e) { /* no sentence */ }
+      throw new Error(problem || "ARGUS did not accept this. Check it and try again.");
+    }
+    throw new Error("ARGUS could not answer right now (" + response.status + "). Try again in a moment.");
+  }
+
   // --- the filters ----------------------------------------------------------------------
 
   // Status, kind and dates live in the address. The search word does not: the address goes
@@ -206,7 +233,7 @@
     return "/invoices" + (query.toString() ? "?" + query.toString() : "");
   }
 
-  const state = { token: null, filters: filtersFromAddress(), ticket: 0, data: null };
+  const state = { token: null, filters: filtersFromAddress(), ticket: 0, data: null, open: null, done: "" };
   const view = { heading: null, figures: null, tabs: null, list: null, note: null, form: null };
 
   function field(labelText, input) {
@@ -379,6 +406,10 @@
     } else {
       view.note.textContent = shown === 1 ? "1 invoice" : shown + " invoices";
     }
+    if (state.done) {
+      view.note.textContent = state.done + " " + view.note.textContent;
+      state.done = "";
+    }
 
     if (!shown) {
       const filtered = FILTERS.some((name) => state.filters[name]);
@@ -406,6 +437,7 @@
     }
     head.append(headRow);
     const body = el("tbody");
+    state.open = null;
     for (const c of cases) body.append(caseRow(c));
     t.append(head, body);
     return t;
@@ -443,6 +475,13 @@
         status.append(link);
       }
       if (c.resume_status) status.append(el("span", "Goes back to " + words(c.resume_status), "sub"));
+      if (c.exception_id !== null) {
+        const resolve = el("button", "Resolve", "button small");
+        resolve.type = "button";
+        resolve.setAttribute("aria-expanded", "false");
+        resolve.addEventListener("click", () => toggleResolve(tr, resolve, c));
+        status.append(resolve);
+      }
     } else if (c.status === "closed" && c.closed_reason) {
       status.append(el("span", CLOSED_REASONS[c.closed_reason] || words(c.closed_reason), "sub"));
     }
@@ -461,6 +500,128 @@
       cell("Due", "mono", readDay(c.due_date))
     );
     return tr;
+  }
+
+  // --- resolving an exception -------------------------------------------------------------
+
+  // Opens the resolve panel under the case's row, or closes it. One panel at a time.
+  function toggleResolve(tr, button, c) {
+    const wasOpen = state.open && state.open.button === button;
+    if (state.open) {
+      state.open.row.remove();
+      state.open.button.setAttribute("aria-expanded", "false");
+      state.open = null;
+    }
+    if (wasOpen) return;
+    const row = el("tr", null, "resolve-row");
+    const td = el("td", null, "resolve-cell");
+    td.colSpan = COLUMNS.length;
+    const panel = el("div", null, "resolve");
+    panel.id = "resolve-" + c.exception_id;
+    panel.setAttribute("aria-label", "Resolve the exception of case " + c.case_id);
+    panel.setAttribute("role", "region");
+    panel.append(el("p", "Loading…", "muted"));
+    td.append(panel);
+    row.append(td);
+    tr.after(row);
+    button.setAttribute("aria-expanded", "true");
+    button.setAttribute("aria-controls", panel.id);
+    state.open = { row, button };
+    loadChoices(panel, c, () => toggleResolve(tr, button, c));
+  }
+
+  async function loadChoices(panel, c, close) {
+    try {
+      const x = await call(state.token, "/exceptions/" + encodeURIComponent(c.exception_id) + "/choices");
+      panel.replaceChildren(...resolveForm(x, close));
+    } catch (e) {
+      panel.replaceChildren(el("p", e.message, "problem"));
+    }
+  }
+
+  function resolveForm(x, close) {
+    const parts = [];
+    parts.push(el("h3", x.reason_text, "resolve-title"));
+    if (x.detail) parts.push(el("p", x.detail, "resolve-detail"));
+    if (x.resume_text) parts.push(el("p", "Before the exception the case was " + x.resume_text.toLowerCase() + ".", "muted"));
+    if (x.note) {
+      const note = el("p", x.note + " ", "muted");
+      const link = el("a", "Open in the exception queue");
+      link.href = "/queue?exception=" + encodeURIComponent(x.exception_id);
+      note.append(link);
+      parts.push(note);
+    }
+    const cancel = el("button", "Cancel", "button");
+    cancel.type = "button";
+    cancel.addEventListener("click", close);
+    if (!x.choices.length) {
+      parts.push(cancel);
+      return parts;
+    }
+
+    const form = el("form", null, "resolve-form");
+    const set = el("fieldset", null, "choices");
+    set.append(el("legend", "How does it end?"));
+    const name = "outcome-" + x.exception_id;
+    x.choices.forEach((choice, i) => {
+      const id = name + "-" + i;
+      const input = el("input");
+      input.type = "radio";
+      input.name = name;
+      input.id = id;
+      input.value = choice.outcome;
+      input.required = true;
+      const label = el("label", null, "choice" + (choice.closes ? " closes" : ""));
+      label.htmlFor = id;
+      label.append(el("span", choice.label, "choice-label"), el("span", choice.explain, "sub"));
+      const line = el("div", null, "choice-line");
+      line.append(input, label);
+      set.append(line);
+    });
+
+    const comment = el("textarea", null, "comment");
+    comment.id = "comment-" + x.exception_id;
+    comment.required = true;
+    comment.minLength = 3;
+    comment.maxLength = 500;
+    const commentLabel = el("label", "Why (3 to 500 characters, no personal details)");
+    commentLabel.htmlFor = comment.id;
+    const commentRow = el("p", null, "field");
+    commentRow.append(commentLabel, comment);
+
+    const save = el("button", "Resolve", "button primary");
+    save.type = "submit";
+    const buttons = el("div", null, "resolve-buttons");
+    buttons.append(save, cancel);
+    const result = el("p");
+    result.setAttribute("role", "status");
+
+    form.append(set, commentRow, buttons, result);
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const picked = form.querySelector('input[name="' + name + '"]:checked');
+      if (!picked) {
+        result.className = "problem";
+        result.textContent = "Pick how the exception ends.";
+        return;
+      }
+      save.disabled = true;
+      result.className = "muted";
+      result.textContent = "Saving…";
+      try {
+        const answer = await call(state.token, "/exceptions/" + encodeURIComponent(x.exception_id) + "/resolution",
+          { outcome: picked.value, comment: comment.value });
+        state.done = "Case " + answer.case_id + " is resolved and now " + answer.case_status_text.toLowerCase() + "." +
+          (answer.others_open ? " It has another open exception." : "");
+        await refresh();
+      } catch (e) {
+        result.className = "problem";
+        result.textContent = e.message;
+        save.disabled = false;
+      }
+    });
+    parts.push(form);
+    return parts;
   }
 
   // The fake mailbox page exists only in demo mode (#135). Its stylesheet is a fixed public

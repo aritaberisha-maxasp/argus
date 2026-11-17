@@ -14,7 +14,8 @@ from sqlalchemy import Engine
 
 from argus.app import PUBLIC_PATHS, create_app
 from argus.auth import Role
-from argus.cases.model import CaseStatus
+from argus.cases.model import CaseKind, CaseStatus, ClosedReason, ExceptionReason, Outcome
+from argus.invoices_page.resolve import BadResolution, choices_for, clean_comment
 from argus.invoices_page.views import STATUS_TEXT, _like
 from argus.invoices_page.web import DATA_PATH, PAGE_PATHS, STATIC, CaseQuery
 from standins.entra.app import FakeEntra
@@ -186,3 +187,100 @@ def test_an_unknown_filter_is_refused() -> None:
     with pytest.raises(ValueError):
         CaseQuery.model_validate({"q": "x" * 101})
     assert CaseQuery.model_validate({}) == CaseQuery()
+
+
+# Resolving an exception from the page (EX-01)
+
+
+@pytest.mark.req("EX-01")
+def test_an_approver_or_someone_without_a_token_cannot_resolve(
+    entra: FakeEntra, client: TestClient
+) -> None:
+    approver = bearer(entra.token(ALICE, roles=[Role.APPROVER]))
+    body = {"outcome": "rejected", "comment": "not ours"}
+
+    assert client.get("/exceptions/1/choices", headers=approver).status_code == 403
+    assert client.post("/exceptions/1/resolution", json=body, headers=approver).status_code == 403
+    assert client.get("/exceptions/1/choices").status_code == 401
+    assert client.post("/exceptions/1/resolution", json=body).status_code == 401
+
+
+@pytest.mark.req("EX-01")
+def test_an_unknown_outcome_or_extra_field_is_refused_before_the_database(
+    entra: FakeEntra, client: TestClient
+) -> None:
+    finance = bearer(entra.token(BENJAMIN, roles=[Role.FINANCE]))
+    path = "/exceptions/1/resolution"
+
+    for body in (
+        {"outcome": "paid", "comment": "not ours"},
+        {"outcome": "rejected"},
+        {"outcome": "rejected", "comment": "not ours", "case_to": "closed"},
+    ):
+        assert client.post(path, json=body, headers=finance).status_code == 422
+
+
+@pytest.mark.req("EX-01")
+@pytest.mark.parametrize("reason", list(ExceptionReason))
+def test_every_reason_has_safe_endings(reason: ExceptionReason) -> None:
+    for kind in CaseKind:
+        for resume in [*CaseStatus, None]:
+            for others in (0, 1):
+                offered = choices_for(reason, kind, resume, others)
+                outcomes = [c.outcome for c in offered]
+                assert len(set(outcomes)) == len(outcomes)
+                closing = [c for c in offered if c.closes]
+                if closing:
+                    # Only an incoming invoice or credit note that has not been booked or paid
+                    # closes, and only when nothing else is open on it.
+                    assert kind in (CaseKind.INCOMING_INVOICE, CaseKind.INCOMING_CREDIT_NOTE)
+                    assert resume not in (
+                        CaseStatus.BOOKED,
+                        CaseStatus.IN_PAYMENT_RUN,
+                        CaseStatus.PAID,
+                    )
+                    assert others == 0
+                # The database rules of migrations 0002, 0010 and 0013 for these reasons.
+                if reason is ExceptionReason.IBAN_MISMATCH:
+                    assert outcomes in ([], [Outcome.REJECTED])
+                if reason is ExceptionReason.VALUES_TO_CHECK:
+                    assert outcomes in ([], [Outcome.REJECTED])
+                if reason is ExceptionReason.DUPLICATE:
+                    assert set(outcomes) <= {
+                        Outcome.CONFIRMED_DUPLICATE,
+                        Outcome.NOT_A_DUPLICATE,
+                        Outcome.REJECTED,
+                    }
+                if reason is ExceptionReason.PAYMENT_FAILED:
+                    assert outcomes == []
+                assert Outcome.DATA_CORRECTED not in outcomes  # only through a correction
+
+
+@pytest.mark.req("EX-01")
+def test_a_plain_exception_on_a_new_invoice_can_carry_on_or_be_rejected() -> None:
+    offered = choices_for(
+        ExceptionReason.UNKNOWN_VENDOR, CaseKind.INCOMING_INVOICE, CaseStatus.RECEIVED, 0
+    )
+
+    assert [c.outcome for c in offered] == [Outcome.ACCEPTED_WITH_COMMENT, Outcome.REJECTED]
+    assert offered[-1].closes is ClosedReason.REJECTED
+
+
+@pytest.mark.req("EX-01", "NF-03")
+@pytest.mark.parametrize("comment", ["", "   ", "ab", "x" * 501])
+def test_a_comment_is_needed_and_short(comment: str) -> None:
+    with pytest.raises(BadResolution, match="Leave out personal details"):
+        clean_comment(comment)
+
+
+def test_a_comment_is_kept_without_surrounding_spaces() -> None:
+    assert clean_comment("  Checked with the vendor  ") == "Checked with the vendor"
+
+
+def test_the_resolve_panel_puts_server_text_on_the_page_only_as_text() -> None:
+    page = script()
+    start = page.index("function resolveForm")
+    part = page[start : page.index("// The fake mailbox page", start)]
+
+    assert "innerHTML" not in part and "insertAdjacentHTML" not in part
+    assert "x.detail" in part and "textContent" in page
