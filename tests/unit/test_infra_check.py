@@ -203,7 +203,9 @@ def alerts() -> dict[str, Any]:
 # The "no backup" query from infra/modules/backup-alerts.bicep: Monday, the day after the
 # Sunday backup.
 NO_BACKUP_QUERY = (
-    "union isfuzzy=true (datatable(TimeGenerated: datetime)[]), (AddonAzureBackupJobs) "
+    "union isfuzzy=true (datatable(TimeGenerated: datetime, JobOperation: string, "
+    "JobStatus: string)[]), (AddonAzureBackupJobs) "
+    "| where TimeGenerated > ago(2d) "
     '| where JobOperation == "Backup" and JobStatus startswith "Completed" '
     "| summarize completed = count() "
     "| where completed == 0 and dayofweek(now()) == 1d and hourofday(now()) == 23"
@@ -255,12 +257,34 @@ def backup_alerts() -> dict[str, Any]:
                 "name": "alert-bvault-argus-no-backup",
                 "location": "[parameters('location')]",
                 "properties": {
-                    "criteria": {"allOf": [{"query": "[variables('noBackupQuery')]"}]},
+                    "enabled": True,
+                    "evaluationFrequency": "PT1H",
+                    "windowSize": "P2D",
+                    "criteria": {
+                        "allOf": [
+                            {
+                                "query": "[variables('noBackupQuery')]",
+                                "timeAggregation": "Count",
+                                "operator": "GreaterThan",
+                                "threshold": 0,
+                            }
+                        ]
+                    },
                     "actions": {"actionGroups": ["[parameters('actionGroupId')]"]},
                 },
             },
         ],
     }
+
+
+def backup_alerts_module() -> dict[str, Any]:
+    """The backup alerts module as main.bicep calls it: watchBackups follows the switch that
+    starts the backups (#169)."""
+    deployment = module("backup-alerts", "[parameters('location')]", backup_alerts())
+    deployment["properties"]["parameters"]["watchBackups"] = {
+        "value": "[parameters('databaseBackupProtected')]"
+    }
+    return deployment
 
 
 # How Bicep compiles the env list of the web app in infra/modules/apps.bicep (#133).
@@ -514,6 +538,7 @@ def good_main() -> dict[str, Any]:
                 "minValue": 1,
                 "maxValue": 10,
             },
+            "databaseBackupProtected": {"type": "bool", "defaultValue": False},
             "demo": {"type": "bool", "defaultValue": False},
             "demoImage": {"type": "string", "defaultValue": ""},
         },
@@ -529,7 +554,7 @@ def good_main() -> dict[str, Any]:
             "ai": module("ai", "[parameters('aiLocation')]", ai),
             "apps": module("apps", "[parameters('location')]", apps),
             "alerts": module("alerts", "[parameters('location')]", alerts()),
-            "backupAlerts": module("backup-alerts", "[parameters('location')]", backup_alerts()),
+            "backupAlerts": backup_alerts_module(),
             "standins": {
                 **module("standins", "[parameters('location')]", standins),
                 "condition": "[and(parameters('demo'), not(empty(parameters('demoImage'))))]",
@@ -1412,6 +1437,186 @@ def test_a_no_backup_alert_on_the_wrong_hour_fails(tmp_path: Path, hour: str) ->
         NO_BACKUP_QUERY.replace("== 23", hour)
     )
     assert any("hourofday(now()) == 23" in p for p in run(tmp_path, main))
+
+
+# --- Switched off backup alerts (#169) ---
+
+
+def no_backup_criterion(main: dict[str, Any]) -> dict[str, Any]:
+    criterion: dict[str, Any] = backup_alert_resources(main)[2]["properties"]["criteria"]["allOf"][
+        0
+    ]
+    return criterion
+
+
+@pytest.mark.req("NF-01")
+@pytest.mark.parametrize(
+    "change",
+    [
+        # module backupAlerts '...' = if (false)
+        lambda deployment: deployment.update(condition=False),
+        lambda deployment: deployment.update(condition="[false()]"),
+        # module backupAlerts '...' = if (demo)
+        lambda deployment: deployment.update(condition="[parameters('demo')]"),
+    ],
+)
+def test_a_switched_off_backup_alerts_module_fails(tmp_path: Path, change: Any) -> None:
+    main = good_main()
+    change(main["resources"]["backupAlerts"])
+    assert any("the backup alerts module backup-alerts" in p for p in run(tmp_path, main))
+
+
+@pytest.mark.req("NF-01")
+@pytest.mark.parametrize(
+    "value",
+    [
+        False,
+        "[false()]",
+        "[not(parameters('databaseBackupProtected'))]",
+        "[parameters('demo')]",
+        "[and(parameters('databaseBackupProtected'), parameters('demo'))]",
+    ],
+)
+def test_backup_alerts_that_do_not_follow_the_backup_switch_fail(
+    tmp_path: Path, value: Any
+) -> None:
+    main = good_main()
+    main["resources"]["backupAlerts"]["properties"]["parameters"]["watchBackups"] = {"value": value}
+    problems = run(tmp_path, main)
+    for alert in ("argus-backup-jobs", "apr-bvault-argus-to-ops", "alert-bvault-argus-no-backup"):
+        assert f"backup alert {alert} in module backup-alerts must follow" in " ".join(problems)
+
+
+@pytest.mark.req("NF-01")
+def test_backup_alerts_without_the_backup_switch_given_fail(tmp_path: Path) -> None:
+    main = good_main()
+    del main["resources"]["backupAlerts"]["properties"]["parameters"]["watchBackups"]
+    assert any("must follow databaseBackupProtected" in p for p in run(tmp_path, main))
+
+
+@pytest.mark.req("NF-01")
+def test_backup_alerts_switched_by_the_module_condition_pass(tmp_path: Path) -> None:
+    main = good_main()
+    deployment = main["resources"]["backupAlerts"]
+    deployment["condition"] = "[parameters('databaseBackupProtected')]"
+    for alert in backup_alert_resources(main):
+        del alert["condition"]
+    assert run(tmp_path, main) == []
+
+
+@pytest.mark.req("NF-01")
+def test_an_unswitched_backup_alert_in_an_unswitched_module_fails(tmp_path: Path) -> None:
+    main = good_main()
+    del backup_alert_resources(main)[1]["condition"]
+    assert any(
+        "backup alert apr-bvault-argus-to-ops in module backup-alerts must follow" in p
+        for p in run(tmp_path, main)
+    )
+
+
+@pytest.mark.req("NF-01")
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        # The time window.
+        ("ago(2d)", "ago(30d)"),
+        ("ago(2d)", "ago(2h)"),
+        ("TimeGenerated > ago(2d)", "TimeGenerated < ago(2d)"),
+        ("| where TimeGenerated > ago(2d) ", ""),
+        # The job.
+        ('JobOperation == "Backup"', 'JobOperation == "Restore"'),
+        ('JobOperation == "Backup"', 'JobOperation != "Backup"'),
+        ('JobOperation == "Backup" and ', ""),
+        # The job status.
+        ('startswith "Completed"', 'startswith "Failed"'),
+        ('JobStatus startswith "Completed"', 'JobStatus !startswith "Completed"'),
+        (' and JobStatus startswith "Completed"', ""),
+        ('"Backup" and JobStatus', '"Backup" or JobStatus'),
+        (
+            'where JobOperation == "Backup" and JobStatus startswith "Completed"',
+            'where not(JobOperation == "Backup" and JobStatus startswith "Completed")',
+        ),
+        # The table.
+        ("(AddonAzureBackupJobs)", "(AddonAzureBackupJobs_CL)"),
+        ("(AddonAzureBackupJobs)", "(AzureDiagnostics), (AddonAzureBackupJobsOld)"),
+        # Inverted: fires when there was a backup.
+        ("completed == 0", "completed > 0"),
+        ("completed == 0", "completed != 0"),
+        ("completed == 0 and ", ""),
+        # Something that can never be true.
+        ("hourofday(now()) == 23", "hourofday(now()) == 23 and 1 == 2"),
+        # Something in between that changes the records.
+        ("| summarize", '| extend JobStatus = "Completed" | summarize'),
+        ("summarize completed = count()", "summarize completed = dcount(JobStatus)"),
+    ],
+)
+def test_a_no_backup_query_that_means_something_else_fails(
+    tmp_path: Path, old: str, new: str
+) -> None:
+    main = good_main()
+    assert old in NO_BACKUP_QUERY
+    backup_alert_resources(main)[2]["properties"]["criteria"]["allOf"][0]["query"] = (
+        NO_BACKUP_QUERY.replace(old, new)
+    )
+    assert any(
+        "must fire when no backup job completed in the last 2 days" in p
+        or "no backup job completed for 8 days" in p
+        for p in run(tmp_path, main)
+    )
+
+
+@pytest.mark.req("NF-01")
+@pytest.mark.parametrize(
+    "query",
+    [
+        # The query exactly as infra/modules/backup-alerts.bicep writes it.
+        "union isfuzzy=true (datatable(TimeGenerated: datetime, JobOperation: string, JobStatus: "
+        "string)[]), (AddonAzureBackupJobs) | where TimeGenerated > ago(2d) | where JobOperation "
+        '== "Backup" and JobStatus startswith "Completed" | summarize completed = count() | '
+        "where completed == 0 and dayofweek(now()) == 1d and hourofday(now()) == 23",
+        # Line breaks, single quotes and the filters in another order mean the same.
+        "AddonAzureBackupJobs\n| where JobStatus == 'Completed'\n| where JobOperation == 'Backup' "
+        "and TimeGenerated >= ago(48h)\n| summarize jobs = count()\n| where hourofday(now()) "
+        "== 23 and jobs == 0\n| where dayofweek(now()) == 1d",
+    ],
+)
+def test_a_no_backup_query_that_means_the_same_passes(tmp_path: Path, query: str) -> None:
+    main = good_main()
+    backup_alert_resources(main)[2]["properties"]["criteria"]["allOf"][0]["query"] = query
+    assert run(tmp_path, main) == []
+
+
+@pytest.mark.req("NF-01")
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda criterion: criterion.update(operator="LessThan"),
+        lambda criterion: criterion.update(operator="Equal"),
+        lambda criterion: criterion.update(threshold=1),
+        lambda criterion: criterion.pop("operator"),
+        lambda criterion: criterion.update(timeAggregation="Average"),
+    ],
+)
+def test_a_no_backup_alert_that_does_not_fire_on_a_result_fails(
+    tmp_path: Path, change: Any
+) -> None:
+    main = good_main()
+    change(no_backup_criterion(main))
+    assert any("must fire on any result row" in p for p in run(tmp_path, main))
+
+
+@pytest.mark.req("NF-01")
+@pytest.mark.parametrize("window", ["PT1H", "P1D", None])
+def test_a_no_backup_alert_that_reads_less_than_2_days_fails(
+    tmp_path: Path, window: str | None
+) -> None:
+    main = good_main()
+    properties = backup_alert_resources(main)[2]["properties"]
+    if window is None:
+        del properties["windowSize"]
+    else:
+        properties["windowSize"] = window
+    assert any("windowSize P2D" in p for p in run(tmp_path, main))
 
 
 # --- The nightly audit copy job (#103) ---

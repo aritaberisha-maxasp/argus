@@ -17,7 +17,9 @@ Azure sign in is needed. The script fails when:
 - the Backup vault raises no alert for a failed job, no alert processing rule sends Azure
   Backup alerts to an action group, the vault's job records do not reach Log Analytics, no log
   alert catches a week without a completed backup, or that alert checks on another day than the
-  one after the weekly backup (#115, NF-01);
+  one after the weekly backup (#115, NF-01); or the backup alerts are switched off, no longer
+  follow ``databaseBackupProtected``, or their query no longer means "no completed backup job in
+  the last 2 days" (#169);
 - a secret could end up in the code, a parameter default or a deployment output, or an app or
   a job gets a secret any other way than as a Key Vault reference, including through a loop
   or as a plain setting such as a connection string, key or token (NF-06, #103);
@@ -129,6 +131,8 @@ _KUSTO_HOUR = re.compile(r"hourofday\(now\(\)\)\s*==\s*(\d+)")
 # The hour (UTC) the "no backup" alert checks: late enough that a Sunday backup has finished
 # and its record has reached Log Analytics, early enough that the 2 day window still covers it.
 BACKUP_CHECK_HOUR = 23
+# The switch that starts the backups. The backup alerts follow it, never anything else (#169).
+BACKUP_SWITCH = "databaseBackupProtected"
 EMAIL = re.compile(r"[\w.+-]+@[\w-]+(\.[\w-]+)+")
 _COPY_VARIABLE = re.compile(r"variables\('(\w+)'\)")
 _VARIABLE_FIELD = re.compile(r"^\[variables\('(\w+)'\)\.(\w+)\]$")
@@ -376,6 +380,132 @@ def _backup_weekday(main: dict[str, Any]) -> int | None:
     return None
 
 
+def _backup_alert_resource(resource: dict[str, Any], template: dict[str, Any]) -> bool:
+    """One of the three resources of the backup alerts: the job records setting, the alert
+    processing rule for Azure Backup alerts, or the "no backup" log alert."""
+    kind = resource.get("type")
+    properties = resource.get("properties", {})
+    if kind == DIAGNOSTIC_SETTING:
+        return "backupVaults" in str(resource.get("scope", ""))
+    if kind == ALERT_PROCESSING_RULE:
+        return any("Azure Backup" in c.get("values", []) for c in properties.get("conditions", []))
+    if kind == LOG_ALERT:
+        return any(
+            BACKUP_JOBS_TABLE in str(_resolve(template, item.get("query", "")))
+            for item in properties.get("criteria", {}).get("allOf", [])
+        )
+    return False
+
+
+def backup_alert_switch_problems(main: dict[str, Any]) -> list[str]:
+    """The backup alerts are deployed exactly when the backups run: the module is not switched
+    off and every alert follows databaseBackupProtected (#169, NF-01)."""
+    problems = []
+    switch = f"[parameters('{BACKUP_SWITCH}')]"
+    for name, deployment, template in modules(main):
+        found = template.get("resources", [])
+        alerts = [
+            r
+            for r in (found.values() if isinstance(found, dict) else found)
+            if _backup_alert_resource(r, template)
+        ]
+        if not alerts:
+            continue
+        if _switched_off(deployment):
+            problems.append(f"the backup alerts module {name} is switched off")
+            continue
+        module_condition = deployment.get("condition", True)
+        if module_condition not in (True, switch):
+            problems.append(f"the backup alerts module {name} must only depend on {BACKUP_SWITCH}")
+            continue
+        given = deployment.get("properties", {}).get("parameters", {})
+        for alert in alerts:
+            condition = alert.get("condition", True)
+            bound = re.fullmatch(r"\[parameters\('(\w+)'\)\]", str(condition))
+            if condition is True:
+                follows = module_condition == switch
+            else:
+                follows = bound is not None and given.get(bound[1], {}).get("value") == switch
+            if not follows:
+                problems.append(
+                    f"backup alert {alert.get('name', '?')} in module {name} must follow "
+                    f"{BACKUP_SWITCH}, the switch that starts the backups"
+                )
+    return problems
+
+
+def _kusto(text: str) -> str:
+    """A query with single spaces and double quotes, so its parts compare as plain text."""
+    return re.sub(r"\s+", " ", text.replace("'", '"')).strip()
+
+
+# The parts of the "no backup" query (#115, #169). Before the count, only filters that keep
+# completed backup jobs of the last 2 days. After it, only "none of them", the day and the hour.
+_NO_BACKUP_TABLE = re.compile(rf"(?<!\w){BACKUP_JOBS_TABLE}(?!\w)")
+_NO_BACKUP_FILTERS = {
+    "the last 2 days": re.compile(r"TimeGenerated >=? ago\((2d|48h)\)"),
+    "backup jobs": re.compile(r'JobOperation == "Backup"'),
+    "completed jobs": re.compile(r'JobStatus (startswith|==) "Completed"'),
+}
+_NO_BACKUP_COUNT = re.compile(r"summarize (\w+) = count\(\)")
+_NO_BACKUP_TIMING = re.compile(r"(dayofweek\(now\(\)\) == \dd|hourofday\(now\(\)\) == \d+)")
+
+
+def no_backup_query_problems(
+    resource: dict[str, Any], query: str, criterion: dict[str, Any]
+) -> list[str]:
+    """The "no backup" alert fires only when no backup job completed in the last 2 days, and
+    the alert rule fires on any result row (#169, NF-01)."""
+    name = resource.get("name", "?")
+    wrong = (
+        f"alert {name} must fire when no backup job completed in the last 2 days "
+        f"({BACKUP_JOBS_TABLE} | where TimeGenerated > ago(2d) | where JobOperation == "
+        '"Backup" and JobStatus startswith "Completed" | summarize completed = count() '
+        "| where completed == 0 and ...)"
+    )
+    problems = []
+    if (
+        criterion.get("timeAggregation", "Count") != "Count"
+        or criterion.get("operator") != "GreaterThan"
+        or criterion.get("threshold") != 0
+    ):
+        problems.append(f"alert {name} must fire on any result row (Count GreaterThan 0)")
+    if resource.get("properties", {}).get("windowSize") != "P2D":
+        problems.append(f"alert {name} must read 2 days of job records (windowSize P2D)")
+
+    source, *stages = [part.strip() for part in _kusto(query).split("|")]
+    counts = [
+        (i, found[1])
+        for i, stage in enumerate(stages)
+        if (found := _NO_BACKUP_COUNT.fullmatch(stage))
+    ]
+    if not _NO_BACKUP_TABLE.search(source) or len(counts) != 1:
+        return [*problems, wrong]
+    (at, counted), *_ = counts
+    before, after = stages[:at], stages[at + 1 :]
+
+    def conditions(stage: str) -> list[str] | None:
+        """The parts of a "where A and B" stage, or None for anything else."""
+        if not stage.startswith("where ") or re.search(r"\bor\b|\bnot\b|!(?!=)", stage):
+            return None
+        return [part.strip() for part in stage[len("where ") :].split(" and ")]
+
+    filters = [conditions(stage) for stage in before]
+    checks = [conditions(stage) for stage in after]
+    if any(f is None for f in filters) or any(c is None for c in checks):
+        return [*problems, wrong]
+    kept = [part for found in filters if found for part in found]
+    if not all(any(p.fullmatch(part) for part in kept) for p in _NO_BACKUP_FILTERS.values()):
+        return [*problems, wrong]
+    none_left = f"{counted} == 0"
+    final = [part for found in checks if found for part in found]
+    if none_left not in final or not all(
+        part == none_left or _NO_BACKUP_TIMING.fullmatch(part) for part in final
+    ):
+        return [*problems, wrong]
+    return problems
+
+
 def backup_alert_problems(main: dict[str, Any]) -> list[str]:
     """A failed backup job and a week without a completed backup both reach an action group
     (#115, NF-01)."""
@@ -394,6 +524,7 @@ def backup_alert_problems(main: dict[str, Any]) -> list[str]:
             )
     if not vaults:
         return problems
+    problems.extend(backup_alert_switch_problems(main))
 
     routed = False
     for rule in (r for r in resources(main) if r.get("type") == ALERT_PROCESSING_RULE):
@@ -440,12 +571,13 @@ def backup_alert_problems(main: dict[str, Any]) -> list[str]:
             for item in properties.get("criteria", {}).get("allOf", []):
                 query = str(_resolve(template, item.get("query", "")))
                 if BACKUP_JOBS_TABLE in query:
-                    watchers.append((resource, query))
+                    watchers.append((resource, query, item))
     if not watchers:
         problems.append("no alert fires when no backup job completed for 8 days")
     weekday = _backup_weekday(main)
-    for resource, query in watchers:
+    for resource, query, criterion in watchers:
         name = resource.get("name", "?")
+        problems.extend(no_backup_query_problems(resource, query, criterion))
         if not resource.get("properties", {}).get("actions", {}).get("actionGroups"):
             problems.append(f"alert {name} sends to no action group")
         if _switched_off(resource):
