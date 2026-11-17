@@ -411,3 +411,20 @@ def test_the_log_names_ids_and_the_outcome_but_never_the_comment(
     )
     for personal in ("Mustermann", "Erika", "confirmed it"):
         assert personal not in logged
+
+
+def test_an_iban_mismatch_that_cannot_be_rejected_here_says_why(
+    app: Engine, client: TestClient, entra: FakeEntra, tag: str
+) -> None:
+    _, booked = case_in_exception(
+        app, ExceptionReason.IBAN_MISMATCH, f"A-{tag}", before=CaseStatus.BOOKED
+    )
+    case_id, waiting = case_in_exception(app, ExceptionReason.IBAN_MISMATCH, f"B-{tag}")
+    with unit_of_work(app, INTAKE) as db:
+        open_exception(db, ExceptionReason.UNKNOWN_VENDOR, "Not known.", case_id=case_id)
+
+    for exception_id, why in ((booked, "still waiting before booking"), (waiting, "another")):
+        offered = choices(client, entra, exception_id)
+        assert offered["choices"] == []
+        assert "can only reject" not in offered["note"]
+        assert why in offered["note"]

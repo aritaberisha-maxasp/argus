@@ -188,6 +188,17 @@ def choices_for(
 def _note(
     reason: ExceptionReason, choices: tuple[Choice, ...], could_close_alone: bool
 ) -> str | None:
+    if reason is ExceptionReason.IBAN_MISMATCH and not choices:
+        # Rejecting is the only ending here, and it is not possible for this case.
+        why = (
+            "it has another open exception"
+            if could_close_alone
+            else "it is not an incoming invoice still waiting before booking"
+        )
+        return (
+            "Once the IBAN is fixed in DATEV, ARGUS will check it again. That check is not built"
+            f" yet, and this case cannot be rejected here because {why}."
+        )
     if reason in NOTES:
         return NOTES[reason]
     if not choices:
