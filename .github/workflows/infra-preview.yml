@@ -82,6 +82,9 @@ jobs:
       # ARGUS_ALERT_EMAIL is left out on purpose: the preview prints every changed value into
       # the run summary, and the address belongs to a person. The preview may therefore show
       # the alert email receiver as removed; the deploy keeps it (#125).
+      # ARGUS_DIGEST_TO, ARGUS_REMINDER_FORWARD_TO and ARGUS_STATEMENT_SENDERS (#167) are left
+      # out for the same reason. Once demo mode is off the preview may show them as emptied; the
+      # deploy sets them.
     steps:
       - uses: actions/checkout@v4
 

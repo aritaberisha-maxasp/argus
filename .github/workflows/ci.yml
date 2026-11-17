@@ -223,6 +223,11 @@ jobs:
           az bicep install --version "$BICEP_VERSION"
           az bicep version
       - name: Build the templates
+        # The go live addresses (#167), so that with demo mode off the check below refuses a
+        # parameters file that leaves one empty. Only names reach the log, never the values.
+        env:
+          ARGUS_DIGEST_TO: ${{ vars.ARGUS_DIGEST_TO }}
+          ARGUS_REMINDER_FORWARD_TO: ${{ vars.ARGUS_REMINDER_FORWARD_TO }}
         run: |
           mkdir -p build/infra
           az bicep build --file infra/main.bicep --outdir build/infra

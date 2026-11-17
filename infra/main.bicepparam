@@ -77,6 +77,17 @@ param signInSettings = {
   adminGroupId: readEnvironmentVariable('ARGUS_ENTRA_GROUP_ADMIN', '')
 }
 
+// Who ARGUS emails, and who may email it Wise statements (#167, EX-03, BA-08): Benjamin's
+// address at go live. Personal data, so the values come from GitHub variables
+// (docs/runbooks/go-live.md), never from this file. Not used while demo = true, which has
+// synthetic values. Once demo is false, tools/check_infra.py refuses an empty ARGUS_DIGEST_TO or
+// ARGUS_REMINDER_FORWARD_TO, and the digest job refuses to run without its address.
+param notifySettings = {
+  digestTo: readEnvironmentVariable('ARGUS_DIGEST_TO', '')
+  reminderForwardTo: readEnvironmentVariable('ARGUS_REMINDER_FORWARD_TO', '')
+  statementSenders: readEnvironmentVariable('ARGUS_STATEMENT_SENDERS', '')
+}
+
 // Where operations alerts go, for example a failed sweep (#125). Arita's address lives in the
 // GitHub variable ARGUS_ALERT_EMAIL, never in the repo.
 param alertEmail = readEnvironmentVariable('ARGUS_ALERT_EMAIL', '')

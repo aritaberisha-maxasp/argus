@@ -245,6 +245,14 @@ At go live, add who Max ASP is, for the sorting and the invoice reading (#125). 
 | `ARGUS_VENDOR_DOMAINS` | The email domains of the vendors, comma separated, from the partner list in the [go live runbook](../runbooks/go-live.md) |
 | `ARGUS_CUSTOMER_DOMAINS` | The same for the customers |
 
+Also at go live, who ARGUS emails (#167). Benjamin's address, never written into the repository. While demo mode is on the jobs use synthetic `.example` addresses instead; once `demo = false`, the CI check fails while one of the first two is empty:
+
+| Variable | Value |
+| --- | --- |
+| `ARGUS_DIGEST_TO` | The one address the daily digest of open exceptions goes to |
+| `ARGUS_REMINDER_FORWARD_TO` | The one address payment reminders and Wise statement notices go to |
+| `ARGUS_STATEMENT_SENDERS` | Who may email Wise statements, comma separated. Optional |
+
 The deploy identity is also the database admin, because it runs the migrations. The app never uses it: the app signs in with its own identity and works as `argus_app`.
 
 ### 7a. Sign in with Microsoft

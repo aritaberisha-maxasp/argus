@@ -7,7 +7,7 @@
 
 targetScope = 'resourceGroup'
 
-import { intakeSettingValues, modelDeployment, manualSecret, signInSettingValues } from 'types.bicep'
+import { intakeSettingValues, modelDeployment, manualSecret, notifySettingValues, signInSettingValues } from 'types.bicep'
 
 @description('Every ARGUS resource runs in Germany West Central (ADR 0001, NF-03).')
 @allowed([
@@ -104,6 +104,13 @@ param signInSettings signInSettingValues = {
   approverGroupId: ''
   financeGroupId: ''
   adminGroupId: ''
+}
+
+@description('Who ARGUS emails, and who may email it Wise statements (#167). Come from GitHub variables, never from the repo. Not used in demo mode, which has synthetic values. With demo off, tools/check_infra.py refuses an empty digestTo or reminderForwardTo.')
+param notifySettings notifySettingValues = {
+  digestTo: ''
+  reminderForwardTo: ''
+  statementSenders: ''
 }
 
 @minValue(0)
@@ -305,6 +312,7 @@ module apps 'modules/apps.bicep' = {
     auditJobName: auditJobName
     intakeSettings: intakeSettings
     signInSettings: signInSettings
+    notifySettings: notifySettings
   }
   // The secrets must exist in Key Vault before the app revision reads them.
   dependsOn: [

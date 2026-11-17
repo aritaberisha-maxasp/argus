@@ -43,6 +43,24 @@ def module(name: str, location: str, template: dict[str, Any]) -> dict[str, Any]
     }
 
 
+INTAKE_JOB_NAME = "[parameters('intakeJobNames')[variables('intakeJobList')[copyIndex()].job]]"
+
+# How Bicep compiles the env list of the intake jobs and the live addresses in
+# infra/modules/apps.bicep (#167). Demo mode has .example addresses in demoSettings.
+# Cut down to the parts the address rule reads, so the secret rules see the same as before.
+INTAKE_JOB_ENV = (
+    "[concat(if(parameters('demo'), variables('demoSettings'), createArray()), "
+    "variables('notifyEnv'))]"
+)
+NOTIFY_ENV = (
+    "[if(parameters('demo'), createArray(), createArray(createObject('name', 'ARGUS_DIGEST_TO', "
+    "'value', parameters('notifySettings').digestTo), createObject('name', "
+    "'ARGUS_REMINDER_FORWARD_TO', 'value', parameters('notifySettings').reminderForwardTo), "
+    "createObject('name', 'ARGUS_STATEMENT_SENDERS', 'value', "
+    "parameters('notifySettings').statementSenders)))]"
+)
+
+
 def intake_jobs() -> dict[str, Any]:
     """The sweep, removal and digest jobs as Bicep compiles the loop in infra/modules/apps.bicep."""
     return {
@@ -79,6 +97,7 @@ def intake_jobs() -> dict[str, Any]:
                             "argus.intake",
                             "[variables('intakeJobList')[copyIndex()].job]",
                         ],
+                        "env": INTAKE_JOB_ENV,
                     }
                 ]
             },
@@ -358,7 +377,12 @@ def good_main() -> dict[str, Any]:
                 },
             ],
             "signInEnv": sign_in_env(),
-            "demoSettings": [{"name": "ARGUS_MAILBOX", "value": "accounts@maxasp.example"}],
+            "demoSettings": [
+                {"name": "ARGUS_MAILBOX", "value": "accounts@maxasp.example"},
+                {"name": "ARGUS_REMINDER_FORWARD_TO", "value": "reminders@maxasp.example"},
+                {"name": "ARGUS_DIGEST_TO", "value": "digest@maxasp.example"},
+            ],
+            "notifyEnv": NOTIFY_ENV,
             "auditJob": {"job": "audit-copy", "cron": "0 1 * * *"},
             "auditSecrets": AUDIT_SECRETS,
         },
@@ -1011,6 +1035,8 @@ def test_demo_mode_with_real_secrets_in_the_parameters_fails(tmp_path: Path) -> 
     assert len(problems) == 1
     assert "switches demo mode on and also hands real secrets" in problems[0]
     parameters["parameters"]["demo"]["value"] = False
+    # Live needs the two addresses too (#167).
+    parameters["parameters"]["notifySettings"] = {"value": ADDRESSES}
     assert run(tmp_path, good_main(), parameters=parameters) == []
 
 
@@ -1666,3 +1692,105 @@ def test_a_stand_in_token_as_a_secret_reference_passes(tmp_path: Path) -> None:
         "'ARGUS_GRAPH_STANDIN_TOKEN', 'secretRef', 'token')), ",
     )
     assert run(tmp_path, main) == []
+
+
+# Go live addresses (#167, EX-03, BA-08)
+
+
+def live_parameters(**notify: str) -> dict[str, Any]:
+    parameters = good_parameters()
+    parameters["parameters"]["demo"] = {"value": False}
+    parameters["parameters"]["notifySettings"] = {
+        "value": {"digestTo": "", "reminderForwardTo": "", "statementSenders": "", **notify}
+    }
+    return parameters
+
+
+ADDRESSES = {"digestTo": "person@firma.de", "reminderForwardTo": "person@firma.de"}
+
+
+@pytest.mark.req("EX-03", "BA-08")
+def test_live_addresses_from_github_variables_pass(tmp_path: Path) -> None:
+    assert run(tmp_path, good_main(), parameters=live_parameters(**ADDRESSES)) == []
+
+
+@pytest.mark.req("EX-03", "BA-08")
+def test_demo_mode_needs_no_live_address(tmp_path: Path) -> None:
+    parameters = good_parameters()
+    parameters["parameters"]["notifySettings"] = {
+        "value": {"digestTo": "", "reminderForwardTo": "", "statementSenders": ""}
+    }
+
+    assert run(tmp_path, good_main(), parameters=parameters) == []
+
+
+@pytest.mark.req("EX-03", "BA-08")
+@pytest.mark.parametrize(
+    ("field", "setting"),
+    [("digestTo", "ARGUS_DIGEST_TO"), ("reminderForwardTo", "ARGUS_REMINDER_FORWARD_TO")],
+)
+@pytest.mark.parametrize("value", ["", "   "])
+def test_an_empty_address_with_demo_off_fails(
+    tmp_path: Path, field: str, setting: str, value: str
+) -> None:
+    parameters = live_parameters(**{**ADDRESSES, field: value})
+
+    assert run(tmp_path, good_main(), parameters=parameters) == [
+        f"demo mode is off but {setting} is empty; set the GitHub variable {setting} first "
+        "(docs/runbooks/go-live.md)"
+    ]
+
+
+@pytest.mark.req("EX-03", "BA-08")
+def test_demo_off_without_any_address_fails_for_both(tmp_path: Path) -> None:
+    parameters = good_parameters()
+    parameters["parameters"]["demo"] = {"value": False}
+
+    problems = run(tmp_path, good_main(), parameters=parameters)
+
+    assert [p.split(" is empty")[0] for p in problems] == [
+        "demo mode is off but ARGUS_DIGEST_TO",
+        "demo mode is off but ARGUS_REMINDER_FORWARD_TO",
+    ]
+
+
+@pytest.mark.req("EX-03", "NF-03")
+@pytest.mark.parametrize(
+    "value", ["one@firma.de, two@firma.de", "Benjamin <person@firma.de>", "person"]
+)
+def test_more_or_less_than_one_address_fails_without_naming_it(tmp_path: Path, value: str) -> None:
+    parameters = live_parameters(**{**ADDRESSES, "digestTo": value})
+
+    problems = run(tmp_path, good_main(), parameters=parameters)
+
+    assert problems == ["ARGUS_DIGEST_TO must be exactly one email address"]
+    assert value not in " ".join(problems)
+
+
+@pytest.mark.req("EX-03", "BA-08")
+def test_intake_jobs_without_the_live_addresses_fail(tmp_path: Path) -> None:
+    main = good_main()
+    del apps_variables(main)["notifyEnv"]
+    container = main["resources"]["apps"]["properties"]["template"]["resources"][0]["properties"][
+        "template"
+    ]["containers"][0]
+    container["env"] = INTAKE_JOB_ENV.replace("variables('notifyEnv'), ", "")
+
+    problems = run(tmp_path, main)
+
+    assert sorted(problems) == [
+        f"intake job {INTAKE_JOB_NAME} does not get {setting} from the notifySettings parameter "
+        "when demo mode is off"
+        for setting in ("ARGUS_DIGEST_TO", "ARGUS_REMINDER_FORWARD_TO")
+    ]
+
+
+@pytest.mark.req("EX-03", "NF-03")
+def test_a_real_address_written_into_the_code_fails(tmp_path: Path) -> None:
+    main = good_main()
+    apps_variables(main)["demoSettings"][2]["value"] = "person@firma.de"
+
+    assert run(tmp_path, main) == [
+        f"intake job {INTAKE_JOB_NAME} gets ARGUS_DIGEST_TO as a fixed address that is not a "
+        ".example address; real addresses come from GitHub variables"
+    ]

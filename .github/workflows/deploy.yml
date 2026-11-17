@@ -108,6 +108,11 @@ jobs:
       ARGUS_OWN_VAT_IDS: ${{ vars.ARGUS_OWN_VAT_IDS }}
       ARGUS_VENDOR_DOMAINS: ${{ vars.ARGUS_VENDOR_DOMAINS }}
       ARGUS_CUSTOMER_DOMAINS: ${{ vars.ARGUS_CUSTOMER_DOMAINS }}
+      # Read by main.bicepparam (#167): who ARGUS emails at go live. Not secrets, but Benjamin's
+      # address. Not used while demo mode is on.
+      ARGUS_DIGEST_TO: ${{ vars.ARGUS_DIGEST_TO }}
+      ARGUS_REMINDER_FORWARD_TO: ${{ vars.ARGUS_REMINDER_FORWARD_TO }}
+      ARGUS_STATEMENT_SENDERS: ${{ vars.ARGUS_STATEMENT_SENDERS }}
       # Read by main.bicepparam (#133): the IDs for sign in with Microsoft. Not secrets. Empty
       # deploys too, but ARGUS then answers 503 on every route with data.
       ARGUS_ENTRA_TENANT_ID: ${{ vars.ARGUS_ENTRA_TENANT_ID }}

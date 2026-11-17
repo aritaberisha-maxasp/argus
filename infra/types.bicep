@@ -76,3 +76,20 @@ type signInSettingValues = {
   @description('Object ID of the admins group (ARGUS_ENTRA_GROUP_ADMIN).')
   adminGroupId: string
 }
+
+// Who ARGUS emails, and who may email it Wise statements (#167, EX-03, BA-08). Plain values,
+// no secrets, but personal data, so they never go in the repository. The pipeline passes them
+// from GitHub variables (docs/runbooks/go-live.md); in demo mode apps.bicep uses synthetic
+// .example addresses instead. tools/check_infra.py refuses an empty digestTo or
+// reminderForwardTo once demo mode is off.
+@export()
+type notifySettingValues = {
+  @description('The one address the daily digest of open exceptions goes to (ARGUS_DIGEST_TO).')
+  digestTo: string
+
+  @description('The one address payment reminders are forwarded to and Wise statement notices go to (ARGUS_REMINDER_FORWARD_TO).')
+  reminderForwardTo: string
+
+  @description('Who may email Wise statements, comma separated (ARGUS_STATEMENT_SENDERS). May stay empty: then only the statement folder counts.')
+  statementSenders: string
+}
