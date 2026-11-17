@@ -1736,7 +1736,7 @@ def test_an_empty_address_with_demo_off_fails(
     parameters = live_parameters(**{**ADDRESSES, field: value})
 
     assert run(tmp_path, good_main(), parameters=parameters) == [
-        f"demo mode is off but {setting} is empty; set the GitHub variable {setting} first "
+        f"demo mode is off but {setting} is empty; set the GitHub secret {setting} first "
         "(docs/runbooks/go-live.md)"
     ]
 
@@ -1792,7 +1792,7 @@ def test_a_real_address_written_into_the_code_fails(tmp_path: Path) -> None:
 
     assert run(tmp_path, main) == [
         f"intake job {INTAKE_JOB_NAME} gets ARGUS_DIGEST_TO as a fixed address that is not a "
-        ".example address; real addresses come from GitHub variables"
+        ".example address; real addresses come from GitHub secrets"
     ]
 
 

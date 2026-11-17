@@ -219,6 +219,11 @@ In the repository: Settings, Secrets and variables, Actions, tab **Variables** (
 | `ARGUS_RESOURCE_GROUP` | `rg-argus` |
 | `ARGUS_DATABASE_ADMIN_OBJECT_ID` | `principalId` of `id-argus-deploy` |
 | `ARGUS_DATABASE_ADMIN_NAME` | `id-argus-deploy` |
+
+Then, on the tab **Secrets** of the same page, the address that gets the operations alerts. It is the address of a person, and GitHub prints a variable in every step header of the run log, a secret only as `***` (#167, compliance review of PR 178). The deploy stops with an error while it, or one of the go live addresses below, is still stored as a variable:
+
+| Secret | Value |
+| --- | --- |
 | `ARGUS_ALERT_EMAIL` | The address that gets operations alerts, for example a failed mailbox sweep (#125). Optional, but without it the alerts reach nobody. |
 
 For sign in with Microsoft (#133), add the five IDs from step 7a. They are needed for the demo too, because the people who look at the queue page sign in with their own Max ASP accounts:
@@ -245,9 +250,9 @@ At go live, add who Max ASP is, for the sorting and the invoice reading (#125). 
 | `ARGUS_VENDOR_DOMAINS` | The email domains of the vendors, comma separated, from the partner list in the [go live runbook](../runbooks/go-live.md) |
 | `ARGUS_CUSTOMER_DOMAINS` | The same for the customers |
 
-Also at go live, who ARGUS emails (#167). Benjamin's address, never written into the repository. While demo mode is on the jobs use synthetic `.example` addresses instead; once `demo = false`, the CI check fails while one of the first two is empty:
+Also at go live, who ARGUS emails (#167). Benjamin's address, never written into the repository. Add these on the tab **Secrets**, not Variables, for the same reason as `ARGUS_ALERT_EMAIL`. While demo mode is on the jobs use synthetic `.example` addresses instead; once `demo = false`, the CI check fails while one of the first two is empty:
 
-| Variable | Value |
+| Secret | Value |
 | --- | --- |
 | `ARGUS_DIGEST_TO` | The one address the daily digest of open exceptions goes to |
 | `ARGUS_REMINDER_FORWARD_TO` | The one address payment reminders and Wise statement notices go to |

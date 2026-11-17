@@ -1061,7 +1061,7 @@ def _address_entries(template: dict[str, Any], container: dict[str, Any]) -> lis
 
 def notify_problems(main: dict[str, Any], parameters: dict[str, Any] | None) -> list[str]:
     """Outside demo mode every intake job gets the digest address and the reminder address
-    from the ``notifySettings`` parameter, so Arita sets them through GitHub variables, and a
+    from the ``notifySettings`` parameter, so Arita sets them through GitHub secrets, and a
     parameters file with demo mode off must fill both with one address each (#167, EX-03,
     BA-08). Problems name settings, never the address."""
     problems = []
@@ -1093,7 +1093,7 @@ def notify_problems(main: dict[str, Any], parameters: dict[str, Any] | None) -> 
                         if "parameters(" not in value and not DEMO_ADDRESS.fullmatch(literal):
                             problems.append(
                                 f"intake job {job} gets {setting} as a fixed address that is not "
-                                "a .example address; real addresses come from GitHub variables"
+                                "a .example address; real addresses come from GitHub secrets"
                             )
     if jobs == 0:
         problems.append("no intake job found to check the digest and reminder addresses on")
@@ -1105,7 +1105,7 @@ def notify_problems(main: dict[str, Any], parameters: dict[str, Any] | None) -> 
                 value = str(notify.get(field, "")).strip() if isinstance(notify, dict) else ""
                 if not value:
                     problems.append(
-                        f"demo mode is off but {setting} is empty; set the GitHub variable "
+                        f"demo mode is off but {setting} is empty; set the GitHub secret "
                         f"{setting} first (docs/runbooks/go-live.md)"
                     )
                 elif not EMAIL.fullmatch(value):

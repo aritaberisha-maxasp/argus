@@ -485,3 +485,73 @@ def test_a_preview_that_prints_email_addresses_fails(
     assert (root / PREVIEW).read_text(encoding="utf-8") != before
 
     assert any("must hide email addresses" in p for p in check_pipeline.check(root))
+
+
+# Email addresses of people are GitHub secrets, never variables (#167, compliance on PR 178)
+
+
+@pytest.mark.req("NF-03")
+@pytest.mark.parametrize("workflow", [DEPLOY, PREVIEW])
+def test_an_address_read_as_a_variable_fails(tmp_path: Path, workflow: str) -> None:
+    root = copy_repo(tmp_path)
+    edit(
+        root,
+        workflow,
+        lambda s: s.replace("${{ secrets.ARGUS_DIGEST_TO }}", "${{ vars.ARGUS_DIGEST_TO }}"),
+    )
+    assert any(
+        "reads ARGUS_DIGEST_TO as a GitHub variable" in p for p in check_pipeline.check(root)
+    )
+
+
+@pytest.mark.req("NF-06")
+def test_a_secret_that_is_no_address_fails_even_in_env(tmp_path: Path) -> None:
+    root = copy_repo(tmp_path)
+    edit(
+        root,
+        PREVIEW,
+        lambda s: s.replace("${{ secrets.ARGUS_DIGEST_TO }}", "${{ secrets.WISE_API_TOKEN }}"),
+    )
+    assert any(
+        p == "infra-preview.yml reads a GitHub secret; Azure sign in must use OpenID Connect"
+        for p in check_pipeline.check(root)
+    )
+
+
+@pytest.mark.req("NF-03")
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda s: s.replace("Refuse email addresses stored as GitHub variables", "Check things"),
+        lambda s: s.replace(" || vars.ARGUS_STATEMENT_SENDERS != ''", ""),
+        lambda s: s.replace('then run Deploy again."\n          exit 1', 'then run Deploy again."'),
+    ],
+)
+def test_a_deploy_that_does_not_refuse_addresses_as_variables_fails(
+    tmp_path: Path, change: Callable[[str], str]
+) -> None:
+    root = copy_repo(tmp_path)
+    before = (root / DEPLOY).read_text(encoding="utf-8")
+    edit(root, DEPLOY, change)
+    assert (root / DEPLOY).read_text(encoding="utf-8") != before
+
+    assert any(
+        "must start by refusing email addresses stored as GitHub variables" in p
+        for p in check_pipeline.check(root)
+    )
+
+
+@pytest.mark.req("NF-06")
+@pytest.mark.parametrize(
+    "expression", ["${{ secrets['WISE_API_TOKEN'] }}", "${{ toJSON(secrets) }}"]
+)
+def test_secrets_read_any_other_way_fail(tmp_path: Path, expression: str) -> None:
+    root = copy_repo(tmp_path)
+    edit(
+        root,
+        PREVIEW,
+        lambda s: s.replace("${{ secrets.ARGUS_DIGEST_TO }}", expression),
+    )
+    assert "infra-preview.yml reads a GitHub secret; Azure sign in must use OpenID Connect" in (
+        check_pipeline.check(root)
+    )

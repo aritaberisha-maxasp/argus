@@ -78,8 +78,8 @@ type signInSettingValues = {
 }
 
 // Who ARGUS emails, and who may email it Wise statements (#167, EX-03, BA-08). Plain values,
-// no secrets, but personal data, so they never go in the repository. The pipeline passes them
-// from GitHub variables (docs/runbooks/go-live.md); in demo mode apps.bicep uses synthetic
+// not credentials, but personal data, so they never go in the repository. The pipeline passes
+// them from GitHub secrets, so run logs show *** for them (docs/runbooks/go-live.md); in demo mode apps.bicep uses synthetic
 // .example addresses instead. tools/check_infra.py refuses an empty digestTo or
 // reminderForwardTo once demo mode is off.
 @export()

@@ -1,7 +1,8 @@
 # Shows what a PR would change in Azure, without changing anything (#81).
 #
 # Signs in as the preview identity: it may read the ARGUS resource group and ask Azure for a
-# what if, nothing else. It cannot deploy, push images, reach the database or read secrets.
+# what if, nothing else. It cannot deploy, push images, reach the database or read Key Vault
+# secrets. The only GitHub secrets it reads are the four email addresses of people (#167).
 # Before Azure is set up, the job skips the preview with a notice and stays green.
 name: Infrastructure preview
 
@@ -79,26 +80,17 @@ jobs:
       ARGUS_ENTRA_GROUP_APPROVER: ${{ vars.ARGUS_ENTRA_GROUP_APPROVER }}
       ARGUS_ENTRA_GROUP_FINANCE: ${{ vars.ARGUS_ENTRA_GROUP_FINANCE }}
       ARGUS_ENTRA_GROUP_ADMIN: ${{ vars.ARGUS_ENTRA_GROUP_ADMIN }}
-      # The addresses of people (#125, #167). Passed like the deploy passes them, so an unchanged
-      # address shows no false change. They are masked below, and every email address is cut out
-      # of the what-if output before it reaches the log or the run summary (compliance review of
-      # PR 178): leaving them out made the preview print the running value as removed.
-      ARGUS_ALERT_EMAIL: ${{ vars.ARGUS_ALERT_EMAIL }}
-      ARGUS_DIGEST_TO: ${{ vars.ARGUS_DIGEST_TO }}
-      ARGUS_REMINDER_FORWARD_TO: ${{ vars.ARGUS_REMINDER_FORWARD_TO }}
-      ARGUS_STATEMENT_SENDERS: ${{ vars.ARGUS_STATEMENT_SENDERS }}
+      # The addresses of people (#125, #167), passed like the deploy passes them so an unchanged
+      # address shows no false change. They are GitHub secrets, not variables, so GitHub shows
+      # *** for them everywhere in the log, step headers included. On top of that every email
+      # address is cut out of the what-if output before it reaches the log or the run summary
+      # (compliance review of PR 178).
+      ARGUS_ALERT_EMAIL: ${{ secrets.ARGUS_ALERT_EMAIL }}
+      ARGUS_DIGEST_TO: ${{ secrets.ARGUS_DIGEST_TO }}
+      ARGUS_REMINDER_FORWARD_TO: ${{ secrets.ARGUS_REMINDER_FORWARD_TO }}
+      ARGUS_STATEMENT_SENDERS: ${{ secrets.ARGUS_STATEMENT_SENDERS }}
     steps:
       - uses: actions/checkout@v4
-
-      # A second guard next to the filter below: GitHub replaces these values with *** in the
-      # log. Each address of a comma separated list is masked on its own.
-      - name: Mask the addresses of people
-        run: |
-          for value in "$ARGUS_ALERT_EMAIL" "$ARGUS_DIGEST_TO" "$ARGUS_REMINDER_FORWARD_TO" "$ARGUS_STATEMENT_SENDERS"; do
-            tr ',' '\n' <<<"$value" | while read -r address; do
-              if [[ -n "$address" ]]; then echo "::add-mask::$address"; fi
-            done
-          done
 
       - name: Sign in to Azure with OpenID Connect
         uses: azure/login@v2

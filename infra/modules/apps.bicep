@@ -246,7 +246,7 @@ var intakeEnv = [
 // Who ARGUS emails at go live (#167, EX-03, BA-08): the digest of open exceptions, payment
 // reminders and Wise statement notices go to Benjamin, and his address may send statements. In
 // demo mode demoSettings has synthetic .example values for the first two, so these are left out
-// there. Live they come from GitHub variables (docs/runbooks/go-live.md), never from the repo.
+// there. Live they come from GitHub secrets (docs/runbooks/go-live.md), never from the repo.
 // tools/check_infra.py refuses a parameters file that leaves an address empty with demo off,
 // and the jobs that send refuse to start without one.
 var notifyEnv = demo

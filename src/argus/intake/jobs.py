@@ -267,7 +267,7 @@ def digest_services_from_env(environ: Mapping[str, str]) -> DigestServices:
         if not connections.digest_to:
             raise JobSettingsError(
                 f"set {DIGEST_TO_ENV} before the digest job can run; at go live it is the "
-                "GitHub variable of the same name (docs/runbooks/go-live.md)"
+                "GitHub secret of the same name (docs/runbooks/go-live.md)"
             )
         if not _ADDRESS.fullmatch(connections.digest_to):
             raise JobSettingsError(f"{DIGEST_TO_ENV} must be exactly one email address")
@@ -335,7 +335,7 @@ def run_job(
     except SETTINGS_ERRORS as error:
         # These name the missing or wrong setting and never its value, so the reason can go
         # into the log as it is. The safe formatter would only write the error's type, and
-        # Arita needs to see which GitHub variable to set (#167).
+        # Arita needs to see which GitHub secret to set (#167).
         log.error("The %s job cannot run: %s", job, error)
     except Exception:
         log.exception("The %s job could not finish", job)
