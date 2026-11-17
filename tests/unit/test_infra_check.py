@@ -267,6 +267,10 @@ def backup_alerts() -> dict[str, Any]:
                                 "timeAggregation": "Count",
                                 "operator": "GreaterThan",
                                 "threshold": 0,
+                                "failingPeriods": {
+                                    "numberOfEvaluationPeriods": 1,
+                                    "minFailingPeriodsToAlert": 1,
+                                },
                             }
                         ]
                     },
@@ -1548,6 +1552,18 @@ def test_an_unswitched_backup_alert_in_an_unswitched_module_fails(tmp_path: Path
         # Something in between that changes the records.
         ("| summarize", '| extend JobStatus = "Completed" | summarize'),
         ("summarize completed = count()", "summarize completed = dcount(JobStatus)"),
+        # Two days or two hours that can never both be true.
+        ("== 1d and", "== 1d and dayofweek(now()) == 2d and"),
+        ("hourofday(now()) == 23", "hourofday(now()) == 23 and hourofday(now()) == 22"),
+        ("hourofday(now()) == 23", "hourofday(now()) == 23 | where hourofday(now()) == 22"),
+        # A fake completed backup in the source, so completed == 0 is never true.
+        ("string)[])", 'string)[now(), "Backup", "Completed"])'),
+        (
+            "union isfuzzy=true (datatable(TimeGenerated: datetime, JobOperation: string, "
+            "JobStatus: string)[]), (AddonAzureBackupJobs)",
+            "datatable(TimeGenerated: datetime, JobOperation: string, JobStatus: string)[now(), "
+            '"Backup", "Completed"] // AddonAzureBackupJobs',
+        ),
     ],
 )
 def test_a_no_backup_query_that_means_something_else_fails(
@@ -1617,6 +1633,43 @@ def test_a_no_backup_alert_that_reads_less_than_2_days_fails(
     else:
         properties["windowSize"] = window
     assert any("windowSize P2D" in p for p in run(tmp_path, main))
+
+
+@pytest.mark.req("NF-01")
+@pytest.mark.parametrize(
+    "periods",
+    [
+        {"numberOfEvaluationPeriods": 2, "minFailingPeriodsToAlert": 2},
+        {"numberOfEvaluationPeriods": 2, "minFailingPeriodsToAlert": 1},
+    ],
+)
+def test_a_no_backup_alert_that_waits_for_more_failing_checks_fails(
+    tmp_path: Path, periods: dict[str, int]
+) -> None:
+    main = good_main()
+    no_backup_criterion(main)["failingPeriods"] = periods
+    assert any("failingPeriods 1 of 1" in p for p in run(tmp_path, main))
+
+
+@pytest.mark.req("NF-01")
+@pytest.mark.parametrize("frequency", ["PT2H", "P1D", None])
+def test_a_no_backup_alert_that_does_not_run_every_hour_fails(
+    tmp_path: Path, frequency: str | None
+) -> None:
+    main = good_main()
+    properties = backup_alert_resources(main)[2]["properties"]
+    if frequency is None:
+        del properties["evaluationFrequency"]
+    else:
+        properties["evaluationFrequency"] = frequency
+    assert any("evaluationFrequency PT1H" in p for p in run(tmp_path, main))
+
+
+@pytest.mark.req("NF-01")
+def test_a_no_backup_alert_that_mutes_its_actions_fails(tmp_path: Path) -> None:
+    main = good_main()
+    backup_alert_resources(main)[2]["properties"]["muteActionsDuration"] = "P7D"
+    assert any("must not mute its actions" in p for p in run(tmp_path, main))
 
 
 # --- The nightly audit copy job (#103) ---

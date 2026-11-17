@@ -441,14 +441,20 @@ def _kusto(text: str) -> str:
 
 # The parts of the "no backup" query (#115, #169). Before the count, only filters that keep
 # completed backup jobs of the last 2 days. After it, only "none of them", the day and the hour.
-_NO_BACKUP_TABLE = re.compile(rf"(?<!\w){BACKUP_JOBS_TABLE}(?!\w)")
+# The table alone, or the table next to an empty datatable that keeps the query valid before
+# the first job record arrives. Any other source could add rows that look like backups.
+_NO_BACKUP_SOURCE = re.compile(
+    rf"{BACKUP_JOBS_TABLE}|union isfuzzy=true \(datatable\([\w:, ]*\)\[\]\), "
+    rf"\({BACKUP_JOBS_TABLE}\)"
+)
 _NO_BACKUP_FILTERS = {
     "the last 2 days": re.compile(r"TimeGenerated >=? ago\((2d|48h)\)"),
     "backup jobs": re.compile(r'JobOperation == "Backup"'),
     "completed jobs": re.compile(r'JobStatus (startswith|==) "Completed"'),
 }
 _NO_BACKUP_COUNT = re.compile(r"summarize (\w+) = count\(\)")
-_NO_BACKUP_TIMING = re.compile(r"(dayofweek\(now\(\)\) == \dd|hourofday\(now\(\)\) == \d+)")
+_NO_BACKUP_DAY = re.compile(r"dayofweek\(now\(\)\) == \dd")
+_NO_BACKUP_HOUR = re.compile(r"hourofday\(now\(\)\) == \d+")
 
 
 def no_backup_query_problems(
@@ -470,8 +476,23 @@ def no_backup_query_problems(
         or criterion.get("threshold") != 0
     ):
         problems.append(f"alert {name} must fire on any result row (Count GreaterThan 0)")
-    if resource.get("properties", {}).get("windowSize") != "P2D":
+    properties = resource.get("properties", {})
+    if properties.get("windowSize") != "P2D":
         problems.append(f"alert {name} must read 2 days of job records (windowSize P2D)")
+    # The query is true in one hour a week, so the rule must run every hour and fire on the
+    # first true result, and must not stay quiet afterwards.
+    if properties.get("evaluationFrequency") != "PT1H":
+        problems.append(f"alert {name} must run every hour (evaluationFrequency PT1H)")
+    periods = criterion.get("failingPeriods", {})
+    if (
+        periods.get("numberOfEvaluationPeriods", 1) != 1
+        or periods.get("minFailingPeriodsToAlert", 1) != 1
+    ):
+        problems.append(
+            f"alert {name} must fire on the first failing check (failingPeriods 1 of 1)"
+        )
+    if properties.get("muteActionsDuration"):
+        problems.append(f"alert {name} must not mute its actions (muteActionsDuration)")
 
     source, *stages = [part.strip() for part in _kusto(query).split("|")]
     counts = [
@@ -479,7 +500,7 @@ def no_backup_query_problems(
         for i, stage in enumerate(stages)
         if (found := _NO_BACKUP_COUNT.fullmatch(stage))
     ]
-    if not _NO_BACKUP_TABLE.search(source) or len(counts) != 1:
+    if not _NO_BACKUP_SOURCE.fullmatch(source) or len(counts) != 1:
         return [*problems, wrong]
     (at, counted), *_ = counts
     before, after = stages[:at], stages[at + 1 :]
@@ -499,8 +520,13 @@ def no_backup_query_problems(
         return [*problems, wrong]
     none_left = f"{counted} == 0"
     final = [part for found in checks if found for part in found]
-    if none_left not in final or not all(
-        part == none_left or _NO_BACKUP_TIMING.fullmatch(part) for part in final
+    days = [part for part in final if _NO_BACKUP_DAY.fullmatch(part)]
+    hours = [part for part in final if _NO_BACKUP_HOUR.fullmatch(part)]
+    if (
+        final.count(none_left) != 1
+        or len(days) > 1
+        or len(hours) > 1
+        or len(final) != 1 + len(days) + len(hours)
     ):
         return [*problems, wrong]
     return problems
