@@ -1,8 +1,19 @@
 """Resolving an exception from the invoice status page (#62, EX-01, NF-05).
 
 Benjamin or Arita picks how the exception ends and says why in a short comment. The page only
-offers endings that are safe for the case as it stands, and the database checks every one again
-(migrations 0002, 0010 and 0013), so a refused ending can never slip through.
+offers endings that are safe for the case as it stands.
+
+Who checks what:
+
+- **The database** (migrations 0002, 0010 and 0013) records who resolved it and when, refuses
+  any change to a resolved exception, lets an IBAN mismatch end only as fixed in DATEV or
+  rejected, lets "not a duplicate" come only from a person with a reason, lets values to check
+  end as data corrected only after a correction, and lets a rejected or confirmed duplicate case
+  only close. It refuses closing a case that was in a payment run or paid.
+- **This page only** (the rules below): which endings fit which reason, that only an incoming
+  invoice or credit note is closed, that a booked case is not closed, that a comment is given
+  for every ending, and that a person (not a job) resolves. The database does not check these
+  yet; a follow up story moves them there.
 
 What each exception can end as here:
 
@@ -29,6 +40,7 @@ The comment stays on the exception, never in the audit log, which records who, w
 and the outcome (NF-03). Nothing here logs.
 """
 
+import unicodedata
 from dataclasses import dataclass
 
 from sqlalchemy import Connection, text
@@ -234,9 +246,18 @@ def open_case_exception(connection: Connection, exception_id: int) -> OpenCaseEx
 
 
 def clean_comment(comment: str) -> str:
-    """The comment as stored, or BadResolution with a sentence for the person."""
+    """The comment as stored, or BadResolution with a sentence for the person.
+
+    Control characters other than line breaks and tabs are refused (PostgreSQL refuses a NUL
+    anyway). Invisible characters do not count toward the length, so a comment of only zero
+    width spaces is refused like an empty one."""
+    if any(unicodedata.category(ch) == "Cc" and ch not in "\n\r\t" for ch in comment):
+        raise BadResolution("The comment holds a character that cannot be stored. Type it again.")
     cleaned = comment.strip()
-    if not MIN_COMMENT <= len(cleaned) <= MAX_COMMENT:
+    visible = "".join(
+        ch for ch in cleaned if not ch.isspace() and unicodedata.category(ch) not in ("Cf", "Cc")
+    )
+    if len(visible) < MIN_COMMENT or len(cleaned) > MAX_COMMENT:
         raise BadResolution(
             f"Say briefly why ({MIN_COMMENT} to {MAX_COMMENT} characters). Leave out personal"
             " details."

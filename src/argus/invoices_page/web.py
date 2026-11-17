@@ -15,7 +15,7 @@ Like the exception queue page (#126), there are two kinds of routes:
 - **Resolving an exception** (``GET /exceptions/{id}/choices`` and
   ``POST /exceptions/{id}/resolution``, EX-01). The same two roles see how an open exception of
   a case can end and pick one with a short comment. See ``argus.invoices_page.resolve`` for
-  which endings are offered; the database checks each one again and records who and when.
+  which endings are offered and which rules the database checks; it records who and when.
 
 Logs name only the person's ID, case and exception IDs, counts and outcome codes, never a
 vendor, customer, search word or comment (NF-03).

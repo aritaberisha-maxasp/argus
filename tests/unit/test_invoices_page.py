@@ -267,10 +267,19 @@ def test_a_plain_exception_on_a_new_invoice_can_carry_on_or_be_rejected() -> Non
 
 
 @pytest.mark.req("EX-01", "NF-03")
-@pytest.mark.parametrize("comment", ["", "   ", "ab", "x" * 501])
+@pytest.mark.parametrize(
+    "comment", ["", "   ", "ab", "x" * 501, "\u200b\u200b\u200b\u200b", "a\u200bb"]
+)
 def test_a_comment_is_needed_and_short(comment: str) -> None:
     with pytest.raises(BadResolution, match="Leave out personal details"):
         clean_comment(comment)
+
+
+@pytest.mark.req("EX-01")
+def test_a_comment_with_a_control_character_is_refused_plainly() -> None:
+    with pytest.raises(BadResolution, match="cannot be stored"):
+        clean_comment("Checked\x00 with the vendor")
+    assert clean_comment("Line one\nline two") == "Line one\nline two"
 
 
 def test_a_comment_is_kept_without_surrounding_spaces() -> None:
