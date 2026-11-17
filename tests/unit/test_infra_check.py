@@ -1794,3 +1794,26 @@ def test_a_real_address_written_into_the_code_fails(tmp_path: Path) -> None:
         f"intake job {INTAKE_JOB_NAME} gets ARGUS_DIGEST_TO as a fixed address that is not a "
         ".example address; real addresses come from GitHub variables"
     ]
+
+
+@pytest.mark.req("BA-01", "BA-08")
+@pytest.mark.parametrize("value", ["", "person@firma.de", "person@firma.de, other@firma.de"])
+def test_statement_senders_empty_or_a_list_of_addresses_pass(tmp_path: Path, value: str) -> None:
+    parameters = live_parameters(**ADDRESSES, statementSenders=value)
+
+    assert run(tmp_path, good_main(), parameters=parameters) == []
+
+
+@pytest.mark.req("BA-01", "NF-03")
+@pytest.mark.parametrize(
+    "value", ["person@firma.de; other@firma.de", "Benjamin <person@firma.de>", "person@firma.de,"]
+)
+def test_statement_senders_that_are_no_list_of_addresses_fail(tmp_path: Path, value: str) -> None:
+    parameters = live_parameters(**ADDRESSES, statementSenders=value)
+
+    problems = run(tmp_path, good_main(), parameters=parameters)
+
+    assert problems == [
+        "ARGUS_STATEMENT_SENDERS must be empty or a comma separated list of email addresses"
+    ]
+    assert "person@firma.de" not in " ".join(problems)

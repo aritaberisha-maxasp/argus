@@ -37,8 +37,9 @@ Azure sign in is needed. The script fails when:
   anywhere (#23, #133, NF-03).
 - an intake job does not get the digest address and the reminder address from a parameter
   when demo mode is off, an address is written into the code with a real domain, or the
-  parameters file switches demo mode off and leaves an address empty or puts more than one
-  address in it (#167, EX-03, BA-08).
+  parameters file switches demo mode off and leaves an address empty, puts more than one
+  address in it, or sets statement senders that are not a list of addresses (#167, EX-03,
+  BA-08).
 
 Run from the repository root: ``python tools/check_infra.py build/infra``
 """
@@ -1109,6 +1110,16 @@ def notify_problems(main: dict[str, Any], parameters: dict[str, Any] | None) -> 
                     )
                 elif not EMAIL.fullmatch(value):
                     problems.append(f"{setting} must be exactly one email address")
+            # Who may email bank statements (BA-01). May stay empty, but a value the import cannot
+            # read would stop it with no reason in the log (compliance review of PR 178).
+            senders = str(notify.get("statementSenders", "")) if isinstance(notify, dict) else ""
+            if senders.strip() and not all(
+                EMAIL.fullmatch(item.strip()) for item in senders.split(",")
+            ):
+                problems.append(
+                    "ARGUS_STATEMENT_SENDERS must be empty or a comma separated list of email "
+                    "addresses"
+                )
     return problems
 
 

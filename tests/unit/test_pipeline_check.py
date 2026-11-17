@@ -456,3 +456,32 @@ def test_a_demo_reset_that_splits_a_tsv_list_fails(tmp_path: Path) -> None:
     assert "demo.yml must read the app identity's object ID with --query principalId" in (
         check_pipeline.check(root)
     )
+
+
+FILTER_LINE = (
+    "            | sed -E 's/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]+/(address hidden)/g' \\\n"
+)
+
+
+def without_filter(text: str) -> str:
+    return text.replace(FILTER_LINE, "")
+
+
+def filter_after_tee(text: str) -> str:
+    """The filter moved behind tee, so the log already holds the address."""
+    return without_filter(text).replace(
+        "| tee what-if.txt", "| tee what-if.txt | sed -E 's/x/(address hidden)/g'"
+    )
+
+
+@pytest.mark.req("NF-03")
+@pytest.mark.parametrize("change", [without_filter, filter_after_tee])
+def test_a_preview_that_prints_email_addresses_fails(
+    tmp_path: Path, change: Callable[[str], str]
+) -> None:
+    root = copy_repo(tmp_path)
+    before = (root / PREVIEW).read_text(encoding="utf-8")
+    edit(root, PREVIEW, change)
+    assert (root / PREVIEW).read_text(encoding="utf-8") != before
+
+    assert any("must hide email addresses" in p for p in check_pipeline.check(root))

@@ -52,6 +52,8 @@ FORBIDDEN_ANYWHERE = {
     "Key Vault secrets": re.compile(r"az\s+keyvault|vaults/secrets|\.vault\.azure\.net"),
     "Wise": re.compile(r"\bwise\b|api\.(sandbox\.)?transferwise|wise\.com", re.IGNORECASE),
 }
+# What the preview puts in place of an email address (#167).
+ADDRESS_FILTER = "/(address hidden)/g"
 # The preview may look, never change.
 FORBIDDEN_IN_PREVIEW = {
     "a deployment": re.compile(r"deployment\s+(group|sub)\s+create"),
@@ -173,6 +175,15 @@ def preview_problems(workflow: dict[str, Any], text: str) -> list[str]:
         problems.append("infra-preview.yml must run on pull requests only")
     if "what-if" not in text:
         problems.append("infra-preview.yml must run a what if")
+    # The what-if prints changed values, the addresses of people among them (#125, #167). They
+    # are cut out before tee writes the log and the run summary (compliance review of PR 178).
+    hide = text.find(ADDRESS_FILTER)
+    tee = text.find("tee ")
+    if hide == -1 or tee == -1 or hide > tee:
+        problems.append(
+            "infra-preview.yml must hide email addresses in the what if output before it is "
+            "printed or written to the run summary"
+        )
     for what, pattern in FORBIDDEN_IN_PREVIEW.items():
         if pattern.search(text):
             problems.append(f"infra-preview.yml must not make {what}")
