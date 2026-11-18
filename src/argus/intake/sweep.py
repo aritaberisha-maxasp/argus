@@ -7,7 +7,8 @@ it is given :class:`Sorting`, it then sorts the stored copy (step ``classified``
 in doubt also gets an exception for a person, IN-09) and
 routes it (step ``routed``): a payment reminder by forwarding it (#27), every other email by
 recording its route. After the pass over the Inbox it files every routed email into its ARGUS
-folder (#26, :mod:`argus.intake.filing`).
+folder (#26, :mod:`argus.intake.filing`). When :class:`Sorting` has DATEV, it then matches each
+new case to its vendor account (#35, :mod:`argus.intake.vendors`).
 
 Shadow mode (#72, :mod:`argus.intake.mode`), the default: the sweep still stores every email
 and sorts it, but records the result only as a proposal (:mod:`argus.intake.shadow`). It does
@@ -51,6 +52,7 @@ from sqlalchemy import Connection, Engine, text
 
 from argus.cases.model import Actor, ExceptionReason
 from argus.cases.store import open_exception, unit_of_work
+from argus.datev.gateway import DatevGateway
 from argus.documents.email import StoredEmail, store_email
 from argus.documents.records import record_email_documents
 from argus.documents.store import DocumentStore
@@ -84,6 +86,7 @@ from argus.intake.statements import (
     handed_over_from_folder,
     imported_from,
 )
+from argus.intake.vendors import VendorPass, match_vendors
 from argus.sorting import EmailToSort, LanguageModel, Route, SortingConfig, SortingDecision
 from argus.sorting.gates import gate_labels
 from argus.sorting.router import sort_email
@@ -139,6 +142,9 @@ class Sorting:
     invoicing: Invoicing | None = None
     # Max ASP's folders and what each means, to see what the person did in shadow mode (#72).
     person_folders: PersonFolders = field(default_factory=PersonFolders)
+    # DATEV, to match each new case to its vendor account at the end of a live sweep (#35).
+    # Without it, cases wait without a vendor account.
+    vendors: DatevGateway | None = None
 
     def __post_init__(self) -> None:
         # Sorting and reading must skip the same VAT IDs as Max ASP's own. Otherwise sorting
@@ -168,6 +174,8 @@ class SweepResult:
     sorted_by_person: int = 0
     # Statement files handed to the import, from the Inbox and from the statement folder (#166).
     statement_files: int = 0
+    # Cases matched to their DATEV vendor account, and the rest of that pass (#35).
+    vendors: VendorPass | None = None
 
 
 @contextmanager
@@ -474,13 +482,17 @@ def sweep(
         if is_live(engine):
             filing = file_routed(engine, graph, Folders(graph))
             result.filed, result.failed = filing.filed, result.failed + filing.failed
+            if sorting is not None and sorting.vendors is not None:
+                result.vendors = match_vendors(engine, sorting.vendors, sorting.config.own_vat_ids)
+                result.failed += result.vendors.failed
         elif sorting is not None:
             seen = observe_person(engine, graph, sorting.person_folders, in_inbox)
             result.sorted_by_person = seen.sorted_by_person + seen.mapped_later
             result.failed += seen.failed
         log.info(
             "Mailbox sweep: %d in Inbox, %d new, %d stored, %d classified, %d routed, %d filed,"
-            " %d proposed, %d sorted by a person, %d statement files, %d failed",
+            " %d proposed, %d sorted by a person, %d statement files, %d matched to a vendor,"
+            " %d failed",
             result.listed,
             result.new,
             result.stored,
@@ -490,6 +502,7 @@ def sweep(
             result.proposed,
             result.sorted_by_person,
             result.statement_files,
+            result.vendors.matched if result.vendors else 0,
             result.failed,
         )
         return result

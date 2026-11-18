@@ -4,8 +4,9 @@ What runs for real: the fake Graph serves the 50 ``.eml`` fixtures, the mailbox 
 picks them up and stores them in Azurite, sorts each one as read back from the document store
 (#91, with the sorting of #25 and the email reader of #91), opens one case per invoice of
 every incoming invoice email (#30), routes it, forwards the payment
-reminders (#27) and files each email into its ARGUS folder (#26). A second sweep finds nothing
-left to do.
+reminders (#27), files each email into its ARGUS folder (#26) and matches every case to its
+vendor account in the fake DATEV, with the fixture approver table loaded (#35). A second sweep
+finds nothing left to do.
 
 What is stood in: the language model answers from its recordings, and the document reader
 reads PDFs by their text layer and the two scans from their recorded readings, as in the
@@ -20,9 +21,13 @@ from email import policy
 
 import pypdf
 from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from sqlalchemy import Engine, text
 
+from argus.approvers.table import ChangedBy, load_approvers_csv
 from argus.cases.model import Actor
+from argus.datev import DatevConnectGateway
+from argus.datev.fake import DEFAULT_CLIENT_ID, create_fake_datev
 from argus.documents.email import attachments_of
 from argus.documents.store import DocumentStore
 from argus.intake.email_text import EmailReader
@@ -44,6 +49,8 @@ from tests.unit.sorting_helpers import (
     fixture_config,
     manifest,
 )
+
+APPROVERS = EMAILS.parent / "master-data" / "approvers.csv"
 
 # The test stand in that recorded classified and routed before #91. Nothing records under this
 # name any more; AC-8 checks that no step in the trail carries it.
@@ -151,6 +158,12 @@ def run_intake(owner: Engine, app: Engine, documents: DocumentStore) -> IntakeRu
 
 
 def _run_intake(app: Engine, documents: DocumentStore) -> IntakeRun:
+    load_approvers_csv(app, APPROVERS, ChangedBy(ADMIN.actor, ADMIN.name))
+    with TestClient(create_fake_datev()) as datev:
+        return _sweep_twice(app, documents, DatevConnectGateway(datev, DEFAULT_CLIENT_ID))
+
+
+def _sweep_twice(app: Engine, documents: DocumentStore, datev: DatevConnectGateway) -> IntakeRun:
     fake = create_app(token=TOKEN)
     graph = GraphClient(
         StaticTokens(),
@@ -168,6 +181,7 @@ def _run_intake(app: Engine, documents: DocumentStore) -> IntakeRun:
         read=EmailReader(FixtureDocumentReader()),
         reminders=graph,
         invoicing=Invoicing(FixtureDocumentReader(), OWN_VAT_IDS),
+        vendors=datev,
     )
 
     first = sweep(app, graph, archive, sorting)
