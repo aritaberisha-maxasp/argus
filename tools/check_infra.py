@@ -37,6 +37,11 @@ Azure sign in is needed. The script fails when:
 - the ARGUS web app does not always get the five sign in settings, or gets one as a fixed value
   instead of from a parameter, or ``ARGUS_ENTRA_AUTHORITY`` (the local fake only) shows up
   anywhere (#23, #133, NF-03).
+- an intake job does not get the digest address and the reminder address from a parameter
+  when demo mode is off, an address is written into the code with a real domain, or the
+  parameters file switches demo mode off and leaves an address empty, puts more than one
+  address in it, or sets statement senders that are not a list of addresses (#167, EX-03,
+  BA-08).
 
 Run from the repository root: ``python tools/check_infra.py build/infra``
 """
@@ -116,6 +121,15 @@ SIGN_IN_SETTINGS = (
 )
 # Points ARGUS at another sign in service. Only for the local fake (standins/entra).
 FAKE_AUTHORITY_SETTING = "ARGUS_ENTRA_AUTHORITY"
+# The addresses the jobs send to (#167): the setting, and its field in the notifySettings
+# parameter. Both are needed outside demo mode; demo mode has .example values in the code.
+NOTIFY_PARAMETER = "notifySettings"
+NOTIFY_SETTINGS = {
+    "ARGUS_DIGEST_TO": "digestTo",
+    "ARGUS_REMINDER_FORWARD_TO": "reminderForwardTo",
+}
+# RFC 2606 keeps .example for documentation, so such an address can never reach a real person.
+DEMO_ADDRESS = re.compile(r"[\w.+-]+@[\w-]+(\.[\w-]+)*\.example")
 ACTION_GROUP = "Microsoft.Insights/actionGroups"
 LOG_ALERT = "Microsoft.Insights/scheduledQueryRules"
 ALERT_PROCESSING_RULE = "Microsoft.AlertsManagement/actionRules"
@@ -1184,6 +1198,89 @@ def sign_in_problems(main: dict[str, Any]) -> list[str]:
     return problems
 
 
+def _address_entries(template: dict[str, Any], container: dict[str, Any]) -> list[tuple[str, str]]:
+    """Each address setting a container can get, with the value as written: from plain
+    entries and from ``createObject`` calls in expressions, following every variable."""
+    found: list[tuple[str, str]] = []
+    for value in _with_variables(template, _container_env(container)):
+        for entry in _dicts(value):
+            name = entry.get("name")
+            if name in NOTIFY_SETTINGS and "value" in entry:
+                found.append((str(name), str(entry["value"])))
+        for text in strings(value):
+            for body in _calls(text, "createObject"):
+                for name in NOTIFY_SETTINGS:
+                    marker = f"'name', '{name}', 'value', "
+                    start = body.find(marker)
+                    if start != -1:
+                        found.append((name, body[start + len(marker) : -1]))
+    return found
+
+
+def notify_problems(main: dict[str, Any], parameters: dict[str, Any] | None) -> list[str]:
+    """Outside demo mode every intake job gets the digest address and the reminder address
+    from the ``notifySettings`` parameter, so Arita sets them through GitHub secrets, and a
+    parameters file with demo mode off must fill both with one address each (#167, EX-03,
+    BA-08). Problems name settings, never the address."""
+    problems = []
+    jobs = 0
+    for _name, _deployment, template in modules(main):
+        for resource in resources(template):
+            if resource.get("type") != CONTAINER_JOB:
+                continue
+            containers = resource.get("properties", {}).get("template", {}).get("containers", [])
+            for container in containers if isinstance(containers, list) else []:
+                if not isinstance(container, dict):
+                    continue
+                command = " ".join(str(part) for part in container.get("command", []))
+                if INTAKE_COMMAND not in command:
+                    continue
+                jobs += 1
+                job = resource.get("name", "?")
+                entries = _address_entries(template, container)
+                for setting, field in NOTIFY_SETTINGS.items():
+                    values = [value for name, value in entries if name == setting]
+                    expected = f"parameters('{NOTIFY_PARAMETER}').{field}"
+                    if not any(expected in value for value in values):
+                        problems.append(
+                            f"intake job {job} does not get {setting} from the {NOTIFY_PARAMETER} "
+                            "parameter when demo mode is off"
+                        )
+                    for value in values:
+                        literal = value.strip("'")
+                        if "parameters(" not in value and not DEMO_ADDRESS.fullmatch(literal):
+                            problems.append(
+                                f"intake job {job} gets {setting} as a fixed address that is not "
+                                "a .example address; real addresses come from GitHub secrets"
+                            )
+    if jobs == 0:
+        problems.append("no intake job found to check the digest and reminder addresses on")
+    if parameters is not None:
+        given = parameters.get("parameters", {})
+        if given.get(DEMO_PARAMETER, {}).get("value") is False:
+            notify = given.get(NOTIFY_PARAMETER, {}).get("value") or {}
+            for setting, field in NOTIFY_SETTINGS.items():
+                value = str(notify.get(field, "")).strip() if isinstance(notify, dict) else ""
+                if not value:
+                    problems.append(
+                        f"demo mode is off but {setting} is empty; set the GitHub secret "
+                        f"{setting} first (docs/runbooks/go-live.md)"
+                    )
+                elif not EMAIL.fullmatch(value):
+                    problems.append(f"{setting} must be exactly one email address")
+            # Who may email bank statements (BA-01). May stay empty, but a value the import cannot
+            # read would stop it with no reason in the log (compliance review of PR 178).
+            senders = str(notify.get("statementSenders", "")) if isinstance(notify, dict) else ""
+            if senders.strip() and not all(
+                EMAIL.fullmatch(item.strip()) for item in senders.split(",")
+            ):
+                problems.append(
+                    "ARGUS_STATEMENT_SENDERS must be empty or a comma separated list of email "
+                    "addresses"
+                )
+    return problems
+
+
 def check(folder: Path) -> list[str]:
     main = json.loads((folder / "main.json").read_text(encoding="utf-8"))
     policy = json.loads((folder / "eu-only.json").read_text(encoding="utf-8"))
@@ -1204,6 +1301,7 @@ def check(folder: Path) -> list[str]:
         *intake_job_problems(main),
         *audit_job_problems(main),
         *sign_in_problems(main),
+        *notify_problems(main, parameters),
     ]
 
 

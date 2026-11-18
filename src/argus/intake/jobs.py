@@ -45,12 +45,22 @@ from sqlalchemy import Engine, text
 
 from argus.bank.importer import BankSettings
 from argus.bank.notices import remind_missing_statements
-from argus.connections import connections_from_env
+from argus.connections import (
+    DIGEST_TO_ENV,
+    ConnectionSettingsError,
+    NotConnected,
+    connections_from_env,
+)
 from argus.db import engine_from_env
 from argus.db.mode import DatabaseModeError
 from argus.db.mode import check_database_for_mode as _check_database_for_mode
 from argus.documents.store import AzureDocumentStore
-from argus.intake.digest import app_url_from_environment, berlin_today, send_daily_digest
+from argus.intake.digest import (
+    DigestSettingsError,
+    app_url_from_environment,
+    berlin_today,
+    send_daily_digest,
+)
 from argus.intake.email_text import EmailReader
 from argus.intake.filing import Folders, remove_due
 from argus.intake.graph import GraphClient, lookup_name_ok
@@ -90,11 +100,24 @@ DOCUMENT_INTELLIGENCE_ENDPOINT_ENV: Final = "AZURE_DOCUMENT_INTELLIGENCE_ENDPOIN
 
 _DOMAIN = re.compile(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+")
 _VAT_ID = re.compile(r"[A-Z]{2}[A-Z0-9]{2,12}")
+# One email address, nothing around it: no list, no display name (#167).
+_ADDRESS = re.compile(r"[^@\s,;<>]+@" + _DOMAIN.pattern, re.IGNORECASE)
 
 
 class JobSettingsError(ValueError):
     """A setting the job needs is missing or malformed. The message names the setting, never
     its value."""
+
+
+# Errors whose message names a setting and never its value. A job that stops on one logs the
+# message, so the log says which setting to fix (#167). Every other error is logged as its type
+# and the place it was raised only (NF-03).
+SETTINGS_ERRORS: Final = (
+    JobSettingsError,
+    DigestSettingsError,
+    ConnectionSettingsError,
+    NotConnected,
+)
 
 
 def _items(environ: Mapping[str, str], name: str) -> frozenset[str]:
@@ -311,7 +334,12 @@ def digest_services_from_env(environ: Mapping[str, str]) -> DigestServices:
         connections = connections_from_env(environ)
         check_database_for_mode(environ, demo=connections.demo)
         if not connections.digest_to:
-            raise JobSettingsError("set ARGUS_DIGEST_TO before the digest job can run")
+            raise JobSettingsError(
+                f"set {DIGEST_TO_ENV} before the digest job can run; at go live it is the "
+                "GitHub secret of the same name (docs/runbooks/go-live.md)"
+            )
+        if not _ADDRESS.fullmatch(connections.digest_to):
+            raise JobSettingsError(f"{DIGEST_TO_ENV} must be exactly one email address")
         graph = connections.graph_client(digest=True)
         resources.callback(graph.close)
         engine = engine_from_env(environ=environ)
@@ -402,6 +430,11 @@ def run_job(
     ok = False
     try:
         ok = _run(job, environ, build, build_digest, build_statements)
+    except SETTINGS_ERRORS as error:
+        # These name the missing or wrong setting and never its value, so the reason can go
+        # into the log as it is. The safe formatter would only write the error's type, and
+        # Arita needs to see which GitHub secret to set (#167).
+        log.error("The %s job cannot run: %s", job, error)
     except Exception:
         log.exception("The %s job could not finish", job)
     log_outcome(log, job, ok)

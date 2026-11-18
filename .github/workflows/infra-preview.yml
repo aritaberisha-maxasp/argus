@@ -1,7 +1,8 @@
 # Shows what a PR would change in Azure, without changing anything (#81).
 #
 # Signs in as the preview identity: it may read the ARGUS resource group and ask Azure for a
-# what if, nothing else. It cannot deploy, push images, reach the database or read secrets.
+# what if, nothing else. It cannot deploy, push images, reach the database or read Key Vault
+# secrets. The only GitHub secrets it reads are the four email addresses of people (#167).
 # Before Azure is set up, the job skips the preview with a notice and stays green.
 name: Infrastructure preview
 
@@ -79,9 +80,15 @@ jobs:
       ARGUS_ENTRA_GROUP_APPROVER: ${{ vars.ARGUS_ENTRA_GROUP_APPROVER }}
       ARGUS_ENTRA_GROUP_FINANCE: ${{ vars.ARGUS_ENTRA_GROUP_FINANCE }}
       ARGUS_ENTRA_GROUP_ADMIN: ${{ vars.ARGUS_ENTRA_GROUP_ADMIN }}
-      # ARGUS_ALERT_EMAIL is left out on purpose: the preview prints every changed value into
-      # the run summary, and the address belongs to a person. The preview may therefore show
-      # the alert email receiver as removed; the deploy keeps it (#125).
+      # The addresses of people (#125, #167), passed like the deploy passes them so an unchanged
+      # address shows no false change. They are GitHub secrets, not variables, so GitHub shows
+      # *** for them everywhere in the log, step headers included. On top of that every email
+      # address is cut out of the what-if output before it reaches the log or the run summary
+      # (compliance review of PR 178).
+      ARGUS_ALERT_EMAIL: ${{ secrets.ARGUS_ALERT_EMAIL }}
+      ARGUS_DIGEST_TO: ${{ secrets.ARGUS_DIGEST_TO }}
+      ARGUS_REMINDER_FORWARD_TO: ${{ secrets.ARGUS_REMINDER_FORWARD_TO }}
+      ARGUS_STATEMENT_SENDERS: ${{ secrets.ARGUS_STATEMENT_SENDERS }}
     steps:
       - uses: actions/checkout@v4
 
@@ -110,8 +117,10 @@ jobs:
             --resource-group "$RESOURCE_GROUP" \
             --name "argus-preview-$GITHUB_RUN_ID" \
             --parameters infra/main.bicepparam \
-            --validation-level ProviderNoRbac \
-            | sed 's/\x1b\[[0-9;]*m//g' | tee what-if.txt
+            --validation-level ProviderNoRbac 2>&1 \
+            | sed 's/\x1b\[[0-9;]*m//g' \
+            | sed -E 's/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]+/(address hidden)/g' \
+            | tee what-if.txt
           {
             echo "## What this PR would change in Azure"
             echo

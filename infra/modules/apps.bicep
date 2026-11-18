@@ -9,7 +9,7 @@
 // builds the ARGUS image and passes it in. The very first deploy starts with a public
 // placeholder, because the registry for the real image does not exist yet.
 
-import { intakeSettingValues, manualSecret, signInSettingValues } from '../types.bicep'
+import { intakeSettingValues, manualSecret, notifySettingValues, signInSettingValues } from '../types.bicep'
 
 param location string
 param environmentName string
@@ -77,6 +77,9 @@ param intakeSettings intakeSettingValues
 
 @description('The IDs for sign in with Microsoft (#23, #133). Plain app settings, none is secret.')
 param signInSettings signInSettingValues
+
+@description('Who ARGUS emails, and who may email it Wise statements (#167). Used only with demo off.')
+param notifySettings notifySettingValues
 
 resource workspace 'Microsoft.OperationalInsights/workspaces@2023-09-01' existing = {
   name: logAnalyticsWorkspaceName
@@ -246,6 +249,29 @@ var intakeEnv = [
     value: intake.customerDomains
   }
 ]
+
+// Who ARGUS emails at go live (#167, EX-03, BA-08): the digest of open exceptions, payment
+// reminders and Wise statement notices go to Benjamin, and his address may send statements. In
+// demo mode demoSettings has synthetic .example values for the first two, so these are left out
+// there. Live they come from GitHub secrets (docs/runbooks/go-live.md), never from the repo.
+// tools/check_infra.py refuses a parameters file that leaves an address empty with demo off,
+// and the jobs that send refuse to start without one.
+var notifyEnv = demo
+  ? []
+  : [
+      {
+        name: 'ARGUS_DIGEST_TO'
+        value: notifySettings.digestTo
+      }
+      {
+        name: 'ARGUS_REMINDER_FORWARD_TO'
+        value: notifySettings.reminderForwardTo
+      }
+      {
+        name: 'ARGUS_STATEMENT_SENDERS'
+        value: notifySettings.statementSenders
+      }
+    ]
 
 // Sign in with Microsoft (#23, ADR 0008, docs/operations/sign-in.md). Real Entra ID in demo mode
 // too, because the people who look at the demo sign in with their own Max ASP accounts. Only the
@@ -475,6 +501,7 @@ resource intakeJobs 'Microsoft.App/jobs@2024-03-01' = [
               plainSettings,
               demo ? demoSettings : [],
               intakeEnv,
+              notifyEnv,
               jobSettings,
               map(allSecrets, secret => {
                 name: secret.envName

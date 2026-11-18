@@ -12,7 +12,7 @@ from typing import Any
 import pytest
 from pydantic import SecretStr
 
-from argus.connections import ConnectionSettingsError, NotConnected
+from argus.connections import Connections, ConnectionSettingsError, NotConnected
 from argus.intake import jobs
 from argus.intake.jobs import (
     FAILED_MARK,
@@ -20,11 +20,13 @@ from argus.intake.jobs import (
     IntakeSettings,
     JobSettingsError,
     Services,
+    digest_services_from_env,
     main,
     run_job,
     services_from_env,
     statement_services_from_env,
 )
+from argus.logsafe import SafeFormatter
 from standins.graph.app import fake_token
 
 SETTINGS = {
@@ -390,3 +392,125 @@ def test_a_statement_folder_that_cannot_be_looked_up_is_refused(folder: str) -> 
 def test_statement_senders_that_are_not_addresses_are_refused() -> None:
     with pytest.raises(JobSettingsError, match="ARGUS_STATEMENT_SENDERS"):
         services_from_env({**DEMO, "ARGUS_STATEMENT_SENDERS": "benjamin"})
+
+
+# The digest address at go live (#167, EX-03)
+
+LIVE_DIGEST = {
+    "ARGUS_DEMO": "false",
+    "ARGUS_GRAPH_URL": "https://graph.microsoft.com/v1.0",
+    "ARGUS_MAILBOX": "accounts@firma.example",
+    "ARGUS_DATABASE_URL": "postgresql+psycopg://argus_app@localhost:5432/argus",
+    "ARGUS_APP_URL": "https://argus.example",
+}
+DIGEST_ADDRESS = "person@firma.example"
+
+
+def safe_text(caplog: pytest.LogCaptureFixture) -> str:
+    """The log as Azure sees it: every line through the safe formatter of the jobs."""
+    formatter = SafeFormatter("%(name)s %(message)s")
+    return "\n".join(formatter.format(record) for record in caplog.records)
+
+
+class FakeGraph:
+    def close(self) -> None:
+        pass
+
+
+@pytest.fixture
+def graph_calls(monkeypatch: pytest.MonkeyPatch) -> list[bool]:
+    """Records each Graph client the jobs build; a client is what could send an email."""
+    calls: list[bool] = []
+
+    def graph_client(self: Connections, *args: Any, digest: bool = False, **kwargs: Any) -> Any:
+        calls.append(digest)
+        return FakeGraph()
+
+    monkeypatch.setattr(Connections, "graph_client", graph_client)
+    return calls
+
+
+@pytest.mark.req("EX-03")
+def test_live_with_a_digest_address_builds_the_digest_job(graph_calls: list[bool]) -> None:
+    services = digest_services_from_env({**LIVE_DIGEST, "ARGUS_DIGEST_TO": DIGEST_ADDRESS})
+    try:
+        assert graph_calls == [True]
+        assert services.engine.url.database == "argus"
+    finally:
+        services.close()
+
+
+@pytest.mark.req("EX-03", "NF-03")
+@pytest.mark.parametrize("value", [None, "", "   "])
+def test_live_or_shadow_without_a_digest_address_fails_with_the_reason_and_sends_nothing(
+    value: str | None, graph_calls: list[bool], caplog: pytest.LogCaptureFixture
+) -> None:
+    environ = dict(LIVE_DIGEST)
+    if value is not None:
+        environ["ARGUS_DIGEST_TO"] = value
+
+    with caplog.at_level(logging.INFO):
+        assert main(["digest"], environ=environ) == 1
+
+    assert graph_calls == []
+    assert outcome_lines(caplog) == [f"{FAILED_MARK} digest"]
+    text = safe_text(caplog)
+    assert "The digest job cannot run: set ARGUS_DIGEST_TO before the digest job can run" in text
+    assert "docs/runbooks/go-live.md" in text
+
+
+@pytest.mark.req("EX-03", "NF-03")
+@pytest.mark.parametrize(
+    "value",
+    ["one@firma.example, two@firma.example", "Benjamin <person@firma.example>", "person"],
+)
+def test_more_than_one_digest_address_fails_without_writing_it(
+    value: str, graph_calls: list[bool], caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level(logging.INFO):
+        assert main(["digest"], environ={**LIVE_DIGEST, "ARGUS_DIGEST_TO": value}) == 1
+
+    assert graph_calls == []
+    text = safe_text(caplog)
+    assert "ARGUS_DIGEST_TO must be exactly one email address" in text
+    assert value not in caplog.text
+
+
+@pytest.mark.req("EX-03")
+def test_demo_mode_uses_the_demo_digest_address() -> None:
+    environ = {
+        **DEMO,
+        "ARGUS_DIGEST_TO": "digest@maxasp.example",
+        "ARGUS_APP_URL": "https://argus.example",
+    }
+    services = digest_services_from_env(environ)
+    try:
+        assert services.graph.digest_to == "digest@maxasp.example"
+        assert services.graph.forward_to is None
+    finally:
+        services.close()
+
+
+@pytest.mark.req("EX-03")
+def test_demo_mode_without_a_digest_address_fails_too(caplog: pytest.LogCaptureFixture) -> None:
+    environ = {**DEMO, "ARGUS_APP_URL": "https://argus.example"}
+
+    with caplog.at_level(logging.INFO):
+        assert main(["digest"], environ=environ) == 1
+
+    assert "set ARGUS_DIGEST_TO before the digest job can run" in safe_text(caplog)
+
+
+@pytest.mark.req("IN-01", "NF-03")
+def test_any_other_error_is_still_logged_as_its_type_only(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    def broken(environ: Mapping[str, str]) -> Services:
+        raise RuntimeError("row with sender person@firma.example")
+
+    with caplog.at_level(logging.INFO):
+        run_job("sweep", DEMO, build=broken)
+
+    text = safe_text(caplog)
+    assert "error: RuntimeError" in text
+    assert "person@firma.example" not in text

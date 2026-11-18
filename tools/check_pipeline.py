@@ -5,7 +5,10 @@
 The deploy pipeline cannot be run in CI without Azure, so this check reads the workflow files
 and fails when one of the promises in the issue no longer holds:
 
-- Azure sign in uses OpenID Connect only. No secret of any kind is read from GitHub.
+- Azure sign in uses OpenID Connect only. No credential is read from GitHub. The only GitHub
+  secrets a workflow may read are the four email addresses of people (#125, #167), because
+  GitHub prints a variable in every step header of the log and a secret only as ``***``. Those
+  four may never be read as variables, and the deploy refuses to run while one still is one.
 - The deploy runs only on main, after CI passed or by hand. Never on a PR.
 - Only the tip of main deploys, so a re-run of an old CI run is skipped.
 - The order keeps the running version alive: infrastructure with the running image, then the
@@ -38,7 +41,23 @@ DEMO = Path(".github/workflows/demo.yml")
 SCRIPTS = (Path("tools/azure"), Path("tools/deploy.py"))
 LOGIN_ACTION = "azure/login@"
 LOGIN_INPUTS = frozenset({"client-id", "tenant-id", "subscription-id"})
-SECRET_EXPRESSION = re.compile(r"\$\{\{[^}]*\bsecrets\.")
+EXPRESSION = re.compile(r"\$\{\{([^}]*)\}\}")
+# Each use of the secrets context in an expression, and the name after it when there is one.
+SECRET_USE = re.compile(r"\bsecrets\b(?:\.(\w+))?")
+# Email addresses of people (#125, #167). Kept as GitHub secrets so the log shows *** for them
+# (compliance review of PR 178). Not credentials: Azure sign in never reads a secret.
+ADDRESS_SECRETS = frozenset(
+    {
+        "ARGUS_ALERT_EMAIL",
+        "ARGUS_DIGEST_TO",
+        "ARGUS_REMINDER_FORWARD_TO",
+        "ARGUS_STATEMENT_SENDERS",
+    }
+)
+ADDRESS_AS_VARIABLE = re.compile(
+    r"\$\{\{[^}]*\bvars\.(" + "|".join(sorted(ADDRESS_SECRETS)) + r")\b"
+)
+ADDRESS_GUARD = "Refuse email addresses stored as GitHub variables"
 DEPLOY_ORDER = ("infra", "image", "migrate", "release", "smoke")
 
 # Nothing in the pipeline may change the lock, read a vault secret or talk to Wise.
@@ -52,6 +71,8 @@ FORBIDDEN_ANYWHERE = {
     "Key Vault secrets": re.compile(r"az\s+keyvault|vaults/secrets|\.vault\.azure\.net"),
     "Wise": re.compile(r"\bwise\b|api\.(sandbox\.)?transferwise|wise\.com", re.IGNORECASE),
 }
+# What the preview puts in place of an email address (#167).
+ADDRESS_FILTER = "/(address hidden)/g"
 # The preview may look, never change.
 FORBIDDEN_IN_PREVIEW = {
     "a deployment": re.compile(r"deployment\s+(group|sub)\s+create"),
@@ -84,8 +105,20 @@ def runs(workflow: dict[str, Any]) -> str:
 
 def sign_in_problems(name: str, workflow: dict[str, Any], text: str) -> list[str]:
     problems = []
-    if SECRET_EXPRESSION.search(text):
+    other = [
+        used
+        for expression in EXPRESSION.findall(text)
+        for used in SECRET_USE.findall(expression)
+        if used not in ADDRESS_SECRETS
+    ]
+    if other:
+        # Only the four addresses of people may be GitHub secrets, never a credential.
         problems.append(f"{name} reads a GitHub secret; Azure sign in must use OpenID Connect")
+    for address in sorted(set(ADDRESS_AS_VARIABLE.findall(text))):
+        problems.append(
+            f"{name} reads {address} as a GitHub variable; an address of a person must be a "
+            "secret, or the log prints it in every step header"
+        )
     if workflow.get("permissions") != {"contents": "read"}:
         problems.append(f"{name} must default to 'contents: read' permissions")
     for job_name, job in workflow.get("jobs", {}).items():
@@ -107,6 +140,29 @@ def sign_in_problems(name: str, workflow: dict[str, Any], text: str) -> list[str
 
 
 def deploy_problems(workflow: dict[str, Any]) -> list[str]:
+    problems = _address_guard_problems(workflow)
+    return problems + _deploy_order_problems(workflow)
+
+
+def _address_guard_problems(workflow: dict[str, Any]) -> list[str]:
+    """The deploy stops before anything runs while an address of a person is still a GitHub
+    variable (#167): the first step of the config job fails when one is set."""
+    first = steps(workflow.get("jobs", {}).get("config", {}))[:1]
+    guard = first[0] if first else {}
+    condition = str(guard.get("if", ""))
+    if (
+        guard.get("name") != ADDRESS_GUARD
+        or "exit 1" not in str(guard.get("run", ""))
+        or not all(f"vars.{name}" in condition for name in ADDRESS_SECRETS)
+    ):
+        return [
+            "deploy.yml must start by refusing email addresses stored as GitHub variables "
+            f"(a first step {ADDRESS_GUARD!r} in the config job)"
+        ]
+    return []
+
+
+def _deploy_order_problems(workflow: dict[str, Any]) -> list[str]:
     problems = []
     triggers = workflow.get("on", {})
     if not isinstance(triggers, dict) or set(triggers) != {"workflow_run", "workflow_dispatch"}:
@@ -173,6 +229,15 @@ def preview_problems(workflow: dict[str, Any], text: str) -> list[str]:
         problems.append("infra-preview.yml must run on pull requests only")
     if "what-if" not in text:
         problems.append("infra-preview.yml must run a what if")
+    # The what-if prints changed values, the addresses of people among them (#125, #167). They
+    # are cut out before tee writes the log and the run summary (compliance review of PR 178).
+    hide = text.find(ADDRESS_FILTER)
+    tee = text.find("tee ")
+    if hide == -1 or tee == -1 or hide > tee:
+        problems.append(
+            "infra-preview.yml must hide email addresses in the what if output before it is "
+            "printed or written to the run summary"
+        )
     for what, pattern in FORBIDDEN_IN_PREVIEW.items():
         if pattern.search(text):
             problems.append(f"infra-preview.yml must not make {what}")

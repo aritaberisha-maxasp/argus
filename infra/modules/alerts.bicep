@@ -1,6 +1,6 @@
 // Operations alerts: tell Arita when a scheduled job fails or stops running (#125).
 //
-// One action group emails the address from the GitHub variable ARGUS_ALERT_EMAIL. Every
+// One action group emails the address from the GitHub secret ARGUS_ALERT_EMAIL. Every
 // operations alert sends to it: the intake jobs (#125), the nightly audit copy (#103) and
 // later the backup alerts (#115).
 //
