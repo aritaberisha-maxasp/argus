@@ -7,6 +7,10 @@
 // button: the person picks how the exception ends, from the endings ARGUS offers for it, and
 // says why in a short comment (EX-01). ARGUS and its database check the choice again.
 //
+// Every case has a Trail button (#63, NF-01): it shows each step ARGUS recorded for the case,
+// from its email to its last status, with time and actor, and downloads the same as a file.
+// The trail panel only reads: it has no field and no button that changes anything.
+//
 // Sign in goes through the exception queue page, the one address registered in Entra
 // (docs/operations/sign-in.md), like the mailbox page (#135). Everything from the server is put
 // on the page as text (textContent), never as HTML, so nothing read from an invoice can run here.
@@ -65,6 +69,16 @@
     });
     for (const part of format.formatToParts(moment)) out[part.type] = part.value;
     return out.day + "." + out.month + "." + out.year;
+  }
+
+  function berlinTime(moment) {
+    const out = {};
+    const format = new Intl.DateTimeFormat("de-DE", {
+      timeZone: BERLIN, day: "2-digit", month: "2-digit", year: "numeric",
+      hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
+    });
+    for (const part of format.formatToParts(moment)) out[part.type] = part.value;
+    return out.day + "." + out.month + "." + out.year + " " + out.hour + ":" + out.minute + ":" + out.second;
   }
 
   // A date as read on the invoice. ISO dates become DD.MM.YYYY, anything else stays as read.
@@ -206,6 +220,23 @@
       try { problem = (await response.json()).problem || ""; } catch (e) { /* no sentence */ }
       throw new Error(problem || "ARGUS did not accept this. Check it and try again.");
     }
+    throw new Error("ARGUS could not answer right now (" + response.status + "). Try again in a moment.");
+  }
+
+  // Asks ARGUS for the trail of a case, as JSON or as the file.
+  async function trailRequest(token, caseId, file) {
+    const response = await fetch("/cases/" + encodeURIComponent(caseId) + (file ? "/trail.csv" : "/trail"), {
+      method: "GET",
+      headers: { Authorization: "Bearer " + (await token()) },
+      cache: "no-store",
+    });
+    if (response.ok) return response;
+    if (response.status === 401) {
+      sessionStorage.removeItem(DEV_TOKEN_KEY);
+      throw new Error("Your sign in has run out. Reload the page to sign in again.");
+    }
+    if (response.status === 403) throw new Error("Your account has no access to the trail. Ask Arita if you need it.");
+    if (response.status === 404) throw new Error("ARGUS does not know this case. Reload the list.");
     throw new Error("ARGUS could not answer right now (" + response.status + "). Try again in a moment.");
   }
 
@@ -457,6 +488,13 @@
     const kind = el("span", KINDS[c.kind] || words(c.kind), "sub");
     const first = el("span", null, "stack");
     first.append(id, kind);
+    const trailButton = el("button", "Trail", "button small");
+    trailButton.type = "button";
+    trailButton.setAttribute("aria-expanded", "false");
+    trailButton.setAttribute("aria-label", "Trail of case " + c.case_id);
+    trailButton.addEventListener("click", () => togglePanel(tr, trailButton, "trail-" + c.case_id,
+      "Trail of case " + c.case_id, (panel, close) => loadTrail(panel, c, close)));
+    first.append(trailButton);
 
     const partner = el("span", null, "stack");
     partner.append(el("span", c.partner_name || c.sender || "Not read yet", c.partner_name ? "strong" : "muted"));
@@ -479,7 +517,8 @@
         const resolve = el("button", "Resolve", "button small");
         resolve.type = "button";
         resolve.setAttribute("aria-expanded", "false");
-        resolve.addEventListener("click", () => toggleResolve(tr, resolve, c));
+        resolve.addEventListener("click", () => togglePanel(tr, resolve, "resolve-" + c.exception_id,
+          "Resolve the exception of case " + c.case_id, (panel, close) => loadChoices(panel, c, close)));
         status.append(resolve);
       }
     } else if (c.status === "closed" && c.closed_reason) {
@@ -502,10 +541,10 @@
     return tr;
   }
 
-  // --- resolving an exception -------------------------------------------------------------
+  // --- panels under a row -----------------------------------------------------------------
 
-  // Opens the resolve panel under the case's row, or closes it. One panel at a time.
-  function toggleResolve(tr, button, c) {
+  // Opens a panel under the case's row, or closes it. One panel at a time.
+  function togglePanel(tr, button, panelId, label, fill) {
     const wasOpen = state.open && state.open.button === button;
     if (state.open) {
       state.open.row.remove();
@@ -517,8 +556,8 @@
     const td = el("td", null, "resolve-cell");
     td.colSpan = COLUMNS.length;
     const panel = el("div", null, "resolve");
-    panel.id = "resolve-" + c.exception_id;
-    panel.setAttribute("aria-label", "Resolve the exception of case " + c.case_id);
+    panel.id = panelId;
+    panel.setAttribute("aria-label", label);
     panel.setAttribute("role", "region");
     panel.append(el("p", "Loading…", "muted"));
     td.append(panel);
@@ -527,8 +566,90 @@
     button.setAttribute("aria-expanded", "true");
     button.setAttribute("aria-controls", panel.id);
     state.open = { row, button };
-    loadChoices(panel, c, () => toggleResolve(tr, button, c));
+    fill(panel, () => togglePanel(tr, button, panelId, label, fill));
   }
+
+  // --- the trail of a case ------------------------------------------------------------------
+
+  async function loadTrail(panel, c, close) {
+    try {
+      const t = await (await trailRequest(state.token, c.case_id, false)).json();
+      panel.replaceChildren(...trailView(t, c, close));
+    } catch (e) {
+      panel.replaceChildren(el("p", e.message, "problem"));
+    }
+  }
+
+  function actorText(step) {
+    if (step.actor_kind === "system") return "ARGUS · " + step.actor;
+    return step.actor_name ? step.actor_name + " · " + step.actor : "Person · " + step.actor;
+  }
+
+  function trailView(t, c, close) {
+    const parts = [];
+    parts.push(el("h3", "Trail of case " + c.case_id, "resolve-title"));
+    parts.push(el("p", "Every step ARGUS recorded for this case, oldest first, from the email to " +
+      "where it stands now (" + t.case.status_text.toLowerCase() + "). It comes from the audit log " +
+      "and cannot be changed here.", "muted"));
+    if (t.truncated) parts.push(el("p", "Only the first " + t.steps.length + " steps are shown.", "problem"));
+
+    const list = el("ol", null, "trail");
+    for (const s of t.steps) {
+      const item = el("li", null, "trail-step");
+      const when = el("time", berlinTime(new Date(s.occurred_at)), "mono sub");
+      when.dateTime = s.occurred_at;
+      item.append(when, el("span", s.what, "trail-what"), el("span", actorText(s), "sub mono trail-who"));
+      if (s.comment) item.append(el("q", s.comment, "trail-comment"));
+      if (s.facts.length) {
+        // The recorded details are long (fingerprints, IDs), so they fold away.
+        const more = el("details", null, "trail-more");
+        more.append(el("summary", "Recorded details", "sub"));
+        const facts = el("ul", null, "trail-facts");
+        for (const f of s.facts) facts.append(el("li", f, "sub mono"));
+        more.append(facts);
+        item.append(more);
+      }
+      list.append(item);
+    }
+    parts.push(list);
+
+    const download = el("button", "Download as file", "button primary");
+    download.type = "button";
+    const done = el("p");
+    done.setAttribute("role", "status");
+    download.addEventListener("click", async () => {
+      download.disabled = true;
+      done.className = "muted";
+      done.textContent = "Preparing the file…";
+      try {
+        const response = await trailRequest(state.token, c.case_id, true);
+        const blob = await response.blob();
+        const named = /filename="([^"]+)"/.exec(response.headers.get("Content-Disposition") || "");
+        const link = el("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = named ? named[1] : "argus-case-" + c.case_id + "-trail.csv";
+        document.body.append(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(link.href), 10000);
+        done.textContent = "Downloaded " + link.download + ".";
+      } catch (e) {
+        done.className = "problem";
+        done.textContent = e.message;
+      } finally {
+        download.disabled = false;
+      }
+    });
+    const closeButton = el("button", "Close", "button");
+    closeButton.type = "button";
+    closeButton.addEventListener("click", close);
+    const buttons = el("div", null, "resolve-buttons");
+    buttons.append(download, closeButton);
+    parts.push(buttons, done);
+    return parts;
+  }
+
+  // --- resolving an exception -------------------------------------------------------------
 
   async function loadChoices(panel, c, close) {
     try {
