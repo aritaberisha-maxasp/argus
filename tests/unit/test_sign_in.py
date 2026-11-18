@@ -248,6 +248,8 @@ def call(client: TestClient, route: APIRoute, headers: dict[str, str] | None = N
     path = route.path
     for name in ("case_id", "exception_id", "document_id"):
         path = path.replace("{" + name + "}", "1")
+    path = path.replace("{object_id}", "11111111-1111-4111-8111-111111111111")
+    path = path.replace("{vendor_account}", "70001")
     assert "{" not in path, f"give {route.path} a sample value in this test"
     return client.request(sorted(route.methods or {"GET"})[0], path, headers=headers)
 

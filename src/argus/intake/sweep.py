@@ -22,6 +22,11 @@ and the next sweep tries again. An email that is classified but not routed yet (
 failed, or the sweep stopped in between) is routed by the next sweep from the recorded
 decision, without asking the model again.
 
+Wise statements (#166, :mod:`argus.intake.statements`): when it is given
+:class:`~argus.intake.statements.Statements`, the sweep hands the CSV files of a stored email to
+the statement import right before the email is sorted, the same in shadow and live mode. After
+the pass over the Inbox it reads the statement folder and hands each email there over once.
+
 Crash safety: every step is recorded before the next starts. After a crash the next sweep finds
 the email still in the Inbox, reads its record and carries on from the last finished step.
 Storing is content addressed, so storing the same email again returns the copy already there.
@@ -72,6 +77,13 @@ from argus.intake.records import (
 )
 from argus.intake.reminders import ReminderMailbox, forward_reminder
 from argus.intake.shadow import PersonFolders, has_proposal, mark_proposed, observe_person
+from argus.intake.statements import (
+    Statements,
+    hand_over_from_folder,
+    hand_over_from_inbox,
+    handed_over_from_folder,
+    imported_from,
+)
 from argus.sorting import EmailToSort, LanguageModel, Route, SortingConfig, SortingDecision
 from argus.sorting.gates import gate_labels
 from argus.sorting.router import sort_email
@@ -154,6 +166,8 @@ class SweepResult:
     # was recorded.
     proposed: int = 0
     sorted_by_person: int = 0
+    # Statement files handed to the import, from the Inbox and from the statement folder (#166).
+    statement_files: int = 0
 
 
 @contextmanager
@@ -230,8 +244,9 @@ def classify(engine: Engine, sorting: Sorting, record: EmailRecord) -> SortingDe
         if invoices is not None:
             # In the same unit of work, so sorting twice never opens a case twice (IN-08).
             open_cases(db, record.id, invoices)
-        if decision.route is Route.MANUAL_REVIEW:
+        if decision.route is Route.MANUAL_REVIEW and not _open_uncertain(db, record.id):
             # In the same unit of work, so sorting twice never opens a second one (IN-09, EX-01).
+            # The statement handover may have opened one already (#166); one is enough.
             open_exception(
                 db,
                 ExceptionReason.UNCERTAIN_CLASSIFICATION,
@@ -241,6 +256,17 @@ def classify(engine: Engine, sorting: Sorting, record: EmailRecord) -> SortingDe
     # The record ID and the route only: no Message-ID, sender or subject in the log (NF-03).
     log.info("Email record %s classified: %s", record.id, decision.route)
     return decision
+
+
+def _open_uncertain(db: Connection, email_id: int) -> bool:
+    found: bool = db.execute(
+        text(
+            "select exists (select 1 from exception_item where email_id = :id"
+            " and reason = :reason and resolved_at is null)"
+        ),
+        {"id": email_id, "reason": ExceptionReason.UNCERTAIN_CLASSIFICATION.value},
+    ).scalar_one()
+    return found
 
 
 def propose(engine: Engine, sorting: Sorting, record: EmailRecord) -> SortingDecision | None:
@@ -317,6 +343,77 @@ def _current(engine: Engine, record: EmailRecord) -> EmailRecord:
     return found
 
 
+def hand_over_statements(
+    engine: Engine,
+    graph: GraphClient,
+    statements: Statements,
+    record: EmailRecord,
+    live: bool,
+) -> tuple[int, bool]:
+    """Hand the statement files of a stored email to the import, right before it is sorted
+    (#166). Returns the files handed over and whether the email is done: a statement from a
+    confirmed sender is not sorted, so it never lands in manual review (code review of PR
+    176). In live mode it is moved into the statement folder, where it stays at step stored;
+    in shadow mode it stays in the Inbox, moves nothing and gets no proposal.
+
+    Otherwise this runs once per email in practice, because an email is sorted once. A run
+    that fails leaves the email unsorted, so the next sweep tries both again; the import adds
+    nothing twice."""
+    if record.step is not EmailStep.STORED or record.raw_sha256 is None:
+        return 0, False
+    with engine.connect() as connection:
+        if imported_from(connection, record.id):
+            files, handled = 0, True  # handed over before, only the move may be missing
+        elif not live and has_proposal(connection, record.id):
+            return 0, False
+        else:
+            files, handled = None, False
+    if files is None:
+        raw = statements.documents.get(record.raw_sha256)
+        handover = hand_over_from_inbox(engine, statements, record.id, raw)
+        files, handled = len(handover.results), handover.handled
+    if handled and live:
+        # Outside any unit of work; a move to the folder the email is in changes nothing.
+        folder = Folders(graph).id_of(statements.settings.statement_folder)
+        graph.move(record.graph_message_id, folder)
+        log.info("Email record %s moved to the statement folder", record.id)
+    return files, handled
+
+
+def sweep_statement_folder(
+    engine: Engine, graph: GraphClient, archive: EmailArchive, statements: Statements
+) -> tuple[int, int]:
+    """Hand over each email in the statement folder once (#166). The email is recorded and
+    stored like an Inbox email first, so the statement links back to it. Returns the files
+    handed over and the emails that failed; a failed email is tried again by the next sweep."""
+    files = failed = 0
+    try:
+        if is_live(engine):
+            # Live, ARGUS creates the folder like its other folders, so the text of the
+            # exception that asks people to move mail there is never wrong (code review).
+            Folders(graph).id_of(statements.settings.statement_folder)
+        messages = list(graph.list_statement_folder())
+    except Exception:
+        log.exception("Statement folder could not be listed, next sweep retries")
+        return 0, 1
+    for message in messages:
+        try:
+            record, _ = see(engine, message)
+            store(engine, graph, archive, record)
+            record = _current(engine, record)
+            if record.raw_sha256 is None:
+                continue
+            with engine.connect() as connection:
+                if handed_over_from_folder(connection, record.id):
+                    continue
+            raw = statements.documents.get(record.raw_sha256)
+            files += len(hand_over_from_folder(engine, statements, record.id, raw))
+        except Exception:
+            log.exception("Statement folder: email %s failed, next sweep retries", message.id)
+            failed += 1
+    return files, failed
+
+
 def process_email(
     engine: Engine, graph: GraphClient, archive: EmailArchive, message: InboxMessage
 ) -> tuple[bool, bool]:
@@ -326,10 +423,15 @@ def process_email(
 
 
 def sweep(
-    engine: Engine, graph: GraphClient, archive: EmailArchive, sorting: Sorting | None = None
+    engine: Engine,
+    graph: GraphClient,
+    archive: EmailArchive,
+    sorting: Sorting | None = None,
+    statements: Statements | None = None,
 ) -> SweepResult:
     """One pass over the Inbox. An email that fails is logged and retried by the next sweep;
-    the others carry on. Without ``sorting`` the sweep stops at the step stored."""
+    the others carry on. Without ``sorting`` the sweep stops at the step stored. Without
+    ``statements`` no email goes to the statement import."""
     with sweep_lock(engine) as got:
         if not got:
             log.info("Mailbox sweep skipped, another sweep is running")
@@ -343,10 +445,18 @@ def sweep(
                 record, new = see(engine, message)
                 result.new += new
                 result.stored += store(engine, graph, archive, record)
-                if sorting is None:
+                if sorting is None and statements is None:
                     continue
                 record = _current(engine, record)
-                if not is_live(engine):
+                live = is_live(engine)
+                if statements is not None:
+                    files, handled = hand_over_statements(engine, graph, statements, record, live)
+                    result.statement_files += files
+                    if handled:
+                        continue
+                if sorting is None:
+                    continue
+                if not live:
                     result.proposed += propose(engine, sorting, record) is not None
                     continue
                 if classify(engine, sorting, record) is not None:
@@ -357,6 +467,10 @@ def sweep(
                 # The ID only: no sender, subject or content in the log (NF-03).
                 log.exception("Mailbox sweep failed on email %s, next sweep retries", message.id)
                 result.failed += 1
+        if statements is not None:
+            files, failed = sweep_statement_folder(engine, graph, archive, statements)
+            result.statement_files += files
+            result.failed += failed
         if is_live(engine):
             filing = file_routed(engine, graph, Folders(graph))
             result.filed, result.failed = filing.filed, result.failed + filing.failed
@@ -366,7 +480,7 @@ def sweep(
             result.failed += seen.failed
         log.info(
             "Mailbox sweep: %d in Inbox, %d new, %d stored, %d classified, %d routed, %d filed,"
-            " %d proposed, %d sorted by a person, %d failed",
+            " %d proposed, %d sorted by a person, %d statement files, %d failed",
             result.listed,
             result.new,
             result.stored,
@@ -375,6 +489,7 @@ def sweep(
             result.filed,
             result.proposed,
             result.sorted_by_person,
+            result.statement_files,
             result.failed,
         )
         return result

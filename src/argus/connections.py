@@ -130,13 +130,15 @@ class Connections:
         transport: httpx.BaseTransport | None = None,
         *,
         digest: bool = False,
+        statement_folder: str | None = None,
     ) -> GraphClient:
         """The Graph client for the accounts mailbox. In demo mode it signs in to the fake
         Graph with the stand in token. Live, ``tokens`` signs in to Microsoft 365.
         ``transport`` is for tests.
 
         Each client may send only what its job sends: the intake client forwards reminders,
-        the ``digest=True`` client sends the daily digest and nothing else (#61)."""
+        the ``digest=True`` client sends the daily digest and nothing else (#61). Only a client
+        given ``statement_folder`` may list the emails of that one folder (#166)."""
         if not self.graph_url or not self.mailbox:
             raise NotConnected(f"set {GRAPH_URL_ENV} and {MAILBOX_ENV} to read the mailbox")
         if self.demo:
@@ -153,6 +155,7 @@ class Connections:
             standin=self.demo,
             forward_to=None if digest else self.reminder_forward_to,
             digest_to=self.digest_to if digest else None,
+            statement_folder=None if digest else statement_folder,
         )
 
     def datev_gateway(self) -> DatevConnectGateway:

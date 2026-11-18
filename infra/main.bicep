@@ -151,6 +151,7 @@ var intakeJobNames = {
   sweep: 'caj-${prefix}-sweep'
   removal: 'caj-${prefix}-removal'
   digest: 'caj-${prefix}-digest'
+  statements: 'caj-${prefix}-statements'
 }
 
 // The nightly audit copy (#103). It needs only the database and the document store, so it runs

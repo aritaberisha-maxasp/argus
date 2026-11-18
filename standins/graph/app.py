@@ -28,6 +28,7 @@ from email import message_from_bytes, policy
 from email.utils import parseaddr, parsedate_to_datetime
 from pathlib import Path
 from typing import Annotated, Any
+from urllib.parse import quote
 
 from fastapi import FastAPI, Header, Query, Request, Response
 from fastapi.responses import JSONResponse
@@ -407,11 +408,14 @@ def create_app(
         user: str,
         folder_id: str,
         top: Annotated[int, Query(alias="$top", ge=1, le=1000)] = 10,
+        skip: Annotated[int, Query(alias="$skip", ge=0)] = 0,
+        orderby: Annotated[str | None, Query(alias="$orderby")] = None,
         authorization: Annotated[str | None, Header()] = None,
         prefer: Annotated[str | None, Header()] = None,
     ) -> Response:
         """The emails of any folder, newest first, with subject, sender and received time, as
-        the demo mailbox page asks for them (#135). Paging is faked as a next link only."""
+        the demo mailbox page asks for them (#135). With ``$orderby=receivedDateTime asc``
+        oldest first, as the sweep reads the statement folder (#166), paged like the Inbox."""
         refused = check(request, user, authorization, prefer)
         if refused:
             return refused
@@ -421,21 +425,28 @@ def create_app(
         ordered = sorted(
             (m for i, m in box.messages.items() if box.location[i] == folder.id),
             key=lambda m: (m.received, m.immutable_id),
-            reverse=True,
+            reverse=(orderby or "").replace(" ", "").lower() != "receiveddatetimeasc",
         )
-        body: dict[str, Any] = {"value": [summary(m, prefer) for m in ordered[:top]]}
-        if len(ordered) > top:
+        page = ordered[skip : skip + top]
+        body: dict[str, Any] = {"value": [summary(m, prefer) for m in page]}
+        if skip + top < len(ordered):
             base = str(request.base_url).rstrip("/")
             body["@odata.nextLink"] = (
-                f"{base}/v1.0/users/{user}/mailFolders/{folder.id}/messages?%24skip={top}"
+                f"{base}/v1.0/users/{user}/mailFolders/{folder.id}/messages"
+                f"?%24top={top}&%24skip={skip + top}"
             )
-        return JSONResponse(body)
+            if orderby:
+                # Like Graph, the next link keeps the order asked for.
+                body["@odata.nextLink"] += f"&%24orderby={quote(orderby)}"
+        headers = {"Preference-Applied": IMMUTABLE} if prefer == IMMUTABLE else {}
+        return JSONResponse(body, headers=headers)
 
     def summary(message: Message, prefer: str | None) -> dict[str, Any]:
         parsed = message_from_bytes(message.raw, policy=policy.default)
         name, address = parseaddr(str(parsed.get("From", "")))
         return {
             "id": wire_id(message, prefer),
+            "internetMessageId": message.internet_message_id,
             "subject": str(parsed.get("Subject", "")),
             "from": {"emailAddress": {"name": name, "address": address}},
             "receivedDateTime": message.received.strftime("%Y-%m-%dT%H:%M:%SZ"),

@@ -48,6 +48,16 @@ PEOPLE = {
     "tom": ("Tom Test", "tom.test@maxasp.example"),
 }
 
+# Made up Entra object IDs for the people above, so the approver table (#34) can be loaded from
+# approvers.csv and a test can sign in as one of them.
+OBJECT_IDS = {
+    "second_approver": "a0000000-0000-4000-8000-000000000001",
+    "anna": "a0000000-0000-4000-8000-000000000002",
+    "jonas": "a0000000-0000-4000-8000-000000000003",
+    "lea": "a0000000-0000-4000-8000-000000000004",
+    "tom": "a0000000-0000-4000-8000-000000000005",
+}
+
 # Roles from the requirements that point to one person. In the real system
 # these are configuration, not code.
 ROLES = [

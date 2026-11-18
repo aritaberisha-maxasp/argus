@@ -52,6 +52,11 @@ _INBOX_PAGE_PATH = re.compile(
     r"users(?:/(?P<plain>[^/()']+)|\('(?P<quoted>[^/()']+)'\))"
     r"/mailfolders(?:/inbox|\('inbox'\))/messages"
 )
+# The same for the emails of one folder by its ID, such as the statement folder (#166).
+_FOLDER_PAGE_PATH = re.compile(
+    r"users(?:/(?P<plain>[^/()']+)|\('(?P<quoted>[^/()']+)'\))"
+    r"/mailfolders(?:/(?P<folder>[a-z0-9_\-=]+)|\('(?P<folder_quoted>[a-z0-9_\-=]+)'\))/messages"
+)
 
 
 class GraphCallRefused(PermissionError):
@@ -150,6 +155,10 @@ def allowed_paths(
     """The only Graph calls ARGUS makes, all on the one mailbox: list the Inbox, read an email,
     find or create the ARGUS folders, move an email into one and delete an email (#26), and
     read the ID of the Inbox, so the shadow run can tell an email a person moved (#72).
+
+    Listing the emails of a folder is not on this list. The transport allows it for one folder
+    only, the statement folder the client was built with, once the client has found its ID
+    (#166, :meth:`GraphClient.list_statement_folder`).
 
     Forwarding a payment reminder (#27) is only allowed when a forward address is set: save a
     forward as a draft and send a draft. Reading a message, which shows whether it is still a
@@ -336,13 +345,31 @@ class _GuardedTransport(httpx.BaseTransport):
         )
         self._forward_to = forward_to
         self._digest_to = digest_to
+        self._folder_messages = re.compile(
+            re.escape(f"{base_path.rstrip('/')}/users/{quote(mailbox, safe='@')}/mailFolders/")
+            + f"(?P<folder>{_MESSAGE_ID})/messages"
+        )
+        # The one folder whose emails may be listed: the statement folder, once found (#166).
+        self.listable_folder: str | None = None
+
+    def _listing_allowed(self, method: str, path: str) -> bool:
+        found = self._folder_messages.fullmatch(path)
+        return (
+            method == "GET"
+            and found is not None
+            and self.listable_folder is not None
+            and found["folder"] == self.listable_folder
+        )
 
     def handle_request(self, request: httpx.Request) -> httpx.Response:
         url = request.url
         path = url.raw_path.decode("ascii").partition("?")[0]
-        allowed = (url.scheme, url.host, url.port) == self._origin and any(
-            request.method == method and pattern.fullmatch(path)
-            for method, pattern in self._allowed
+        allowed = (url.scheme, url.host, url.port) == self._origin and (
+            any(
+                request.method == method and pattern.fullmatch(path)
+                for method, pattern in self._allowed
+            )
+            or self._listing_allowed(request.method, path)
         )
         if not allowed:
             log.warning("Refused Graph call %s %s%s", request.method, url.host, path)
@@ -389,8 +416,12 @@ class GraphClient:
         sleep: Callable[[float], None] = time.sleep,
         forward_to: str | None = None,
         digest_to: str | None = None,
+        statement_folder: str | None = None,
     ) -> None:
         """``standin=True`` allows plain http, for the fake Graph only, never for Graph.
+
+        ``statement_folder`` is the path of the one folder whose emails the client may list,
+        such as ``ARGUS/Kontoauszüge`` (#166). Without it no folder can be listed.
 
         ``forward_to`` is the one address payment reminders go to (IN-05), ``digest_to`` the
         one address the daily digest of open exceptions goes to (EX-03). Without either the
@@ -406,11 +437,13 @@ class GraphClient:
         self._inbox: str | None = None
         self._sleep = sleep
         self.standin = standin
+        self.statement_folder = statement_folder
+        self._transport = _GuardedTransport(
+            transport or httpx.HTTPTransport(), url, mailbox, forward_to, digest_to, standin
+        )
         self._http = httpx.Client(
             base_url=url,
-            transport=_GuardedTransport(
-                transport or httpx.HTTPTransport(), url, mailbox, forward_to, digest_to, standin
-            ),
+            transport=self._transport,
             timeout=timeout,
             follow_redirects=False,
             auth=_AppToken(tokens),
@@ -502,14 +535,48 @@ class GraphClient:
             link = page.get("@odata.nextLink")
             url, params = (self._next_page(link) if link else ""), None
 
-    def _next_page(self, link: Any) -> str:
+    def list_statement_folder(self) -> Iterator[InboxMessage]:
+        """Every email in the statement folder the client was built with, oldest first,
+        following Graph's paging: IDs and received times only, like :meth:`list_inbox` (#166).
+        Nothing when the folder does not exist. Only this folder can be listed: the transport
+        refuses any other."""
+        if self.statement_folder is None:
+            raise GraphCallRefused("refused Graph call: no statement folder is set")
+        folder_id: str | None = None
+        for name in self.statement_folder.strip("/").split("/"):
+            folder_id = self.find_folder(folder_id, name)
+            if folder_id is None:
+                return
+        if folder_id is None:
+            return
+        _check_id(folder_id)
+        self._transport.listable_folder = folder_id
+        url = f"{self._user}/mailFolders/{folder_id}/messages"
+        params: dict[str, str] | None = {
+            "$select": "id,internetMessageId,receivedDateTime",
+            "$orderby": "receivedDateTime asc",
+            "$top": str(PAGE_SIZE),
+        }
+        while url:
+            page = self._get(url, params).json()
+            for item in page.get("value", []):
+                yield InboxMessage(
+                    id=item["id"],
+                    internet_message_id=item.get("internetMessageId"),
+                    received_at=_parse_time(item.get("receivedDateTime")),
+                )
+            link = page.get("@odata.nextLink")
+            url, params = (self._next_page(link, folder_id) if link else ""), None
+
+    def _next_page(self, link: Any, folder_id: str | None = None) -> str:
         """The URL for the next page of the Inbox, built from Graph's ``@odata.nextLink``.
 
         Real Graph may write the mailbox as ``users('...')`` or percent encode the ``@``, and
         the Inbox as ``mailFolders('Inbox')``. Those all mean our Inbox, so the next page is
         asked for on our own allowlisted path with Graph's query. Any other link (another host,
         a mailbox GUID, another mailbox or folder) is refused with a clear error, so a sweep
-        never silently stops after the first page (#90)."""
+        never silently stops after the first page (#90). With ``folder_id`` the link must name
+        that folder of our mailbox instead of the Inbox (#166)."""
         if not isinstance(link, str):
             raise GraphPagingRefused("refused Graph paging link: it is not text")
         url = httpx.URL(link)
@@ -520,20 +587,29 @@ class GraphClient:
             )
         path = url.raw_path.decode("ascii").partition("?")[0]
         prefix = base.raw_path.decode("ascii").rstrip("/") + "/"
+        pattern = _INBOX_PAGE_PATH if folder_id is None else _FOLDER_PAGE_PATH
         found = (
-            _INBOX_PAGE_PATH.fullmatch(unquote(path[len(prefix) :]).lower())
+            pattern.fullmatch(unquote(path[len(prefix) :]).lower())
             if path.startswith(prefix)
             else None
         )
+        if (
+            folder_id is not None
+            and found is not None
+            and (found["folder"] or found["folder_quoted"]) != folder_id.lower()
+        ):
+            found = None
         if found is None or (found["plain"] or found["quoted"]) != self.mailbox.lower():
             log.error("Refused Graph paging link %s, the sweep stops after this page", path)
             raise GraphPagingRefused(
                 f"refused Graph paging link {path}: it does not name the Inbox of the mailbox"
-                " as ARGUS knows it, so the sweep stops here instead of skipping emails"
+                " as ARGUS knows it, or the folder asked for, so the sweep stops here instead"
+                " of skipping emails"
                 " (see docs/runbooks/go-live.md)"
             )
         query = url.query.decode("ascii")
-        return f"{self._user}/mailFolders/inbox/messages" + (f"?{query}" if query else "")
+        folder = "inbox" if folder_id is None else folder_id
+        return f"{self._user}/mailFolders/{folder}/messages" + (f"?{query}" if query else "")
 
     def get_raw(self, message_id: str) -> bytes:
         """The email exactly as received, as an .eml file with every attachment in it."""
@@ -788,8 +864,16 @@ def _check_id(value: str) -> None:
 
 # A folder name goes into a $filter, so only plain names are allowed.
 FOLDER_NAME = re.compile(r"[A-Za-z][A-Za-z ]{0,63}")
+# What a lookup by name accepts: the same plus the German letters, for the statement folder
+# ARGUS/Kontoauszüge (#166). None of them can end the quoted value in the $filter.
+_LOOKUP_NAME = re.compile(r"[A-Za-zÄÖÜäöüß][A-Za-zÄÖÜäöüß ]{0,63}")
+
+
+def lookup_name_ok(name: str) -> bool:
+    """Whether a folder of this name can be looked up (:meth:`GraphClient.find_folder`)."""
+    return _LOOKUP_NAME.fullmatch(name) is not None
 
 
 def _check_folder_name(name: str) -> None:
-    if not FOLDER_NAME.fullmatch(name):
+    if not _LOOKUP_NAME.fullmatch(name):
         raise GraphCallRefused("refused Graph call: not a plain folder name")

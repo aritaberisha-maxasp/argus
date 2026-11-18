@@ -14,10 +14,11 @@ from sqlalchemy import Engine, text
 from sqlalchemy.exc import NoResultFound
 
 from argus import __version__
+from argus.approvers import ApproverTable
+from argus.approvers.web import install_approver_routes
 from argus.auth import (
     CaseApprovers,
     CurrentUser,
-    NoApproversYet,
     Role,
     SignedInUser,
     TokenVerifier,
@@ -140,7 +141,9 @@ def create_app(
         title="ARGUS", version=__version__, docs_url=None, redoc_url=None, openapi_url=None
     )
     install_sign_in(app, sign_in())
-    approvers = case_approvers or NoApproversYet()
+    # Who decides on a case comes from the approver table (#34): the vendor's approver, and the
+    # deputy while the approver is away. Tests pass their own.
+    approvers = case_approvers or ApproverTable()
     engines: list[Engine] = []
     stores: list[DocumentStore] = []
 
@@ -156,6 +159,7 @@ def create_app(
 
     install_queue_page(app, engine, documents)
     install_invoices_page(app, engine)
+    install_approver_routes(app, engine)
     # The fake mailbox page exists in demo mode only; otherwise its routes answer 404 (#135).
     if connections.demo:
         install_mailbox_page(app, demo_graph or connections.graph_client)

@@ -1,8 +1,8 @@
 """Who may open which case, against a real PostgreSQL (#23, NF-03).
 
-The app reads with the rights of the application's database user, argus_app. Until the
-approver table (#34) and approval (#38) store who decides on a case, a small stand in tells the
-app the approvers of each case.
+The app reads with the rights of the application's database user, argus_app. A small stand in
+tells the app the approvers of each case, so these tests do not depend on the approver table.
+Without one the app asks the approver table (#34); test_approver_table.py covers that.
 """
 
 from collections.abc import Mapping
@@ -99,7 +99,7 @@ def test_finance_and_admin_see_every_case(
         assert response.json()["id"] == case_id
 
 
-def test_until_cases_have_approvers_an_approver_sees_none(
+def test_an_approver_of_no_vendor_sees_no_case(
     app: Engine, entra: FakeEntra, cases: tuple[int, int]
 ) -> None:
     client = client_for(app, entra, None)

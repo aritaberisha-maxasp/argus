@@ -60,7 +60,7 @@ param standinNames object
 @description('The fake accounts mailbox, a reserved .example address (RFC 2606).')
 param demoMailbox string
 
-@description('Run the mailbox sweep, the daily removal and the daily digest as scheduled jobs (#125, #61).')
+@description('Run the mailbox sweep, the daily removal, the daily digest and the daily statement check as scheduled jobs (#125, #61, #166).')
 param runIntakeJobs bool
 
 @description('Names of the intake jobs, from main.bicep.')
@@ -165,6 +165,13 @@ var demoSettings = [
     // set at go live (docs/runbooks/go-live.md).
     name: 'ARGUS_DIGEST_TO'
     value: 'digest@maxasp.example'
+  }
+  {
+    // Who may email the monthly Wise statement (#56, #166): the synthetic address of the demo
+    // fixtures. Live it is Benjamin's address, set at go live (docs/runbooks/go-live.md);
+    // until then statements are imported from the statement folder only.
+    name: 'ARGUS_STATEMENT_SENDERS'
+    value: 'benjamin@maxasp.example'
   }
   {
     name: 'ARGUS_DATEV_URL'
@@ -418,6 +425,14 @@ var intakeJobList = [
     // day starts (#61). The job sends at most one digest per Berlin date, so a late or second
     // start sends nothing more.
     cron: '0 5 * * *'
+  }
+  {
+    job: 'statements'
+    // Once a day at 06:00 UTC: 07:00 in Berlin in winter, 08:00 in summer. Reminds Benjamin
+    // when last month's Wise statement is missing on the 2nd working day and on the 5th
+    // (BA-01, #166). Each notice is sent once per month, so a late or second start sends
+    // nothing more.
+    cron: '0 6 * * *'
   }
 ]
 
