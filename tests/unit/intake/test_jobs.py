@@ -23,6 +23,7 @@ from argus.intake.jobs import (
     main,
     run_job,
     services_from_env,
+    statement_services_from_env,
 )
 from standins.graph.app import fake_token
 
@@ -215,7 +216,7 @@ def test_clients_already_open_are_closed_when_building_fails(
     class Connections:
         demo = True
 
-        def graph_client(self) -> Graph:
+        def graph_client(self, *, statement_folder: str | None = None) -> Graph:
             return Graph()
 
     monkeypatch.setattr(jobs, "connections_from_env", lambda environ: Connections())
@@ -306,7 +307,7 @@ def test_a_sweep_with_a_failed_email_is_a_failed_run(
     )
 
     class Run:
-        engine = graph = archive = sorting = None
+        engine = graph = archive = sorting = statements = None
 
     assert jobs.run_sweep(Run()) is ok  # type: ignore[arg-type]
 
@@ -369,3 +370,23 @@ def test_the_database_is_checked_before_any_client_is_built(
     with pytest.raises(JobSettingsError):
         services_from_env({**DEMO, "ARGUS_DATABASE_URL": "postgresql+psycopg://x@h/argus"})
     assert built == []
+
+
+@pytest.mark.req("BA-01", "BA-08")
+def test_the_statement_job_needs_the_reminder_address() -> None:
+    environ = {k: v for k, v in DEMO.items() if k != "ARGUS_REMINDER_FORWARD_TO"}
+    with pytest.raises(JobSettingsError, match="ARGUS_REMINDER_FORWARD_TO"):
+        statement_services_from_env(environ)
+
+
+@pytest.mark.req("BA-01")
+@pytest.mark.parametrize("folder", ["ARGUS/Konto-Auszüge", "ARGUS/Auszug'", "ARGUS//2026"])
+def test_a_statement_folder_that_cannot_be_looked_up_is_refused(folder: str) -> None:
+    with pytest.raises(JobSettingsError, match="ARGUS_STATEMENT_FOLDER"):
+        statement_services_from_env({**DEMO, "ARGUS_STATEMENT_FOLDER": folder})
+
+
+@pytest.mark.req("BA-01")
+def test_statement_senders_that_are_not_addresses_are_refused() -> None:
+    with pytest.raises(JobSettingsError, match="ARGUS_STATEMENT_SENDERS"):
+        services_from_env({**DEMO, "ARGUS_STATEMENT_SENDERS": "benjamin"})

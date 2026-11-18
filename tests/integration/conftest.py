@@ -159,3 +159,33 @@ def fake_graph() -> FastAPI:
 @pytest.fixture
 def graph(fake_graph: FastAPI) -> GraphClient:
     return client_for(fake_graph)
+
+
+@pytest.fixture
+def clean_bank(owner: Engine) -> Iterator[None]:
+    """Each test starts with no statements. The tables are append only, so the owner wipes
+    them with the triggers off, for this test cleanup only. The audit log stays. Shared by the
+    statement import tests (#56) and the statement handover tests (#166)."""
+
+    def wipe() -> None:
+        with owner.begin() as connection:
+            connection.execute(text("set local session_replication_role = replica"))
+            connection.execute(text("delete from bank_notice"))
+            connection.execute(
+                text(
+                    "delete from exception_item where statement_id is not null"
+                    " or facts ? 'bank_statement'"
+                )
+            )
+            connection.execute(
+                text(
+                    "with gone as (delete from bank_transaction returning case_id)"
+                    " delete from invoice_case where id in (select case_id from gone)"
+                )
+            )
+            connection.execute(text("delete from bank_statement"))
+
+    wipe()
+    yield
+    wipe()
+    set_mode(owner, IntakeMode.SHADOW)

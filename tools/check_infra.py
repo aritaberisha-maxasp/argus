@@ -86,7 +86,7 @@ STANDINS_MODULE = "standins"
 # The scheduled intake jobs (#125) and the log lines their alerts look for.
 INTAKE_COMMAND = "argus.intake"
 INTAKE_SCHEDULES = {"sweep": "*/5 * * * *"}
-INTAKE_DAILY = ("removal", "digest")
+INTAKE_DAILY = ("removal", "digest", "statements")
 # The nightly audit copy (#83, #103) and the job name in its outcome lines.
 AUDIT_COMMAND = "argus.audit"
 AUDIT_JOB = "audit-copy"
@@ -732,9 +732,9 @@ def _daily(cron: str) -> bool:
 
 
 def intake_job_problems(main: dict[str, Any]) -> list[str]:
-    """The sweep runs every 5 minutes, the removal and the digest once a day, one run at a time
-    and without retries, only when switched on, and every run is watched by an alert (#125,
-    #61)."""
+    """The sweep runs every 5 minutes, the removal, the digest and the statement check once a
+    day, one run at a time and without retries, only when switched on, and every run is watched
+    by an alert (#125, #61, #166)."""
     problems = []
     scheduled: dict[str, str] = {}
     for template in templates(main):
