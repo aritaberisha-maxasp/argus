@@ -11,7 +11,8 @@ What each step shows:
 - **When**: the database clock of the event, in Berlin time on the page and in the file.
 - **Who**: a job of ARGUS (``system:intake``) or a person by Entra object ID, the way the audit
   log records them. Where ARGUS knows that person's name (the approver table, or the name a
-  person gave with a correction), it is shown next to the ID.
+  person gave with a correction), it is shown next to the ID, labelled as the name ARGUS knows
+  now: it is today's name, not the one at the time of the step, until #38 and #180 keep that.
 - **What**: a plain sentence for the event, the status before and after, and the recorded
   details.
 - **Why**: the comment a person gave. The audit log keeps no free text (ADR 0005), so the
@@ -19,7 +20,10 @@ What each step shows:
   the audit log itself (migration 0013). An approval comment (AP-08) will show the same way
   once approvals are built.
 - **Chain number and hash**: so an auditor can match each step with the nightly copy of the
-  audit log (#83). The file also says whether the whole hash chain was intact when it was made.
+  audit log (#83). The file also says whether the whole hash chain was intact when it was made,
+  and that the comment of a resolved exception and the name are not covered by the hash.
+- **Bank transactions**: their receipt is the bank statement, so the trail also holds the
+  statement's own events and those of the email that brought it.
 
 Nothing here logs. Names and comments are personal data and stay out of the log (NF-03).
 """
@@ -86,6 +90,15 @@ OUTCOME_TEXT: dict[Outcome, str] = {
     Outcome.PUT_BACK_IN_POOL: "put back in the pool",
 }
 
+# What the hash does not cover (compliance review of PR 181). Names come from the approver table
+# and corrections as they are today; ARGUS does not yet keep the name at the time of the step
+# (#38, #180).
+NOT_HASHED = (
+    "The comment of a resolved exception and the column Name known to ARGUS now are read from"
+    " other ARGUS tables, not from the audit log, so the hash does not cover them. Names are"
+    " as ARGUS knows them today, not as they were at the time of the step."
+)
+
 # The columns of the exported file, in order.
 FILE_COLUMNS = (
     "Step",
@@ -94,7 +107,7 @@ FILE_COLUMNS = (
     "Event",
     "Actor kind",
     "Actor",
-    "Actor name",
+    "Name known to ARGUS now",
     "Status before",
     "Status after",
     "Details",
@@ -190,14 +203,30 @@ def fact_lines(details: dict[str, Any]) -> list[str]:
     return lines
 
 
+# The steps of a case: its own events and those of its email (``case_trace``). A bank
+# transaction case has no email of its own; its receipt is the bank statement it was imported
+# from, so its trail also holds the statement's events and those of the email that brought the
+# statement (compliance review of PR 181). Events of other cases on the same statement stay out.
 _STEPS = """
+    with statement as (
+      select s.id, s.source_email_id
+      from bank_transaction b join bank_statement s on s.id = b.statement_id
+      where b.case_id = :id
+    )
     select t.chain_seq, t.occurred_at, t.event_type, t.actor_type, t.actor,
-           t.from_status, t.to_status, t.details, encode(t.hash, 'hex') as hash_hex,
+           t.from_status, t.to_status, t.details, t.statement_id,
+           encode(t.hash, 'hex') as hash_hex,
            case when t.event_type = 'exception_resolved' then x.resolution
                 when t.event_type = 'case_corrected' then t.details ->> 'reason' end as comment
-    from case_trace t
+    from audit_event t
     left join exception_item x on x.id = t.exception_id
-    where t.trace_case_id = :id
+    where t.id in (
+      select id from case_trace where trace_case_id = :id
+      union
+      select e.id from audit_event e join statement s
+        on e.case_id is null
+       and (e.statement_id = s.id or e.email_id = s.source_email_id)
+    )
     order by t.chain_seq
     limit :limit
 """
@@ -245,7 +274,8 @@ def case_trail(connection: Connection, case_id: int) -> CaseTrail | None:
                 actor_name=names.get(r["actor"]) if r["actor_type"] == "user" else None,
                 from_status=CaseStatus(r["from_status"]) if r["from_status"] else None,
                 to_status=CaseStatus(r["to_status"]) if r["to_status"] else None,
-                facts=fact_lines(details),
+                facts=([f"bank statement: {r['statement_id']}"] if r["statement_id"] else [])
+                + fact_lines(details),
                 details=details,
                 comment=r["comment"],
                 hash_hex=r["hash_hex"],
@@ -294,6 +324,7 @@ def trail_file(
             )
         ]
     )
+    writer.writerow([_cell(NOT_HASHED)])
     writer.writerow(
         [_cell(f"Status now: {case.status_text}, {_steps(len(trail.steps))}")]
         + ([_cell(f"Only the first {MAX_STEPS} steps are in this file")] if trail.truncated else [])

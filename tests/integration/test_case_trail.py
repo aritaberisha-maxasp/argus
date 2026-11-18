@@ -8,6 +8,8 @@ below is made up.
 import csv
 import io
 import logging
+import secrets
+import string
 import uuid
 from collections.abc import Iterator
 from datetime import datetime
@@ -298,6 +300,94 @@ def test_the_trail_holds_only_this_case_and_its_own_email(
             {"seqs": list(seqs), "other": other, "other_email": email_of[other]},
         ).scalar()
     assert foreign == 0
+
+
+def bank_case_from_emailed_statement(
+    app: Engine, store: MemoryDocumentStore, tag: str
+) -> tuple[int, int, int, int]:
+    """Two bank transaction cases imported from one statement that came by email. Returns
+    (case, other case on the same statement, statement, email). A currency of its own, so the
+    one statement per month rule of migration 0014 never meets another test."""
+    email = received_email(app, store)
+    currency = "Q" + "".join(secrets.choice(string.ascii_uppercase) for _ in range(2))
+    with unit_of_work(app, Actor.system("bank")) as db:
+        sha = uuid.uuid4().hex * 2
+        statement_id: int = db.execute(
+            text(
+                """
+                insert into bank_statement (sha256, location, size_bytes, source,
+                                            source_email_id, currency, period, opening_minor,
+                                            closing_minor, transaction_count, outcome)
+                values (:sha, 'sha256/' || :sha, 1, 'email', :email, :currency,
+                        date '2026-10-01', 0, -4250, 2, 'imported')
+                returning id
+                """
+            ),
+            {"sha": sha, "email": email.email_id, "currency": currency},
+        ).scalar_one()
+        ids = []
+        for n in (1, 2):
+            case_id = create_case(db, CaseKind.BANK_TRANSACTION, partner_account=f"W{n}-{tag}")
+            db.execute(
+                text(
+                    """
+                    insert into bank_transaction (case_id, wise_balance_currency,
+                                                  wise_transaction_id, booked_on, amount_minor,
+                                                  statement_id)
+                    values (:id, :currency, :tx, date '2026-10-12', -2125, :statement)
+                    """
+                ),
+                {
+                    "id": case_id,
+                    "currency": currency,
+                    "tx": f"TX{n}-{tag}",
+                    "statement": statement_id,
+                },
+            )
+            ids.append(case_id)
+    return ids[0], ids[1], statement_id, email.email_id
+
+
+def test_a_bank_transaction_trail_starts_with_the_statement_and_its_email(
+    app: Engine,
+    client: TestClient,
+    entra: FakeEntra,
+    store: MemoryDocumentStore,
+    tag: str,
+) -> None:
+    """A bank case has no email of its own: its receipt is the statement (compliance review)."""
+    case_id, other, statement_id, _ = bank_case_from_emailed_statement(app, store, tag)
+
+    steps = trail(client, entra, case_id)["steps"]
+    kinds = [s["event_type"] for s in steps]
+
+    assert kinds[:2] == ["email_seen", "email_stored"]
+    assert kinds.index("bank_statement_recorded") < kinds.index("case_created")
+    imported = next(s for s in steps if s["event_type"] == "bank_transaction_imported")
+    assert f"bank statement: {statement_id}" in imported["facts"]
+    # Nothing of the other transaction on the same statement.
+    with app.connect() as db:
+        foreign = db.execute(
+            text("select count(*) from audit_event where chain_seq = any(:seqs) and case_id = :o"),
+            {"seqs": [s["chain_seq"] for s in steps], "o": other},
+        ).scalar()
+    assert foreign == 0
+    times = [datetime.fromisoformat(s["occurred_at"]) for s in steps]
+    assert times == sorted(times)
+
+
+def test_an_invoice_trail_holds_no_bank_statement_events(
+    app: Engine,
+    client: TestClient,
+    entra: FakeEntra,
+    store: MemoryDocumentStore,
+    tag: str,
+) -> None:
+    bank_case_from_emailed_statement(app, store, tag)
+    case_id = booked_case_from_email(app, store, tag)
+    kinds = {s["event_type"] for s in trail(client, entra, case_id)["steps"]}
+    assert "bank_statement_recorded" not in kinds
+    assert "bank_transaction_imported" not in kinds
 
 
 # --- AC: the trail can be exported as a file ---

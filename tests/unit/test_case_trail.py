@@ -10,6 +10,7 @@ from argus.cases.model import CaseKind, CaseStatus, ExceptionReason, Outcome
 from argus.invoices_page.trail import (
     FILE_COLUMNS,
     MAX_STEPS,
+    NOT_HASHED,
     OUTCOME_TEXT,
     CaseTrail,
     TrailStep,
@@ -135,13 +136,18 @@ def test_the_file_says_what_it_is_then_one_row_per_step() -> None:
         "Exported 2026-11-18T21:00:00+01:00 by Arita Test (44444444), read from the audit log"
     ]
     assert rows[2] == ["Hash chain of the whole audit log: intact"]
-    assert rows[3] == ["Status now: Booked, 2 steps"]
-    assert rows[4] == []
-    assert rows[5] == list(FILE_COLUMNS)
-    assert [r[0] for r in rows[6:]] == ["1", "2"]
-    assert rows[6][1] == "2026-07-01T12:00:01+02:00"
-    assert rows[6][FILE_COLUMNS.index("Details")] == '{"note": "x"}'
-    assert rows[6][FILE_COLUMNS.index("Chain number")] == "101"
+    # It says plainly which columns the hash does not cover, and that names are today's.
+    assert rows[3] == [NOT_HASHED]
+    assert "the hash does not cover them" in NOT_HASHED
+    assert "Name known to ARGUS now" in NOT_HASHED and "today" in NOT_HASHED
+    assert rows[4] == ["Status now: Booked, 2 steps"]
+    assert rows[5] == []
+    assert rows[6] == list(FILE_COLUMNS)
+    assert "Name known to ARGUS now" in FILE_COLUMNS
+    assert [r[0] for r in rows[7:]] == ["1", "2"]
+    assert rows[7][1] == "2026-07-01T12:00:01+02:00"
+    assert rows[7][FILE_COLUMNS.index("Details")] == '{"note": "x"}'
+    assert rows[7][FILE_COLUMNS.index("Chain number")] == "101"
 
 
 def test_a_broken_chain_and_a_cut_trail_are_said_plainly() -> None:
@@ -150,7 +156,7 @@ def test_a_broken_chain_and_a_cut_trail_are_said_plainly() -> None:
         trail_file(trail, chain_broken_at=42, exported_at=datetime.now(UTC), exported_by="someone")
     )
     assert rows[2] == ["Hash chain of the whole audit log: BROKEN at chain number 42"]
-    assert rows[3] == [
+    assert rows[4] == [
         "Status now: Booked, 1 step",
         f"Only the first {MAX_STEPS} steps are in this file",
     ]
@@ -163,7 +169,7 @@ def test_text_a_spreadsheet_would_run_gets_an_apostrophe(start: str) -> None:
     )
     row = read(
         trail_file(trail, chain_broken_at=None, exported_at=datetime.now(UTC), exported_by="x")
-    )[6]
+    )[7]
     assert row[FILE_COLUMNS.index("Comment")] == "'" + start + "1+1"
     assert row[FILE_COLUMNS.index("Actor")] == "'" + start + "job"
 
@@ -172,7 +178,7 @@ def test_semicolons_and_quotes_in_a_comment_stay_in_their_cell() -> None:
     trail = CaseTrail(case=CASE, steps=[step(1, comment='a; "b"\nc')], truncated=False)
     row = read(
         trail_file(trail, chain_broken_at=None, exported_at=datetime.now(UTC), exported_by="x")
-    )[6]
+    )[7]
     assert len(row) == len(FILE_COLUMNS)
     assert row[FILE_COLUMNS.index("Comment")] == 'a; "b"\nc'
 

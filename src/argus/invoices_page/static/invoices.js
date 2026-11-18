@@ -582,7 +582,8 @@
 
   function actorText(step) {
     if (step.actor_kind === "system") return "ARGUS · " + step.actor;
-    return step.actor_name ? step.actor_name + " · " + step.actor : "Person · " + step.actor;
+    // The name is the one ARGUS knows today, not the one at the time of the step (#38, #180).
+    return step.actor_name ? step.actor_name + " (name known to ARGUS now) · " + step.actor : "Person · " + step.actor;
   }
 
   function trailView(t, c, close) {
