@@ -14,6 +14,18 @@ The team works 19:00 to 07:00 CET on weekdays and all weekend. To protect usage,
 
 **Limit on waiting PRs.** When six or more PRs wait at `ready-for-arita`, the shift starts no new story. Arita's merging is then the bottleneck, and more PRs only make the merge order harder and use usage that later fixes may need. Instead the shift updates the waiting PRs from main, gets their re-checks done so the merge list needs no pushes, and refines the next stories as in "When the sprint runs dry". New stories start again once fewer than six wait.
 
+**Checking the merge list.** Each PR's checks ran against main as it was then, not against main after the PRs above it in the list. So before the list goes to Arita, the coordinator tries it:
+
+```
+python tools/check_merge_order.py 154 156 155 158
+```
+
+The script starts from main on GitHub, merges each PR on top of the one before it, the way Arita will, and prints one line per PR: clean, conflict (with the files), migration clash, or tests red (with the test names). It squash merges by default, because that is how Arita merges, so a PR built on another PR's branch shows the conflict Arita would hit. `--fast` skips the tests and takes seconds; without it each step takes about a minute. It only reads from GitHub and pushes nothing.
+
+- The coordinator runs it each time it writes the merge list, and again after each merge by Arita with the PRs still waiting.
+- For every PR it flags, the coordinator asks the author thread to update that PR from main (or from the PR it is built on) and fix it before Arita gets there. A push after a verdict needs the usual short re-check.
+- The digest only shows a list that came out clean, or says which PR is still being fixed and that the list stops before it.
+
 ## How one issue flows
 
 1. **PO** writes the issue with acceptance criteria and requirement IDs. When it meets the Definition of Ready it moves to **Ready**.
