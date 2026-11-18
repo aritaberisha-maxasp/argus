@@ -16,7 +16,13 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, text
 
-from argus.approvers.table import ChangedBy, save_approver, set_vendor_approver
+import argus.intake.vendors as vendors
+from argus.approvers.table import (
+    ChangedBy,
+    remove_vendor_approver,
+    save_approver,
+    set_vendor_approver,
+)
 from argus.cases.model import (
     Actor,
     CaseKind,
@@ -288,7 +294,7 @@ def test_a_person_who_resolved_the_exception_first_wins(
     match_vendors(app, datev, OWN_VAT_IDS, cases=[case_id])
     with app.connect() as connection:
         [exception] = [e for e in list_open_exceptions(connection) if e.case_id == case_id]
-    with unit_of_work(app, Actor.user("55555555-5555-4555-8555-555555555555")) as db:
+    with unit_of_work(app, PERSON) as db:
         resolve_exception(
             db,
             exception.id,
@@ -298,6 +304,89 @@ def test_a_person_who_resolved_the_exception_first_wins(
         )
 
     fake.post("/_fake/creditors", json=vendor.creditor())
+    done = match_vendors(app, datev, OWN_VAT_IDS, cases=[case_id])
+
+    assert (done.matched, done.resolved, done.failed) == (0, 0, 0)
+    assert status_of(app, case_id) == (CaseStatus.CLOSED, None)
+
+
+PERSON = Actor.user("55555555-5555-4555-8555-555555555555")
+
+
+def open_exception_of(app: Engine, case_id: int) -> int:
+    with app.connect() as connection:
+        [exception] = [e for e in list_open_exceptions(connection) if e.case_id == case_id]
+    return exception.id
+
+
+@pytest.mark.req("VM-02")
+def test_carry_on_without_an_approver_puts_the_case_back_in_the_queue(
+    app: Engine, fake: TestClient, datev: DatevConnectGateway
+) -> None:
+    """Code review of PR 182: "Checked, carry on" on the invoices page (#62) must not let a
+    case go on to approval while its vendor still has no approver."""
+    vendor = Vendor()
+    fake.post("/_fake/creditors", json=vendor.creditor())
+    case_id = case_from(app, vat_id=vendor.vat_id)
+    match_vendors(app, datev, OWN_VAT_IDS, cases=[case_id])
+    with unit_of_work(app, PERSON) as db:
+        resolve_exception(
+            db, open_exception_of(app, case_id), Outcome.ACCEPTED_WITH_COMMENT, resolution="ok"
+        )
+    assert status_of(app, case_id) == (CaseStatus.RECEIVED, str(vendor.account))
+
+    done = match_vendors(app, datev, OWN_VAT_IDS, cases=[case_id])
+
+    assert (done.matched, done.without_approver) == (0, 1)
+    assert status_of(app, case_id) == (CaseStatus.EXCEPTION, str(vendor.account))
+    assert [r for r, _ in open_of(app, case_id)] == [ExceptionReason.VENDOR_WITHOUT_APPROVER]
+
+
+@pytest.mark.req("VM-02")
+def test_an_approver_removed_before_approval_stops_the_case_again(
+    app: Engine, fake: TestClient, datev: DatevConnectGateway
+) -> None:
+    vendor = Vendor()
+    fake.post("/_fake/creditors", json=vendor.creditor())
+    give_approver(app, vendor)
+    case_id = case_from(app, vat_id=vendor.vat_id)
+    match_vendors(app, datev, OWN_VAT_IDS, cases=[case_id])
+    assert open_of(app, case_id) == []
+
+    remove_vendor_approver(app, ADMIN, str(vendor.account))
+    # The approver check needs no DATEV, so it runs even while DATEV does not answer.
+    done = match_vendors(app, Watching(datev, down=True), OWN_VAT_IDS, cases=[case_id])
+
+    assert done.without_approver == 1
+    assert not done.skipped_datev_unavailable
+    assert [r for r, _ in open_of(app, case_id)] == [ExceptionReason.VENDOR_WITHOUT_APPROVER]
+
+
+@pytest.mark.req("VM-03")
+def test_an_exception_a_person_resolves_during_the_pass_is_left_alone(
+    app: Engine, fake: TestClient, datev: DatevConnectGateway, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The pass lists its work, then a person rejects the invoice before the pass reaches it."""
+    vendor = Vendor()
+    case_id = case_from(app, vat_id=vendor.vat_id)
+    match_vendors(app, datev, OWN_VAT_IDS, cases=[case_id])
+    listed = vendors._work
+
+    def person_resolves_after_listing(*args: Any) -> Any:
+        work = listed(*args)
+        with unit_of_work(app, PERSON) as db:
+            resolve_exception(
+                db,
+                open_exception_of(app, case_id),
+                Outcome.REJECTED,
+                case_to=CaseStatus.CLOSED,
+                closed_reason=ClosedReason.REJECTED,
+            )
+        return work
+
+    monkeypatch.setattr(vendors, "_work", person_resolves_after_listing)
+    fake.post("/_fake/creditors", json=vendor.creditor())
+
     done = match_vendors(app, datev, OWN_VAT_IDS, cases=[case_id])
 
     assert (done.matched, done.resolved, done.failed) == (0, 0, 0)

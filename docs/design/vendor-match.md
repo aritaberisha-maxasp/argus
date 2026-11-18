@@ -41,11 +41,15 @@ Every pass looks at these two exceptions again:
 
 The case then goes back to where it was and carries on. Nobody has to touch it (VM-03). If a person resolved the exception first, for example by rejecting the invoice, ARGUS leaves it alone.
 
+Every pass also looks at matched cases still in Received whose vendor has no approver row. That happens when a person presses "Checked, carry on" on `vendor_without_approver` on the invoices page (#62), or when an approver row is removed before approval. ARGUS opens `vendor_without_approver` again, so no case reaches approval without an approver (VM-02, code review of PR 182). This check needs no DATEV, so it also runs while DATEV does not answer. For `unknown_vendor`, carry on brings the case back without a vendor account, and the next pass opens `unknown_vendor` again.
+
 ## When it runs
 
-At the end of every live sweep, after filing, so it needs no job of its own. It asks DATEV only when there is a case to match or an exception to look at again. When DATEV does not answer, nothing changes and the next sweep tries again. In shadow mode no cases are opened, so there is nothing to match.
+At the end of every live sweep, after filing, so it needs no job of its own. It asks DATEV only when there is a vendor to find: a new case, or an open `unknown_vendor`. When DATEV does not answer, those wait for the next sweep; the approver checks still run. In shadow mode no cases are opened, so there is nothing to match.
 
-The job builds the gateway from `ARGUS_DATEV_URL` and `ARGUS_DATEV_CLIENT` (`argus.connections`). The demo points them at the fake DATEV. Live they are set at go live; until then cases wait without a vendor account.
+The job builds the gateway from `ARGUS_DATEV_URL` and `ARGUS_DATEV_CLIENT` (`argus.connections`). The demo points them at the fake DATEV. Live they are set at go live ([go live runbook](../runbooks/go-live.md)); until then cases wait without a vendor account.
+
+The demo reset (`python -m argus.demo reset`) fills the approver table from the synthetic `tests/fixtures/master-data/approvers.csv`, so demo invoices carry on to approval. Vendor 70008 has no approver there on purpose, so E13 shows "The vendor has no approver".
 
 ## Testing against the fake DATEV
 

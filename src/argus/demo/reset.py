@@ -8,6 +8,10 @@ Each part checks for itself that it only touches the demo:
 - :func:`reset_documents` deletes the files in a demo document store, an account whose name
   contains ``demo`` (or the local Azurite emulator). The real store is locked for 10 years and
   refuses deletes anyway (ADR 0001).
+- :func:`load_demo_approvers` fills the approver table of the rebuilt demo database from the
+  synthetic fixture ``tests/fixtures/master-data/approvers.csv``, so demo invoices from the
+  fake DATEV vendors carry on to approval instead of all waiting as "vendor without approver"
+  (#35). Vendor 70008 stays without an approver on purpose, for E13.
 - :func:`reset_standins` asks the three stand ins to forget what ARGUS sent them. In Azure the
   Demo workflow restarts them instead, since they cannot be reached from outside.
 """
@@ -21,6 +25,8 @@ from azure.storage.blob import ContainerClient
 from sqlalchemy import Engine, make_url, text
 
 import argus.db
+from argus.approvers.table import ChangedBy, load_approvers_csv
+from argus.cases.model import Actor
 from argus.connections import Connections, is_standin_address
 from argus.db.mode import DEMO_SUFFIX as DEMO_SUFFIX
 from argus.demo.common import DemoRefused, control_root
@@ -28,6 +34,10 @@ from argus.demo.common import DemoRefused, control_root
 # The account name of the local Azurite emulator (UseDevelopmentStorage=true).
 EMULATOR_ACCOUNT = "devstoreaccount1"
 MIGRATIONS = Path(argus.db.__file__).resolve().parent / "migrations"
+# The synthetic approver table, read from the repository checkout the Demo workflow runs in.
+DEMO_APPROVERS = Path("tests") / "fixtures" / "master-data" / "approvers.csv"
+# Who fills the demo approver table in the audit log: a made up person, the demo reset.
+DEMO_RESET = ChangedBy(Actor.user("d0000000-0000-4000-8000-000000000000"), "Demo reset")
 
 
 def database_name(url: str) -> str:
@@ -58,6 +68,16 @@ def reset_database(engine: Engine) -> str:
         connection.commit()
         revision = connection.execute(text("select version_num from alembic_version")).scalar()
     return str(revision)
+
+
+def load_demo_approvers(engine: Engine, path: Path = DEMO_APPROVERS) -> int:
+    """Fill the approver table of the demo database from the synthetic fixture. Returns the
+    number of vendor rows. Refuses any database whose name does not end in ``_demo``."""
+    with engine.connect() as connection:
+        name: str = connection.execute(text("select current_database()")).scalar_one()
+    if not name.endswith(DEMO_SUFFIX):
+        raise DemoRefused(f"connected to {name}, not to a database ending in {DEMO_SUFFIX}")
+    return load_approvers_csv(engine, path, DEMO_RESET)
 
 
 def documents_account(connection_string: str) -> str:

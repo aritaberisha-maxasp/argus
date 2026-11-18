@@ -237,15 +237,19 @@ class _Work:
     case_id: int
     exception_id: int | None
     reason: ExceptionReason | None
+    needs_datev: bool  # only finding a vendor reads DATEV; an approver check does not
 
 
 def _work(connection: Connection, cases: Collection[int] | None) -> list[_Work]:
-    """Cases still without a vendor account, and this step's own open exceptions."""
+    """Cases still without a vendor account, matched cases whose vendor has no approver (for
+    example after a person pressed carry on, or the approver row was removed), and this step's
+    own open exceptions."""
     only = list(cases) if cases is not None else None
     rows = connection.execute(
         text(
             """
-            select c.id as case_id, null::bigint as exception_id, null::text as reason
+            select c.id as case_id, null::bigint as exception_id, null::text as reason,
+                   true as needs_datev
             from invoice_case c
             where c.kind in ('incoming_invoice', 'incoming_credit_note')
               and c.status = 'received' and c.partner_account is null
@@ -253,7 +257,15 @@ def _work(connection: Connection, cases: Collection[int] | None) -> list[_Work]:
                           where r.case_id = c.id and r.role = 'invoice')
               and (cast(:only as bigint[]) is null or c.id = any(cast(:only as bigint[])))
             union all
-            select e.case_id, e.id, e.reason::text
+            select c.id, null::bigint, null::text, false
+            from invoice_case c
+            where c.kind in ('incoming_invoice', 'incoming_credit_note')
+              and c.status = 'received' and c.partner_account is not null
+              and not exists (select 1 from vendor_approver v
+                              where v.vendor_account = c.partner_account)
+              and (cast(:only as bigint[]) is null or c.id = any(cast(:only as bigint[])))
+            union all
+            select e.case_id, e.id, e.reason::text, e.reason = 'unknown_vendor'
             from exception_item e join invoice_case c on c.id = e.case_id
             where e.resolved_at is null
               and e.reason in ('unknown_vendor', 'vendor_without_approver')
@@ -264,7 +276,12 @@ def _work(connection: Connection, cases: Collection[int] | None) -> list[_Work]:
         {"only": only},
     ).all()
     return [
-        _Work(row.case_id, row.exception_id, ExceptionReason(row.reason) if row.reason else None)
+        _Work(
+            row.case_id,
+            row.exception_id,
+            ExceptionReason(row.reason) if row.reason else None,
+            row.needs_datev,
+        )
         for row in rows
     ]
 
@@ -293,12 +310,14 @@ def match_vendors(
         work = _work(connection, cases)
     if not work:
         return result
-    try:
-        book = VendorBook.from_datev(datev, own_vat_ids)
-    except DatevError:
-        log.warning("DATEV did not answer, vendor matching waits for the next sweep")
-        result.skipped_datev_unavailable = True
-        return result
+    book = VendorBook(())
+    if any(item.needs_datev for item in work):
+        try:
+            book = VendorBook.from_datev(datev, own_vat_ids)
+        except DatevError:
+            log.warning("DATEV did not answer, vendor matching waits for the next sweep")
+            result.skipped_datev_unavailable = True
+            work = [item for item in work if not item.needs_datev]
     for item in work:
         try:
             with unit_of_work(engine, VENDOR_ACTOR) as db:
@@ -336,10 +355,14 @@ def _handle(db: Connection, item: _Work, book: VendorBook, result: VendorPass) -
             )
             result.resolved += 1
         return
-    if item.reason is None and (
-        case.status is not CaseStatus.RECEIVED or case.partner_account is not None
-    ):
+    if item.reason is None and case.status is not CaseStatus.RECEIVED:
         return  # moved on since the work was listed
+    if item.reason is None and case.partner_account is not None:
+        # Matched before, but the vendor has no approver (again): it must not carry on (VM-02).
+        if vendor_approver(db, case.partner_account) is None:
+            _queue_without_approver(db, item.case_id, case.partner_account, None)
+            result.without_approver += 1
+        return
     party = _party(db, item.case_id)
     if party is None:
         return
@@ -374,16 +397,7 @@ def _handle(db: Connection, item: _Work, book: VendorBook, result: VendorPass) -
     if found.by.weaker:
         result.weaker.append(item.case_id)
     if vendor_approver(db, account) is None:
-        open_exception(
-            db,
-            ExceptionReason.VENDOR_WITHOUT_APPROVER,
-            (
-                f"Vendor account {account} ({found.vendor.name}) has no approver yet. Add one "
-                "in the approver table. ARGUS carries on by itself once it has one."
-            ),
-            case_id=item.case_id,
-            facts={"account": account},
-        )
+        _queue_without_approver(db, item.case_id, account, found.vendor.name)
         result.without_approver += 1
     if item.reason is ExceptionReason.UNKNOWN_VENDOR:
         # Opened before resolving, so the case stays stopped while it still has no approver.
@@ -396,6 +410,22 @@ def _handle(db: Connection, item: _Work, book: VendorBook, result: VendorPass) -
             ),
         )
         result.resolved += 1
+
+
+def _queue_without_approver(
+    db: Connection, case_id: int, account: str, vendor_name: str | None
+) -> None:
+    named = f" ({vendor_name})" if vendor_name else ""
+    open_exception(
+        db,
+        ExceptionReason.VENDOR_WITHOUT_APPROVER,
+        (
+            f"Vendor account {account}{named} has no approver yet. Add one in the approver "
+            "table. ARGUS carries on by itself once it has one."
+        ),
+        case_id=case_id,
+        facts={"account": account},
+    )
 
 
 def _unknown_detail(party: InvoiceParty, found: NoMatch) -> str:
