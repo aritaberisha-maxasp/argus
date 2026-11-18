@@ -22,6 +22,7 @@ import time
 from collections.abc import Callable, Generator, Iterator
 from dataclasses import dataclass
 from datetime import datetime
+from enum import StrEnum
 from typing import Any, Protocol
 from urllib.parse import quote, unquote, urlsplit
 
@@ -145,16 +146,51 @@ def check_token(token: SecretStr) -> None:
         )
 
 
+class GraphCall(StrEnum):
+    """One kind of Graph call. Each job builds its client with only the kinds it needs, so a
+    bug in one job cannot touch mail it has no business with (#168, NF-03). The lists live
+    next to the jobs in :mod:`argus.intake.jobs`."""
+
+    LIST_INBOX = "list the Inbox"
+    READ_EMAIL = "read an email as received"
+    # Which folder an email is in, whether it is still a draft and who it goes to.
+    READ_MESSAGE = "read the details of an email"
+    FIND_FOLDERS = "find folders"
+    CREATE_FOLDER = "create a folder"
+    READ_INBOX_ID = "read the ID of the Inbox"
+    READ_DELETED_ITEMS_ID = "read the ID of Deleted Items"
+    MOVE = "move an email"
+    DELETE = "delete an email"
+    # The one statement folder the client was built with (#166).
+    LIST_STATEMENT_FOLDER = "list the statement folder"
+    # Any folder, against the fake Graph only, for the demo mailbox page (#135). The Inbox and
+    # the statement folder are folders too.
+    LIST_ANY_FOLDER = "list any folder in the demo"
+    FORWARD = "save a forward of a payment reminder"
+    SEND_NOTICE = "send a notice about a Wise statement"
+    CREATE_DIGEST = "save the daily digest"
+    SEND_DRAFT = "send a saved draft"
+
+
+# Every call ARGUS makes. A client built without its own list gets this one; every job passes
+# its own (#168).
+ALL_CALLS: frozenset[GraphCall] = frozenset(GraphCall)
+
+
 def allowed_paths(
     base_path: str,
     mailbox: str,
     forward_to: str | None = None,
     digest_to: str | None = None,
     standin: bool = False,
+    calls: frozenset[GraphCall] = ALL_CALLS,
 ) -> tuple[tuple[str, re.Pattern[str]], ...]:
     """The only Graph calls ARGUS makes, all on the one mailbox: list the Inbox, read an email,
     find or create the ARGUS folders, move an email into one and delete an email (#26), and
     read the ID of the Inbox, so the shadow run can tell an email a person moved (#72).
+
+    ``calls`` narrows this to what one job needs (#168). A call that is not in it is not on
+    the list, whatever else the client was built with.
 
     Listing the emails of a folder is not on this list. The transport allows it for one folder
     only, the statement folder the client was built with, once the client has found its ID
@@ -172,30 +208,46 @@ def allowed_paths(
     Listing the emails of any folder is allowed against the fake Graph only, for the demo
     mailbox page (#135). Against the real Graph that call stays refused."""
     user = re.escape(f"{base_path.rstrip('/')}/users/{quote(mailbox, safe='@')}")
-    paths: tuple[tuple[str, re.Pattern[str]], ...] = (
-        ("GET", re.compile(f"{user}/mailFolders/inbox/messages")),
-        ("GET", re.compile(f"{user}/messages/{_MESSAGE_ID}/\\$value")),
-        ("GET", re.compile(f"{user}/messages/{_MESSAGE_ID}")),
-        ("GET", re.compile(f"{user}/mailFolders(/{_MESSAGE_ID}/childFolders)?")),
-        ("GET", re.compile(f"{user}/mailFolders/deleteditems")),
-        ("GET", re.compile(f"{user}/mailFolders/inbox")),
-        ("POST", re.compile(f"{user}/mailFolders(/{_MESSAGE_ID}/childFolders)?")),
-        ("POST", re.compile(f"{user}/messages/{_MESSAGE_ID}/move")),
-        ("DELETE", re.compile(f"{user}/messages/{_MESSAGE_ID}")),
+    rules: tuple[tuple[GraphCall, str, str, bool], ...] = (
+        (GraphCall.LIST_INBOX, "GET", f"{user}/mailFolders/inbox/messages", True),
+        (GraphCall.READ_EMAIL, "GET", f"{user}/messages/{_MESSAGE_ID}/\\$value", True),
+        (GraphCall.READ_MESSAGE, "GET", f"{user}/messages/{_MESSAGE_ID}", True),
+        (
+            GraphCall.FIND_FOLDERS,
+            "GET",
+            f"{user}/mailFolders(/{_MESSAGE_ID}/childFolders)?",
+            True,
+        ),
+        (GraphCall.READ_DELETED_ITEMS_ID, "GET", f"{user}/mailFolders/deleteditems", True),
+        (GraphCall.READ_INBOX_ID, "GET", f"{user}/mailFolders/inbox", True),
+        (
+            GraphCall.CREATE_FOLDER,
+            "POST",
+            f"{user}/mailFolders(/{_MESSAGE_ID}/childFolders)?",
+            True,
+        ),
+        (GraphCall.MOVE, "POST", f"{user}/messages/{_MESSAGE_ID}/move", True),
+        (GraphCall.DELETE, "DELETE", f"{user}/messages/{_MESSAGE_ID}", True),
+        (GraphCall.LIST_ANY_FOLDER, "GET", f"{user}/mailFolders/{_MESSAGE_ID}/messages", standin),
+        (
+            GraphCall.FORWARD,
+            "POST",
+            f"{user}/messages/{_MESSAGE_ID}/createForward",
+            bool(forward_to),
+        ),
+        # A notice about a Wise statement (#56); checked by notice_body_problem.
+        (GraphCall.SEND_NOTICE, "POST", f"{user}/sendMail", bool(forward_to)),
+        (GraphCall.CREATE_DIGEST, "POST", f"{user}/messages", bool(digest_to)),
+        (
+            GraphCall.SEND_DRAFT,
+            "POST",
+            f"{user}/messages/{_MESSAGE_ID}/send",
+            bool(forward_to or digest_to),
+        ),
     )
-    if standin:
-        paths += (("GET", re.compile(f"{user}/mailFolders/{_MESSAGE_ID}/messages")),)
-    if forward_to:
-        paths += (
-            ("POST", re.compile(f"{user}/messages/{_MESSAGE_ID}/createForward")),
-            # A notice about a Wise statement (#56); checked by notice_body_problem.
-            ("POST", re.compile(f"{user}/sendMail")),
-        )
-    if digest_to:
-        paths += (("POST", re.compile(f"{user}/messages")),)
-    if forward_to or digest_to:
-        paths += (("POST", re.compile(f"{user}/messages/{_MESSAGE_ID}/send")),)
-    return paths
+    return tuple(
+        (method, re.compile(pattern)) for call, method, pattern, ok in rules if ok and call in calls
+    )
 
 
 # What a statement notice may carry. No attachment, no copy, no reply address.
@@ -335,11 +387,13 @@ class _GuardedTransport(httpx.BaseTransport):
         forward_to: str | None = None,
         digest_to: str | None = None,
         standin: bool = False,
+        calls: frozenset[GraphCall] = ALL_CALLS,
     ) -> None:
         self._inner = inner
         self._origin = (base_url.scheme, base_url.host, base_url.port)
         base_path = base_url.raw_path.decode("ascii")
-        self._allowed = allowed_paths(base_path, mailbox, forward_to, digest_to, standin)
+        self._allowed = allowed_paths(base_path, mailbox, forward_to, digest_to, standin, calls)
+        self._list_statement_folder = GraphCall.LIST_STATEMENT_FOLDER in calls
         self._new_message = re.compile(
             re.escape(f"{base_path.rstrip('/')}/users/{quote(mailbox, safe='@')}/messages")
         )
@@ -356,6 +410,7 @@ class _GuardedTransport(httpx.BaseTransport):
         found = self._folder_messages.fullmatch(path)
         return (
             method == "GET"
+            and self._list_statement_folder
             and found is not None
             and self.listable_folder is not None
             and found["folder"] == self.listable_folder
@@ -417,6 +472,7 @@ class GraphClient:
         forward_to: str | None = None,
         digest_to: str | None = None,
         statement_folder: str | None = None,
+        calls: frozenset[GraphCall] = ALL_CALLS,
     ) -> None:
         """``standin=True`` allows plain http, for the fake Graph only, never for Graph.
 
@@ -425,7 +481,10 @@ class GraphClient:
 
         ``forward_to`` is the one address payment reminders go to (IN-05), ``digest_to`` the
         one address the daily digest of open exceptions goes to (EX-03). Without either the
-        client cannot send anything."""
+        client cannot send anything.
+
+        ``calls`` are the kinds of Graph call this client may make (#168). Every job passes its
+        own list (:mod:`argus.intake.jobs`); anything else is refused before it leaves ARGUS."""
         if urlsplit(base_url).scheme != "https" and not standin:
             raise ValueError("the Graph base URL must use https unless it is the stand in")
         self.mailbox = mailbox
@@ -438,8 +497,15 @@ class GraphClient:
         self._sleep = sleep
         self.standin = standin
         self.statement_folder = statement_folder
+        self.calls = frozenset(calls)
         self._transport = _GuardedTransport(
-            transport or httpx.HTTPTransport(), url, mailbox, forward_to, digest_to, standin
+            transport or httpx.HTTPTransport(),
+            url,
+            mailbox,
+            forward_to,
+            digest_to,
+            standin,
+            self.calls,
         )
         self._http = httpx.Client(
             base_url=url,

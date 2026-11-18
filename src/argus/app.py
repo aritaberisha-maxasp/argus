@@ -3,6 +3,7 @@
 import logging
 import os
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 from typing import Annotated
 
@@ -37,7 +38,7 @@ from argus.intake.mode import IntakeMode, SwitchedBy, intake_mode, switch_intake
 from argus.intake.shadow import PersonFolders, ShadowReport, shadow_report
 from argus.invoices_page.web import PAGE_PATHS as INVOICES_PAGE_PATHS
 from argus.invoices_page.web import install_invoices_page
-from argus.mailbox_page.web import install_mailbox_page
+from argus.mailbox_page.web import MAILBOX_PAGE_CALLS, install_mailbox_page
 from argus.queue_page.web import PAGE_PATHS, install_queue_page
 from argus.secrets import EnvironmentSecretStore
 
@@ -162,7 +163,9 @@ def create_app(
     install_approver_routes(app, engine)
     # The fake mailbox page exists in demo mode only; otherwise its routes answer 404 (#135).
     if connections.demo:
-        install_mailbox_page(app, demo_graph or connections.graph_client)
+        install_mailbox_page(
+            app, demo_graph or partial(connections.graph_client, calls=MAILBOX_PAGE_CALLS)
+        )
 
     @app.get("/health")
     def health() -> Health:
