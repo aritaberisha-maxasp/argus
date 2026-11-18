@@ -10,9 +10,10 @@ What each step shows:
 
 - **When**: the database clock of the event, in Berlin time on the page and in the file.
 - **Who**: a job of ARGUS (``system:intake``) or a person by Entra object ID, the way the audit
-  log records them. Where ARGUS knows that person's name (the approver table, or the name a
-  person gave with a correction), it is shown next to the ID, labelled as the name ARGUS knows
-  now: it is today's name, not the one at the time of the step, until #38 and #180 keep that.
+  log records them. A correction carries the name the person gave at that moment, and the
+  trail shows that one. For other steps the name comes from the approver table, labelled as the
+  name ARGUS knows now: it is today's name, not the one at the time of the step, until #38 and
+  #180 keep that.
 - **What**: a plain sentence for the event, the status before and after, and the recorded
   details.
 - **Why**: the comment a person gave. The audit log keeps no free text (ADR 0005), so the
@@ -245,6 +246,19 @@ _NAMES = """
 """
 
 
+def _name_of(
+    event_type: str, actor_type: str, actor: str, details: dict[str, Any], names: dict[str, str]
+) -> str | None:
+    """The name of the person behind a step. The name the step itself carries comes first: a
+    correction keeps the name the person gave at that moment (migration 0013, ADR 0008). Only
+    a step without one falls back to the name ARGUS knows today (code review of PR 181)."""
+    if actor_type != "user":
+        return None
+    if event_type == "case_corrected" and isinstance(details.get("name"), str):
+        return str(details["name"])
+    return names.get(actor)
+
+
 def case_trail(connection: Connection, case_id: int) -> CaseTrail | None:
     """Every step of the case, oldest first, or None when there is no such case."""
     case = case_row(connection, case_id)
@@ -271,7 +285,7 @@ def case_trail(connection: Connection, case_id: int) -> CaseTrail | None:
                 what=describe(r["event_type"], r["from_status"], r["to_status"], details),
                 actor_kind=r["actor_type"],
                 actor=r["actor"],
-                actor_name=names.get(r["actor"]) if r["actor_type"] == "user" else None,
+                actor_name=_name_of(r["event_type"], r["actor_type"], r["actor"], details, names),
                 from_status=CaseStatus(r["from_status"]) if r["from_status"] else None,
                 to_status=CaseStatus(r["to_status"]) if r["to_status"] else None,
                 facts=([f"bank statement: {r['statement_id']}"] if r["statement_id"] else [])

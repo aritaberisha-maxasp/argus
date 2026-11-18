@@ -273,6 +273,41 @@ def test_a_correction_shows_who_made_it_by_name_and_why(
     assert {s["actor_name"] for s in steps if s["actor_kind"] == "system"} == {None}
 
 
+def test_a_correction_keeps_the_name_given_then_not_the_name_in_the_table_today(
+    app: Engine,
+    client: TestClient,
+    entra: FakeEntra,
+    store: MemoryDocumentStore,
+    tag: str,
+) -> None:
+    """ADR 0008: the name as it was when the person acted, from the step itself."""
+    person = "55555555-5555-4555-8555-555555555555"  # made up
+    save_approver(
+        app, ChangedBy(Actor.user(ARITA), "Arita Test"), person, "Name Today", "p@x.example"
+    )
+    email = received_email(app, store)
+    with unit_of_work(app, INTAKE) as db:
+        case_id = create_case(db, CaseKind.INCOMING_INVOICE, source_email_id=email.email_id)
+        exception_id = open_exception(
+            db, ExceptionReason.VALUES_TO_CHECK, "Number unclear.", case_id=case_id
+        )
+    with unit_of_work(app, Actor.user(person)) as db:
+        correct_case(
+            db,
+            case_id,
+            document_number=tag,
+            gross_cents=5000,
+            currency="EUR",
+            reason="Read from the PDF",
+            name="Name Back Then",
+            exception_id=exception_id,
+        )
+
+    steps = trail(client, entra, case_id)["steps"]
+    corrected = next(s for s in steps if s["event_type"] == "case_corrected")
+    assert corrected["actor_name"] == "Name Back Then"
+
+
 def test_the_trail_holds_only_this_case_and_its_own_email(
     app: Engine,
     client: TestClient,
@@ -303,12 +338,12 @@ def test_the_trail_holds_only_this_case_and_its_own_email(
 
 
 def bank_case_from_emailed_statement(
-    app: Engine, store: MemoryDocumentStore, tag: str
-) -> tuple[int, int, int, int]:
+    app: Engine, store: MemoryDocumentStore, tag: str, *, by_email: bool = True
+) -> tuple[int, int, int, int | None]:
     """Two bank transaction cases imported from one statement that came by email. Returns
     (case, other case on the same statement, statement, email). A currency of its own, so the
     one statement per month rule of migration 0014 never meets another test."""
-    email = received_email(app, store)
+    email_id = received_email(app, store).email_id if by_email else None
     currency = "Q" + "".join(secrets.choice(string.ascii_uppercase) for _ in range(2))
     with unit_of_work(app, Actor.system("bank")) as db:
         sha = uuid.uuid4().hex * 2
@@ -318,12 +353,17 @@ def bank_case_from_emailed_statement(
                 insert into bank_statement (sha256, location, size_bytes, source,
                                             source_email_id, currency, period, opening_minor,
                                             closing_minor, transaction_count, outcome)
-                values (:sha, 'sha256/' || :sha, 1, 'email', :email, :currency,
+                values (:sha, 'sha256/' || :sha, 1, :source, :email, :currency,
                         date '2026-10-01', 0, -4250, 2, 'imported')
                 returning id
                 """
             ),
-            {"sha": sha, "email": email.email_id, "currency": currency},
+            {
+                "sha": sha,
+                "source": "email" if by_email else "folder",
+                "email": email_id,
+                "currency": currency,
+            },
         ).scalar_one()
         ids = []
         for n in (1, 2):
@@ -345,7 +385,7 @@ def bank_case_from_emailed_statement(
                 },
             )
             ids.append(case_id)
-    return ids[0], ids[1], statement_id, email.email_id
+    return ids[0], ids[1], statement_id, email_id
 
 
 def test_a_bank_transaction_trail_starts_with_the_statement_and_its_email(
@@ -374,6 +414,23 @@ def test_a_bank_transaction_trail_starts_with_the_statement_and_its_email(
     assert foreign == 0
     times = [datetime.fromisoformat(s["occurred_at"]) for s in steps]
     assert times == sorted(times)
+
+
+def test_a_bank_transaction_from_a_statement_in_the_folder_starts_at_the_statement(
+    app: Engine,
+    client: TestClient,
+    entra: FakeEntra,
+    store: MemoryDocumentStore,
+    tag: str,
+) -> None:
+    case_id, _, statement_id, _ = bank_case_from_emailed_statement(app, store, tag, by_email=False)
+    steps = trail(client, entra, case_id)["steps"]
+    assert [s["event_type"] for s in steps][:3] == [
+        "bank_statement_recorded",
+        "case_created",
+        "bank_transaction_imported",
+    ]
+    assert f"bank statement: {statement_id}" in steps[0]["facts"]
 
 
 def test_an_invoice_trail_holds_no_bank_statement_events(
@@ -478,13 +535,17 @@ def test_the_trail_is_read_in_a_read_only_transaction(
     seen: list[str] = []
 
     def spy(connection: Any, wanted: int) -> Any:
-        seen.append(connection.execute(text("show transaction_read_only")).scalar())
+        seen.append(
+            connection.execute(text("show transaction_read_only")).scalar()
+            + " "
+            + connection.execute(text("show transaction_isolation")).scalar()
+        )
         return real(connection, wanted)
 
     monkeypatch.setattr("argus.invoices_page.web.case_trail", spy)
     trail(client, entra, case_id)
     exported(client, entra, case_id)
-    assert seen == ["on", "on"]
+    assert seen == ["on repeatable read", "on repeatable read"]
 
 
 # --- who may read it ---

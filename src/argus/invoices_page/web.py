@@ -187,8 +187,9 @@ def trail_json(trail: CaseTrail) -> dict[str, Any]:
 
 def _read_only(connection: Connection) -> None:
     """Makes this transaction read only, so the trail routes cannot change anything even by
-    mistake: the database would refuse it."""
-    connection.execute(text("set transaction read only"))
+    mistake: the database would refuse it. Repeatable read, so the steps and the chain check
+    of a file come from one snapshot of the audit log (code review of PR 181)."""
+    connection.execute(text("set transaction isolation level repeatable read, read only"))
 
 
 def _json(body: dict[str, Any], status_code: int = status.HTTP_200_OK) -> Response:
