@@ -66,7 +66,7 @@ from argus.intake.digest import (
 )
 from argus.intake.email_text import EmailReader
 from argus.intake.filing import Folders, remove_due
-from argus.intake.graph import GraphClient, lookup_name_ok
+from argus.intake.graph import GraphCall, GraphClient, lookup_name_ok
 from argus.intake.invoices import Invoicing
 from argus.intake.statements import Statements
 from argus.intake.sweep import DocumentArchive, Sorting, sweep
@@ -182,6 +182,62 @@ class IntakeSettings:
             raise JobSettingsError(f"{INVOICING_AGENT_ENV} must be one email address") from None
 
 
+# The Graph calls each job may make (#168, NF-03). A call that is not on a job's list is
+# refused before it leaves ARGUS, so a bug in one job cannot touch mail it has no business
+# with. Add a call here only together with the code that needs it, and say why.
+
+# The sweep itself (sweep.py, filing.py, shadow.py): list the Inbox and read each email, find
+# or create the ARGUS folders and file the email there, and in shadow mode see which folder a
+# person moved an email to. It never deletes.
+SWEEP_CALLS: Final = frozenset(
+    {
+        GraphCall.LIST_INBOX,
+        GraphCall.READ_EMAIL,
+        GraphCall.FIND_FOLDERS,
+        GraphCall.CREATE_FOLDER,
+        GraphCall.MOVE,
+        GraphCall.READ_MESSAGE,
+        GraphCall.READ_INBOX_ID,
+        GraphCall.READ_DELETED_ITEMS_ID,
+    }
+)
+# Reminder forward, run by the sweep (reminders.py, #27): save a forward as a draft, read it
+# back and send it.
+REMINDER_FORWARD_CALLS: Final = frozenset(
+    {GraphCall.FORWARD, GraphCall.READ_MESSAGE, GraphCall.SEND_DRAFT}
+)
+# Statement import, run by the sweep (sweep.py, #166): find or create the statement folder,
+# list it, read and move its emails, and send a notice about a blocked statement (#56).
+STATEMENT_IMPORT_CALLS: Final = frozenset(
+    {
+        GraphCall.FIND_FOLDERS,
+        GraphCall.CREATE_FOLDER,
+        GraphCall.LIST_STATEMENT_FOLDER,
+        GraphCall.READ_EMAIL,
+        GraphCall.MOVE,
+        GraphCall.SEND_NOTICE,
+    }
+)
+# The sweep job runs those three with one client.
+SWEEP_JOB_CALLS: Final = SWEEP_CALLS | REMINDER_FORWARD_CALLS | STATEMENT_IMPORT_CALLS
+# The 30 day removal (filing.remove_due, #26): find ARGUS/Removed, check which folder an
+# email is in and delete it. It never moves, lists the Inbox or sends.
+REMOVAL_CALLS: Final = frozenset(
+    {
+        GraphCall.FIND_FOLDERS,
+        GraphCall.READ_MESSAGE,
+        GraphCall.READ_DELETED_ITEMS_ID,
+        GraphCall.DELETE,
+    }
+)
+# The daily digest (digest.py, #61): save the digest as a draft, read it back and send it.
+DIGEST_CALLS: Final = frozenset(
+    {GraphCall.CREATE_DIGEST, GraphCall.READ_MESSAGE, GraphCall.SEND_DRAFT}
+)
+# The statement reminder (bank/notices.py, #166): send a notice about a missing statement.
+STATEMENT_REMINDER_CALLS: Final = frozenset({GraphCall.SEND_NOTICE})
+
+
 @dataclass
 class Services:
     """What one run of a job works with. ``close`` gives back connections and clients."""
@@ -256,8 +312,11 @@ def check_database_for_mode(environ: Mapping[str, str], *, demo: bool) -> None:
         raise JobSettingsError(str(error).replace("the job", "the intake jobs")) from None
 
 
-def services_from_env(environ: Mapping[str, str]) -> Services:
+def services_from_env(
+    environ: Mapping[str, str], calls: frozenset[GraphCall] = SWEEP_JOB_CALLS
+) -> Services:
     """Build everything from the settings Azure gives the job (infra/modules/apps.bicep).
+    ``calls`` are the Graph calls the job may make: the sweep's unless named (#168).
 
     The mailbox comes from :mod:`argus.connections`, the documents from the document store
     secret (the demo store in demo mode), the sorting and the reading from Azure OpenAI and
@@ -270,7 +329,7 @@ def services_from_env(environ: Mapping[str, str]) -> Services:
     try:
         connections = connections_from_env(environ)
         check_database_for_mode(environ, demo=connections.demo)
-        graph = connections.graph_client(statement_folder=bank.statement_folder)
+        graph = connections.graph_client(statement_folder=bank.statement_folder, calls=calls)
         resources.callback(graph.close)
         documents = AzureDocumentStore.from_secrets(secrets)
         openai_endpoint = _setting(environ, OPENAI_ENDPOINT_ENV)
@@ -311,6 +370,12 @@ def services_from_env(environ: Mapping[str, str]) -> Services:
     )
 
 
+def removal_services_from_env(environ: Mapping[str, str]) -> Services:
+    """Build what the 30 day removal needs. Its Graph client may only find ARGUS/Removed,
+    check where an email is and delete it (#168)."""
+    return services_from_env(environ, calls=REMOVAL_CALLS)
+
+
 def _datev_gateway(connections: Connections) -> tuple[DatevConnectGateway, httpx.Client] | None:
     """The DATEV gateway and its HTTP client, or None while DATEV is not set (#35). The demo
     sets the fake DATEV; live DATEV is set at go live (docs/runbooks/go-live.md)."""
@@ -333,7 +398,7 @@ def statement_services_from_env(environ: Mapping[str, str]) -> StatementServices
             raise JobSettingsError(
                 "set ARGUS_REMINDER_FORWARD_TO before the statements job can run"
             )
-        graph = connections.graph_client()
+        graph = connections.graph_client(calls=STATEMENT_REMINDER_CALLS)
         resources.callback(graph.close)
         engine = engine_from_env(environ=environ)
         resources.callback(engine.dispose)
@@ -358,7 +423,7 @@ def digest_services_from_env(environ: Mapping[str, str]) -> DigestServices:
             )
         if not _ADDRESS.fullmatch(connections.digest_to):
             raise JobSettingsError(f"{DIGEST_TO_ENV} must be exactly one email address")
-        graph = connections.graph_client(digest=True)
+        graph = connections.graph_client(digest=True, calls=DIGEST_CALLS)
         resources.callback(graph.close)
         engine = engine_from_env(environ=environ)
         resources.callback(engine.dispose)
@@ -406,12 +471,17 @@ def run_statements(services: StatementServices, today: date | None = None) -> bo
 
 
 RUNNERS: Final[dict[str, Callable[[Services], bool]]] = {SWEEP: run_sweep, REMOVAL: run_removal}
+# Each job builds its own services, so each gets a Graph client with its own calls (#168).
+BUILDERS: Final[dict[str, Callable[[Mapping[str, str]], Services]]] = {
+    SWEEP: services_from_env,
+    REMOVAL: removal_services_from_env,
+}
 
 
 def _run(
     job: str,
     environ: Mapping[str, str],
-    build: Callable[[Mapping[str, str]], Services],
+    build: Callable[[Mapping[str, str]], Services] | None,
     build_digest: Callable[[Mapping[str, str]], DigestServices],
     build_statements: Callable[[Mapping[str, str]], StatementServices],
 ) -> bool:
@@ -427,7 +497,7 @@ def _run(
             return run_digest(digest)
         finally:
             digest.close()
-    services = build(environ)
+    services = (build or BUILDERS[job])(environ)
     try:
         return RUNNERS[job](services)
     finally:
@@ -437,13 +507,14 @@ def _run(
 def run_job(
     job: str,
     environ: Mapping[str, str],
-    build: Callable[[Mapping[str, str]], Services] = services_from_env,
+    build: Callable[[Mapping[str, str]], Services] | None = None,
     build_digest: Callable[[Mapping[str, str]], DigestServices] = digest_services_from_env,
     build_statements: Callable[
         [Mapping[str, str]], StatementServices
     ] = statement_services_from_env,
 ) -> bool:
-    """Run one job once and log its outcome line. Never raises: a failure is logged through
+    """Run one job once and log its outcome line. ``build`` replaces the job's own builder in
+    tests. Never raises: a failure is logged through
     :mod:`argus.logsafe`, as its type and codes only."""
     ok = False
     try:
@@ -462,7 +533,7 @@ def run_job(
 def main(
     argv: list[str] | None = None,
     environ: Mapping[str, str] | None = None,
-    build: Callable[[Mapping[str, str]], Services] = services_from_env,
+    build: Callable[[Mapping[str, str]], Services] | None = None,
     build_digest: Callable[[Mapping[str, str]], DigestServices] = digest_services_from_env,
     build_statements: Callable[
         [Mapping[str, str]], StatementServices

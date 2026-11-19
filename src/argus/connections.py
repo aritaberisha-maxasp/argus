@@ -33,7 +33,7 @@ import httpx
 from pydantic import SecretStr
 
 from argus.datev.datevconnect import DatevConnectGateway
-from argus.intake.graph import GraphClient, TokenProvider
+from argus.intake.graph import ALL_CALLS, GraphCall, GraphClient, TokenProvider
 from argus.wise.client import TOKEN_SECRET as WISE_TOKEN_SECRET
 from argus.wise.client import WiseClient
 
@@ -131,6 +131,7 @@ class Connections:
         *,
         digest: bool = False,
         statement_folder: str | None = None,
+        calls: frozenset[GraphCall] = ALL_CALLS,
     ) -> GraphClient:
         """The Graph client for the accounts mailbox. In demo mode it signs in to the fake
         Graph with the stand in token. Live, ``tokens`` signs in to Microsoft 365.
@@ -138,7 +139,8 @@ class Connections:
 
         Each client may send only what its job sends: the intake client forwards reminders,
         the ``digest=True`` client sends the daily digest and nothing else (#61). Only a client
-        given ``statement_folder`` may list the emails of that one folder (#166)."""
+        given ``statement_folder`` may list the emails of that one folder (#166). ``calls`` are
+        the kinds of Graph call the job needs; each job passes its own list (#168)."""
         if not self.graph_url or not self.mailbox:
             raise NotConnected(f"set {GRAPH_URL_ENV} and {MAILBOX_ENV} to read the mailbox")
         if self.demo:
@@ -156,6 +158,7 @@ class Connections:
             forward_to=None if digest else self.reminder_forward_to,
             digest_to=self.digest_to if digest else None,
             statement_folder=None if digest else statement_folder,
+            calls=calls,
         )
 
     def datev_gateway(self) -> DatevConnectGateway:

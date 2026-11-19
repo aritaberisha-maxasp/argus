@@ -239,7 +239,7 @@ def test_clients_already_open_are_closed_when_building_fails(
     class Connections:
         demo = True
 
-        def graph_client(self, *, statement_folder: str | None = None) -> Graph:
+        def graph_client(self, *, statement_folder: str | None = None, **_: Any) -> Graph:
             return Graph()
 
     monkeypatch.setattr(jobs, "connections_from_env", lambda environ: Connections())

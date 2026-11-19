@@ -25,7 +25,7 @@ from fastapi.responses import HTMLResponse, Response
 
 from argus.auth import Role, SignedInUser, require_role
 from argus.auth.tokens import TokenVerifier
-from argus.intake.graph import GraphClient
+from argus.intake.graph import GraphCall, GraphClient
 from argus.mailbox_page.views import folders_json, mailbox_folders
 from argus.queue_page.web import _page_headers, _sign_in_mode
 
@@ -53,6 +53,11 @@ def render_page(verifier: TokenVerifier | None) -> str:
     )
     template = (STATIC / "mailbox.html").read_text(encoding="utf-8")
     return template.replace("  <!-- sign in settings -->", meta)
+
+
+# The only Graph calls the demo mailbox page makes: list the folders and the emails in one
+# (views.py). It never moves, deletes or sends (#168).
+MAILBOX_PAGE_CALLS = frozenset({GraphCall.FIND_FOLDERS, GraphCall.LIST_ANY_FOLDER})
 
 
 def install_mailbox_page(app: FastAPI, graph: Callable[[], GraphClient]) -> None:
