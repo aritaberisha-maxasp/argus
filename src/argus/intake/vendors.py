@@ -32,9 +32,11 @@ What happens next (:func:`match_vendors`, one pass):
   was (VM-03). Nobody has to touch it. An IBAN mismatch ends by itself only once DATEV holds
   the invoice's IBAN on that vendor account.
 
-Only the values ARGUS read without a flag count. A VAT ID or IBAN a person still has to check
-is not used to find the vendor, because a wrong match would send the invoice to the wrong
-approver.
+Only the values ARGUS read without a flag count to find the vendor. A VAT ID or IBAN a person
+still has to check is not used for that, because a wrong match would send the invoice to the
+wrong approver. A flag never stops the IBAN check, though: once the vendor is found, every IBAN
+the document states, flagged or not, is compared with DATEV (compliance review of PR 185). An
+invoice that prints two IBANs, the usual "we changed banks" letter, is held like any other.
 
 The pass runs at the end of every live sweep (:func:`argus.intake.sweep.sweep`), so it needs no
 job of its own. It calls DATEV only when there is a case to match.
@@ -62,6 +64,7 @@ from argus.cases.store import (
 from argus.datev.gateway import DatevError, DatevGateway
 from argus.datev.models import Account
 from argus.sorting.checks import normalise
+from argus.sorting.models import IBAN
 from argus.vat_ids import clean_vat_id
 
 log = logging.getLogger("argus.intake.vendors")
@@ -100,17 +103,27 @@ class NoMatchReason(StrEnum):
 
 @dataclass(frozen=True)
 class InvoiceParty:
-    """Who the invoice says it is from, as ARGUS read it. Only values without a flag."""
+    """Who the invoice says it is from, as ARGUS read it. ``vat_id``, ``iban`` and ``name``
+    are only values without a flag, used to find the vendor. ``stated_ibans`` is every IBAN the
+    document states, flagged or not, for the IBAN check (#36). It always holds ``iban``."""
 
     vat_id: str | None = None
     iban: str | None = None
     name: str | None = None
+    stated_ibans: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         # Compared cleaned, the way DATEV's values are cleaned.
         object.__setattr__(self, "vat_id", clean_vat_id(self.vat_id) if self.vat_id else None)
         object.__setattr__(self, "iban", clean_iban(self.iban) if self.iban else None)
         object.__setattr__(self, "name", self.name.strip() if self.name else None)
+        stated = [clean_iban(i) for i in (self.iban, *self.stated_ibans) if i]
+        object.__setattr__(self, "stated_ibans", tuple(dict.fromkeys(stated)))
+
+    @property
+    def iban_flagged(self) -> bool:
+        """The document states an IBAN, but not one ARGUS read without a flag."""
+        return bool(self.stated_ibans) and (self.iban is None or self.stated_ibans != (self.iban,))
 
     @classmethod
     def from_reading(cls, reading: Mapping[str, Any]) -> "InvoiceParty":
@@ -123,7 +136,25 @@ class InvoiceParty:
                 return None
             return str(found["value"])
 
-        return cls(value("vendor_vat_id"), value("iban_on_document"), value("issuer_name"))
+        return cls(
+            value("vendor_vat_id"),
+            value("iban_on_document"),
+            value("issuer_name"),
+            _stated_ibans(fields.get("iban_on_document") or {}),
+        )
+
+
+def _stated_ibans(found: Mapping[str, Any]) -> tuple[str, ...]:
+    """Every IBAN in the stored IBAN field, whatever its flag: the value, the ``values`` a
+    flag keeps (several values, readers disagree), and, for readings stored before those were
+    kept, the IBANs the note names."""
+    stated: list[str] = []
+    if found.get("value"):
+        stated.append(str(found["value"]))
+    stated.extend(str(v) for v in found.get("values") or ())
+    note = found.get("note") or ""
+    stated.extend(m[1] + m[2] for m in IBAN.finditer(str(note)))
+    return tuple(stated)
 
 
 @dataclass(frozen=True)
@@ -413,8 +444,9 @@ def _handle(db: Connection, item: _Work, book: VendorBook, result: VendorPass) -
     result.matched += 1
     if found.by.weaker:
         result.weaker.append(item.case_id)
-    if party.iban is not None and party.iban not in _ibans_of(found.vendor):
-        _queue_iban_mismatch(db, item.case_id, party.iban, found.vendor, book)
+    differing = [i for i in party.stated_ibans if i not in _ibans_of(found.vendor)]
+    if differing:
+        _queue_iban_mismatch(db, item.case_id, differing, party, found.vendor, book)
         result.iban_mismatch += 1
     if vendor_approver(db, account) is None:
         _queue_without_approver(db, item.case_id, account, found.vendor.name)
@@ -444,10 +476,10 @@ def _check_iban_again(
     Anything else leaves the case blocked until a person rejects it."""
     party = _party(db, item.case_id)
     vendor = book.vendor(account) if account is not None else None
-    if party is None or party.iban is None or vendor is None:
+    if party is None or not party.stated_ibans or vendor is None:
         return
-    if party.iban not in _ibans_of(vendor):
-        return
+    if not set(party.stated_ibans) <= _ibans_of(vendor):
+        return  # every IBAN the document states must be on file, not just one
     if vendor_approver(db, account) is None and not _has_open(  # type: ignore[arg-type]
         db, item.case_id, ExceptionReason.VENDOR_WITHOUT_APPROVER
     ):
@@ -459,7 +491,7 @@ def _check_iban_again(
         item.exception_id,  # type: ignore[arg-type]
         Outcome.FIXED_IN_DATEV,
         resolution=(
-            f"The IBAN on the invoice is now on vendor account {account} in DATEV. "
+            f"Every IBAN on the invoice is now on vendor account {account} in DATEV. "
             "ARGUS checked again and carried on."
         ),
     )
@@ -479,7 +511,12 @@ def _has_open(db: Connection, case_id: int, reason: ExceptionReason) -> bool:
 
 
 def _queue_iban_mismatch(
-    db: Connection, case_id: int, iban: str, vendor: Account, book: VendorBook
+    db: Connection,
+    case_id: int,
+    differing: list[str],
+    party: InvoiceParty,
+    vendor: Account,
+    book: VendorBook,
 ) -> None:
     """Block the invoice as a possible fraud case (PR-05). The detail shows IBANs masked only,
     and the audit log gets no IBAN at all (NF-03)."""
@@ -488,30 +525,44 @@ def _queue_iban_mismatch(
         has = "which has " + ", ".join(masked_iban(i) for i in on_file)
     else:
         has = "which has no IBAN"
-    others = [v.number for v in book.vendors if v.number != vendor.number and iban in _ibans_of(v)]
+    others = [
+        v.number
+        for v in book.vendors
+        if v.number != vendor.number and _ibans_of(v) & set(differing)
+    ]
     belongs = (
-        f" The invoice's IBAN is on another vendor account in DATEV: "
+        f" An IBAN of this invoice is on another vendor account in DATEV: "
         f"{', '.join(str(n) for n in others)}."
         if others
         else ""
     )
+    shown = ", ".join(masked_iban(i) for i in differing)
+    if len(party.stated_ibans) > 1:
+        stated = (
+            f"This invoice states {len(party.stated_ibans)} IBANs. {shown} "
+            f"{'is' if len(differing) == 1 else 'are'} not on vendor account"
+        )
+    else:
+        stated = f"The IBAN on this invoice ({shown}) is not on vendor account"
     open_exception(
         db,
         ExceptionReason.IBAN_MISMATCH,
         (
-            f"Possible fraud. The IBAN on this invoice ({masked_iban(iban)}) is not on vendor "
-            f"account {vendor.number} ({vendor.name}) in DATEV, {has}.{belongs} A changed bank "
-            "account is a common fraud pattern, so ARGUS has blocked this invoice and will not "
-            "pay it. Do not change the bank details because the invoice or an email asks for "
-            "it. Check with the vendor on a phone number you already know. If the new IBAN is "
-            "right, change it in DATEV and ARGUS carries on by itself. If not, reject the "
-            "invoice."
+            f"Possible fraud. {stated} {vendor.number} ({vendor.name}) in DATEV, {has}."
+            f"{belongs} A changed bank account is a common fraud pattern, so ARGUS has blocked "
+            "this invoice and will not pay it. Do not change the bank details because the "
+            "invoice or an email asks for it. Check with the vendor on a phone number you "
+            "already know. If the new IBAN is right, change it in DATEV and ARGUS carries on by "
+            "itself. If not, reject the invoice."
         ),
         case_id=case_id,
         facts={
             "account": str(vendor.number),
             "possible_fraud": True,
             "ibans_on_file": len(on_file),
+            "ibans_stated": len(party.stated_ibans),
+            "ibans_differing": len(differing),
+            "read_with_flag": party.iban_flagged,
             "other_accounts": [str(n) for n in others],
         },
     )

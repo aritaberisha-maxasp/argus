@@ -92,18 +92,19 @@ def case_from(
     iban: str | None = None,
     name: str | None = None,
     kind: CaseKind = CaseKind.INCOMING_INVOICE,
+    iban_field: dict[str, Any] | None = None,
 ) -> int:
-    """An incoming invoice case with its reading, as intake opens it (#30)."""
+    """An incoming invoice case with its reading, as intake opens it (#30). ``iban_field``
+    stores the IBAN field as given, for a flagged IBAN."""
     values = {"vendor_vat_id": vat_id, "iban_on_document": iban, "issuer_name": name}
-    reading = {
-        "document": "body",
-        "kind": "invoice",
-        "fields": {
-            field: {"value": value, "source": "page_text", "flag": None}
-            for field, value in values.items()
-            if value is not None
-        },
+    fields: dict[str, Any] = {
+        field: {"value": value, "source": "page_text", "flag": None}
+        for field, value in values.items()
+        if value is not None
     }
+    if iban_field is not None:
+        fields["iban_on_document"] = iban_field
+    reading = {"document": "body", "kind": "invoice", "fields": fields}
     with unit_of_work(app, INTAKE) as db:
         case_id = create_case(
             db, kind, document_number=f"T-{uuid.uuid4().hex[:8]}", gross_cents=11900
@@ -537,6 +538,9 @@ def test_a_changed_iban_blocks_the_invoice_as_possible_fraud(
         "account": str(vendor.account),
         "possible_fraud": True,
         "ibans_on_file": 1,
+        "ibans_stated": 1,
+        "ibans_differing": 1,
+        "read_with_flag": False,
         "other_accounts": [],
     }
 
@@ -752,3 +756,152 @@ def test_when_datev_is_down_a_blocked_invoice_stays_blocked(
 
     assert done.skipped_datev_unavailable
     assert [r for r, _ in open_of(app, case_id)] == [ExceptionReason.IBAN_MISMATCH]
+
+
+# A flag stops an IBAN from being used to find the vendor, never from being checked
+# (compliance review of PR 185). Each flagged reading below is stored the way the readers store
+# it (reading/invoice.py, einvoice/parser.py).
+
+
+def flagged_iban_fields(on_file: str, new: str) -> dict[str, dict[str, Any]]:
+    return {
+        # The usual "we changed banks" letter: the old and the new IBAN on one page.
+        "several_values": {
+            "value": None,
+            "source": None,
+            "flag": "several_values",
+            "note": f"the document states 2 IBANs: {new}, {on_file}",
+            "values": [new, on_file],
+        },
+        "several_values_einvoice": {
+            "value": None,
+            "source": None,
+            "flag": "several_values",
+            "note": f"the e-invoice states 2 values: {on_file}, {new}",
+            "values": [on_file, new],
+        },
+        # Stored before the values were kept: only the note names them.
+        "several_values_note_only": {
+            "value": None,
+            "source": None,
+            "flag": "several_values",
+            "note": f"the document states 2 IBANs: {new}, {on_file}",
+        },
+        "from_model": {
+            "value": new,
+            "source": "language_model",
+            "page": 1,
+            "words": f"IBAN {new}",
+            "flag": "from_model",
+            "note": "only the language model located this value, a person confirms it",
+        },
+        "low_confidence": {
+            "value": new,
+            "source": "document_intelligence",
+            "confidence": 0.41,
+            "flag": "low_confidence",
+            "note": "read with low confidence",
+        },
+        "readers_disagree": {
+            "value": on_file,
+            "source": "document_intelligence",
+            "flag": "readers_disagree",
+            "note": f"the reader says {on_file}, the page text says {new}",
+            "values": [on_file, new],
+        },
+        "failed_check": {
+            "value": new[:-1] + ("0" if new[-1] != "0" else "1"),
+            "source": "page_text",
+            "flag": "failed_check",
+            "note": "the IBAN check digits are wrong",
+        },
+    }
+
+
+@pytest.mark.req("PR-05")
+@pytest.mark.parametrize("flag", list(flagged_iban_fields("X", "Y")))
+def test_an_iban_read_with_a_flag_is_still_checked(
+    app: Engine, fake: TestClient, datev: DatevConnectGateway, flag: str
+) -> None:
+    vendor = Vendor()
+    fake.post("/_fake/creditors", json=vendor.creditor())
+    give_approver(app, vendor)
+    new_iban = other_iban()
+    case_id = case_from(
+        app,
+        vat_id=vendor.vat_id,
+        name=vendor.name,
+        iban_field=flagged_iban_fields(vendor.iban, new_iban)[flag],
+    )
+
+    done = match_vendors(app, datev, OWN_VAT_IDS, cases=[case_id])
+
+    assert (done.matched, done.iban_mismatch) == (1, 1)
+    assert status_of(app, case_id) == (CaseStatus.EXCEPTION, str(vendor.account))
+    [(reason, detail)] = open_of(app, case_id)
+    assert reason is ExceptionReason.IBAN_MISMATCH
+    assert detail.startswith("Possible fraud.")
+    assert new_iban not in detail and vendor.iban not in detail
+    assert new_iban not in audit_text(app, case_id)
+    [opened] = events_of(app, case_id, "exception_opened")
+    assert opened["facts"]["read_with_flag"] is True
+    assert opened["facts"]["ibans_differing"] == 1
+
+
+@pytest.mark.req("PR-05", "VM-04")
+def test_two_ibans_end_the_block_only_when_both_are_in_datev(
+    app: Engine, fake: TestClient, datev: DatevConnectGateway
+) -> None:
+    vendor = Vendor()
+    fake.post("/_fake/creditors", json=vendor.creditor())
+    give_approver(app, vendor)
+    new_iban = other_iban()
+    case_id = case_from(
+        app,
+        vat_id=vendor.vat_id,
+        iban_field=flagged_iban_fields(vendor.iban, new_iban)["several_values"],
+    )
+    match_vendors(app, datev, OWN_VAT_IDS, cases=[case_id])
+    [(_, detail)] = open_of(app, case_id)
+    assert "This invoice states 2 IBANs." in detail
+    assert f"DE ... {new_iban[-4:]} is not on vendor account" in detail
+
+    # Only the new IBAN in DATEV, the old one removed: the invoice still names an IBAN DATEV
+    # does not hold, so it stays blocked.
+    fake.put(
+        f"/_fake/creditors/{vendor.account}/bank-accounts",
+        json=[{"iban": new_iban, "currency_code": "EUR"}],
+    ).raise_for_status()
+    match_vendors(app, datev, OWN_VAT_IDS, cases=[case_id])
+    assert [r for r, _ in open_of(app, case_id)] == [ExceptionReason.IBAN_MISMATCH]
+
+    fake.put(
+        f"/_fake/creditors/{vendor.account}/bank-accounts",
+        json=[
+            {"iban": vendor.iban, "currency_code": "EUR"},
+            {"iban": new_iban, "currency_code": "EUR"},
+        ],
+    ).raise_for_status()
+    done = match_vendors(app, datev, OWN_VAT_IDS, cases=[case_id])
+
+    assert done.resolved == 1
+    assert status_of(app, case_id) == (CaseStatus.RECEIVED, str(vendor.account))
+
+
+@pytest.mark.req("PR-05")
+def test_a_flagged_iban_that_is_on_file_carries_on(
+    app: Engine, fake: TestClient, datev: DatevConnectGateway
+) -> None:
+    vendor = Vendor()
+    fake.post("/_fake/creditors", json=vendor.creditor())
+    give_approver(app, vendor)
+    case_id = case_from(
+        app,
+        vat_id=vendor.vat_id,
+        iban_field=flagged_iban_fields(vendor.iban, vendor.iban)["from_model"],
+    )
+
+    done = match_vendors(app, datev, OWN_VAT_IDS, cases=[case_id])
+
+    assert done.iban_mismatch == 0
+    assert status_of(app, case_id) == (CaseStatus.RECEIVED, str(vendor.account))

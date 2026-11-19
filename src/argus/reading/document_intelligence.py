@@ -101,6 +101,7 @@ def _several(name: str, values: list[str]) -> ReadField:
         name,
         flag=Flag.SEVERAL_VALUES,
         note=f"the document states {len(values)} different values: {', '.join(values)}",
+        values=tuple(values),
     )
 
 

@@ -249,6 +249,7 @@ class _Fields:
                 name,
                 flag=Flag.SEVERAL_VALUES,
                 note=f"the e-invoice states {len(distinct)} values: {', '.join(distinct)}",
+                values=tuple(distinct),
             )
 
     def check_iban(self) -> None:
