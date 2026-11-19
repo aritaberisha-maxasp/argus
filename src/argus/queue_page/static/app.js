@@ -247,6 +247,14 @@
 
   // A GET by default. ``body`` is sent as JSON with ``method`` (the mode switch uses PUT).
   // ``sent`` is a response already fetched, by send(), that only needs checking.
+  // A mode switch reason of only spaces, tabs or line breaks is no reason (#170). trim() keeps
+  // zero width spaces, so they go too, like on the server and in the database.
+  const BLANK_REASON =
+    "Please give a reason of at least 3 characters. Spaces, tabs and line breaks alone do not count.";
+  function trimReason(text) {
+    return text.replace(/^[\s\u180e\u200b\ufeff]+|[\s\u180e\u200b\ufeff]+$/g, "");
+  }
+
   async function call(token, path, method, body, sent) {
     let response = sent;
     if (!response) {
@@ -267,7 +275,18 @@
       throw new Error("Your account has no access to the exception queue. Ask Arita if you need it.");
     }
     if (response.status === 404) throw new Error("This exception is not open any more, or it does not exist.");
-    if (response.status === 422) throw new Error("ARGUS did not accept this. Check what you typed and try again.");
+    if (response.status === 422) {
+      const refused = new Error("ARGUS did not accept this. Check what you typed and try again.");
+      refused.status = 422;
+      // A sentence from the server, when it sent one, for forms that show it (#170).
+      try {
+        const body = await response.json();
+        if (typeof body.detail === "string") refused.detail = body.detail;
+      } catch (e) {
+        // no sentence, the general one stays
+      }
+      throw refused;
+    }
     throw new Error("ARGUS could not answer right now (" + response.status + "). Try again in a moment.");
   }
 
@@ -517,9 +536,9 @@
     });
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
-      const why = reason.value.trim();
+      const why = trimReason(reason.value);
       if (why.length < 3) {
-        problem.textContent = "Please give a reason of at least 3 characters.";
+        problem.textContent = BLANK_REASON;
         return;
       }
       confirm.disabled = true;
@@ -527,7 +546,11 @@
       try {
         await call(token, "/intake/mode", "PUT", { mode: target, reason: why });
       } catch (e) {
-        problem.textContent = e && e.message ? e.message : "The switch did not work. Try again.";
+        if (e && e.status === 422) {
+          problem.textContent = e.detail || BLANK_REASON;
+        } else {
+          problem.textContent = e && e.message ? e.message : "The switch did not work. Try again.";
+        }
         confirm.disabled = false;
         return;
       }

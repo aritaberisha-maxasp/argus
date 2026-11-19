@@ -12,6 +12,7 @@ Every step that acts on the mailbox asks :func:`is_live` right before it calls G
 at the start of a sweep, so switching back to shadow mode stops ARGUS within one email.
 """
 
+import re
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -19,6 +20,17 @@ from sqlalchemy import Connection, Engine, text
 
 from argus.cases.model import Actor
 from argus.cases.store import unit_of_work
+
+# Spaces of any kind at either end: Python's own whitespace (tabs, line breaks, non-breaking
+# spaces) plus the zero width ones it does not count. The database trims the same way with
+# ``correction_trim`` (migrations 0013 and 0017), so tabs or line breaks alone are no reason.
+_EDGE_SPACES = re.compile(r"^[\s\u180e\u200b\ufeff]+|[\s\u180e\u200b\ufeff]+$")
+REASON_MIN, REASON_MAX = 3, 500
+
+
+def trimmed_reason(reason: str) -> str:
+    """The reason without spaces, tabs or line breaks at either end (#170)."""
+    return _EDGE_SPACES.sub("", reason)
 
 
 class StoppedByShadowMode(RuntimeError):
