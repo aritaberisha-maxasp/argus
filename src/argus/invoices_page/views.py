@@ -217,3 +217,15 @@ def _row(r: Any) -> CaseRow:
         exception_reason=reason,
         exception_text=REASON_TEXT[reason] if reason else None,
     )
+
+
+def case_row(connection: Connection, case_id: int) -> CaseRow | None:
+    """One case as the list shows it, or None when there is no such case."""
+    row = (
+        connection.execute(
+            text(_LIST_HEAD + _BASE + _OPEN_EXCEPTION + " where c.id = :id"), {"id": case_id}
+        )
+        .mappings()
+        .first()
+    )
+    return _row(row) if row else None
