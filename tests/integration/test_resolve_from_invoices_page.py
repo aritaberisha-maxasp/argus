@@ -283,8 +283,9 @@ def test_an_iban_mismatch_can_only_be_rejected_here(
 
     offered = choices(client, entra, exception_id)
     assert outcomes(offered) == ["rejected"]
-    assert "check it again" in offered["note"]
-    # Fixed in DATEV needs ARGUS to check the IBAN again (#36); until then it is refused.
+    assert offered["note"].startswith("Possible fraud.")
+    assert "next sweep" in offered["note"]
+    # Fixed in DATEV is ARGUS's own check against DATEV (#36), never a click.
     assert resolve(client, entra, exception_id, "fixed_in_datev").status_code == 422
     assert resolve(client, entra, exception_id, "accepted_with_comment").status_code == 422
 

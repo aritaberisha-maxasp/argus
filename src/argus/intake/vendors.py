@@ -7,8 +7,8 @@ creates or changes a vendor account (VM-01): the gateway has no way to.
 How a vendor is found (:func:`match_vendor`), strongest first:
 
 1. The VAT ID on the invoice. When the IBAN on the invoice is also on that vendor account, the
-   match is the strongest one. When the IBAN differs, the match stands; blocking a changed IBAN
-   is #36's job.
+   match is the strongest one. When the IBAN differs, the match stands, and the IBAN check
+   below blocks the invoice.
 2. The IBAN on the invoice, when no vendor account has the VAT ID.
 3. The issuer's name, when neither found one. A name only match is weaker and says so in the
    audit log (``vendor_matched`` with ``weaker: true``).
@@ -23,9 +23,14 @@ What happens next (:func:`match_vendors`, one pass):
   digest tells Benjamin (EX-03), and the detail says what to create in DATEV.
 - A vendor account fits, but the approver table has no row for it: ``vendor_without_approver``
   (VM-02).
-- Every pass looks at those two kinds of exception again. Once the vendor exists in DATEV, or
+- The invoice states an IBAN that is not on the vendor account in DATEV: ``iban_mismatch``, a
+  possible fraud case (#36, PR-05). The invoice stays blocked, so it never goes for approval
+  or into a payment run. ARGUS never takes bank details from an invoice (VM-04): only a change
+  in DATEV ends the block, or a person rejects the invoice.
+- Every pass looks at those three kinds of exception again. Once the vendor exists in DATEV, or
   has an approver, the pass resolves the exception itself and the case carries on where it
-  was (VM-03). Nobody has to touch it.
+  was (VM-03). Nobody has to touch it. An IBAN mismatch ends by itself only once DATEV holds
+  the invoice's IBAN on that vendor account.
 
 Only the values ARGUS read without a flag count. A VAT ID or IBAN a person still has to check
 is not used to find the vendor, because a wrong match would send the invoice to the wrong
@@ -65,7 +70,11 @@ VENDOR_ACTOR = Actor.system("vendor-match")
 VENDOR_MATCHED = "vendor_matched"
 VENDOR_KINDS = (CaseKind.INCOMING_INVOICE, CaseKind.INCOMING_CREDIT_NOTE)
 # The exceptions this step opens, and so may resolve again by itself.
-OWN_REASONS = (ExceptionReason.UNKNOWN_VENDOR, ExceptionReason.VENDOR_WITHOUT_APPROVER)
+OWN_REASONS = (
+    ExceptionReason.UNKNOWN_VENDOR,
+    ExceptionReason.VENDOR_WITHOUT_APPROVER,
+    ExceptionReason.IBAN_MISMATCH,
+)
 
 
 class MatchedBy(StrEnum):
@@ -135,6 +144,9 @@ class VendorBook:
             ),
             own_vat_ids=frozenset(clean_vat_id(v) for v in own_vat_ids),
         )
+
+    def vendor(self, account: str) -> Account | None:
+        return next((v for v in self.vendors if str(v.number) == account), None)
 
 
 @dataclass(frozen=True)
@@ -226,6 +238,7 @@ class VendorPass:
     matched: int = 0
     unknown: int = 0
     without_approver: int = 0
+    iban_mismatch: int = 0
     resolved: int = 0
     failed: int = 0
     skipped_datev_unavailable: bool = False
@@ -265,10 +278,10 @@ def _work(connection: Connection, cases: Collection[int] | None) -> list[_Work]:
                               where v.vendor_account = c.partner_account)
               and (cast(:only as bigint[]) is null or c.id = any(cast(:only as bigint[])))
             union all
-            select e.case_id, e.id, e.reason::text, e.reason = 'unknown_vendor'
+            select e.case_id, e.id, e.reason::text, e.reason <> 'vendor_without_approver'
             from exception_item e join invoice_case c on c.id = e.case_id
             where e.resolved_at is null
-              and e.reason in ('unknown_vendor', 'vendor_without_approver')
+              and e.reason in ('unknown_vendor', 'vendor_without_approver', 'iban_mismatch')
               and (cast(:only as bigint[]) is null or c.id = any(cast(:only as bigint[])))
             order by 1, 2 nulls first
             """
@@ -301,8 +314,9 @@ def match_vendors(
     *,
     cases: Collection[int] | None = None,
 ) -> VendorPass:
-    """One pass: match new cases to their vendor account and look again at the open unknown
-    vendor and vendor without approver exceptions. ``cases`` limits the pass to these case IDs
+    """One pass: match new cases to their vendor account, check the IBAN on the invoice, and
+    look again at the open unknown vendor, vendor without approver and IBAN mismatch
+    exceptions. ``cases`` limits the pass to these case IDs
     (tests share one database). Each case is its own unit of work, so one failure leaves the
     others alone. DATEV is read once, and only when there is work."""
     result = VendorPass()
@@ -355,6 +369,9 @@ def _handle(db: Connection, item: _Work, book: VendorBook, result: VendorPass) -
             )
             result.resolved += 1
         return
+    if item.reason is ExceptionReason.IBAN_MISMATCH:
+        _check_iban_again(db, item, case.partner_account, book, result)
+        return
     if item.reason is None and case.status is not CaseStatus.RECEIVED:
         return  # moved on since the work was listed
     if item.reason is None and case.partner_account is not None:
@@ -396,6 +413,9 @@ def _handle(db: Connection, item: _Work, book: VendorBook, result: VendorPass) -
     result.matched += 1
     if found.by.weaker:
         result.weaker.append(item.case_id)
+    if party.iban is not None and party.iban not in _ibans_of(found.vendor):
+        _queue_iban_mismatch(db, item.case_id, party.iban, found.vendor, book)
+        result.iban_mismatch += 1
     if vendor_approver(db, account) is None:
         _queue_without_approver(db, item.case_id, account, found.vendor.name)
         result.without_approver += 1
@@ -410,6 +430,91 @@ def _handle(db: Connection, item: _Work, book: VendorBook, result: VendorPass) -
             ),
         )
         result.resolved += 1
+
+
+def _check_iban_again(
+    db: Connection,
+    item: _Work,
+    account: str | None,
+    book: VendorBook,
+    result: VendorPass,
+) -> None:
+    """The block ends by itself only when DATEV now holds the invoice's IBAN on the vendor
+    account: someone changed the bank details in DATEV, the one place they may change (VM-04).
+    Anything else leaves the case blocked until a person rejects it."""
+    party = _party(db, item.case_id)
+    vendor = book.vendor(account) if account is not None else None
+    if party is None or party.iban is None or vendor is None:
+        return
+    if party.iban not in _ibans_of(vendor):
+        return
+    if vendor_approver(db, account) is None and not _has_open(  # type: ignore[arg-type]
+        db, item.case_id, ExceptionReason.VENDOR_WITHOUT_APPROVER
+    ):
+        # Opened before resolving, so the case never leaves the queue without an approver.
+        _queue_without_approver(db, item.case_id, account, vendor.name)  # type: ignore[arg-type]
+        result.without_approver += 1
+    resolve_exception(
+        db,
+        item.exception_id,  # type: ignore[arg-type]
+        Outcome.FIXED_IN_DATEV,
+        resolution=(
+            f"The IBAN on the invoice is now on vendor account {account} in DATEV. "
+            "ARGUS checked again and carried on."
+        ),
+    )
+    result.resolved += 1
+
+
+def _has_open(db: Connection, case_id: int, reason: ExceptionReason) -> bool:
+    return bool(
+        db.execute(
+            text(
+                "select exists (select 1 from exception_item where case_id = :id "
+                "and reason = :reason and resolved_at is null)"
+            ),
+            {"id": case_id, "reason": reason.value},
+        ).scalar()
+    )
+
+
+def _queue_iban_mismatch(
+    db: Connection, case_id: int, iban: str, vendor: Account, book: VendorBook
+) -> None:
+    """Block the invoice as a possible fraud case (PR-05). The detail shows IBANs masked only,
+    and the audit log gets no IBAN at all (NF-03)."""
+    on_file = sorted(_ibans_of(vendor))
+    if on_file:
+        has = "which has " + ", ".join(masked_iban(i) for i in on_file)
+    else:
+        has = "which has no IBAN"
+    others = [v.number for v in book.vendors if v.number != vendor.number and iban in _ibans_of(v)]
+    belongs = (
+        f" The invoice's IBAN is on another vendor account in DATEV: "
+        f"{', '.join(str(n) for n in others)}."
+        if others
+        else ""
+    )
+    open_exception(
+        db,
+        ExceptionReason.IBAN_MISMATCH,
+        (
+            f"Possible fraud. The IBAN on this invoice ({masked_iban(iban)}) is not on vendor "
+            f"account {vendor.number} ({vendor.name}) in DATEV, {has}.{belongs} A changed bank "
+            "account is a common fraud pattern, so ARGUS has blocked this invoice and will not "
+            "pay it. Do not change the bank details because the invoice or an email asks for "
+            "it. Check with the vendor on a phone number you already know. If the new IBAN is "
+            "right, change it in DATEV and ARGUS carries on by itself. If not, reject the "
+            "invoice."
+        ),
+        case_id=case_id,
+        facts={
+            "account": str(vendor.number),
+            "possible_fraud": True,
+            "ibans_on_file": len(on_file),
+            "other_accounts": [str(n) for n in others],
+        },
+    )
 
 
 def _queue_without_approver(

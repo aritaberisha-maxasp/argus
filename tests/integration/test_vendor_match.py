@@ -8,6 +8,7 @@ DATEV the way Benjamin would, through the fake's test control ``/_fake/creditors
 
 import itertools
 import json
+import logging
 import uuid
 from collections.abc import Iterator
 from typing import Any
@@ -32,9 +33,11 @@ from argus.cases.model import (
     Outcome,
 )
 from argus.cases.store import (
+    CaseRuleBroken,
     create_case,
     get_case,
     list_open_exceptions,
+    move_case,
     open_exception,
     resolve_exception,
     trace,
@@ -43,6 +46,7 @@ from argus.cases.store import (
 from argus.datev import Account, DatevConnectGateway, DatevUnavailable
 from argus.datev.fake import DEFAULT_CLIENT_ID, create_fake_datev
 from argus.intake.vendors import VENDOR_MATCHED, match_vendors
+from argus.logsafe import SafeFormatter
 
 INTAKE = Actor.system("intake")
 ADMIN = ChangedBy(Actor.user("44444444-4444-4444-8444-444444444444"), "Arita Test")
@@ -474,3 +478,277 @@ def test_when_datev_is_down_the_cases_wait_for_the_next_pass(
     assert done.skipped_datev_unavailable
     assert status_of(app, case_id) == (CaseStatus.RECEIVED, None)
     assert open_of(app, case_id) == []
+
+
+# ------------------------------------------------------------------------- IBAN check (#36)
+
+
+def other_iban() -> str:
+    """An IBAN no vendor account in the fake DATEV has."""
+    return Vendor().iban
+
+
+def audit_text(app: Engine, case_id: int) -> str:
+    """Everything the audit log holds for a case, as one string."""
+    with app.connect() as connection:
+        rows: list[str] = list(
+            connection.execute(
+                text("select details::text from audit_event where case_id = :id"),
+                {"id": case_id},
+            ).scalars()
+        )
+    return " ".join(rows)
+
+
+def changed_iban_case(app: Engine, fake: TestClient) -> tuple[Vendor, str, int]:
+    """A known vendor with an approver, and an invoice from it that asks to pay a new IBAN."""
+    vendor = Vendor()
+    fake.post("/_fake/creditors", json=vendor.creditor())
+    give_approver(app, vendor)
+    new_iban = other_iban()
+    case_id = case_from(app, vat_id=vendor.vat_id, iban=new_iban, name=vendor.name)
+    return vendor, new_iban, case_id
+
+
+@pytest.mark.req("PR-05", "VM-04", "EX-02")
+def test_a_changed_iban_blocks_the_invoice_as_possible_fraud(
+    app: Engine, fake: TestClient, datev: DatevConnectGateway
+) -> None:
+    vendor, new_iban, case_id = changed_iban_case(app, fake)
+
+    done = match_vendors(app, datev, OWN_VAT_IDS, cases=[case_id])
+
+    assert (done.matched, done.iban_mismatch, done.without_approver) == (1, 1, 0)
+    assert status_of(app, case_id) == (CaseStatus.EXCEPTION, str(vendor.account))
+    [(reason, detail)] = open_of(app, case_id)
+    assert reason is ExceptionReason.IBAN_MISMATCH
+    assert detail.startswith("Possible fraud.")
+    assert f"DE ... {new_iban[-4:]}" in detail
+    assert f"DE ... {vendor.iban[-4:]}" in detail
+    assert str(vendor.account) in detail
+    # Masked for people, and never in the audit log (NF-03).
+    assert new_iban not in detail and vendor.iban not in detail
+    log = audit_text(app, case_id)
+    assert new_iban not in log and vendor.iban not in log
+    [matched] = events_of(app, case_id, VENDOR_MATCHED)
+    assert matched["by"] == "vat_id"
+    [opened] = events_of(app, case_id, "exception_opened")
+    assert opened["facts"] == {
+        "account": str(vendor.account),
+        "possible_fraud": True,
+        "ibans_on_file": 1,
+        "other_accounts": [],
+    }
+
+
+@pytest.mark.req("PR-05", "VM-04")
+def test_argus_never_takes_the_new_iban_from_the_invoice(
+    app: Engine, fake: TestClient, datev: DatevConnectGateway
+) -> None:
+    vendor, _, case_id = changed_iban_case(app, fake)
+    watching = Watching(datev)
+
+    match_vendors(app, watching, OWN_VAT_IDS, cases=[case_id])
+    match_vendors(app, watching, OWN_VAT_IDS, cases=[case_id])
+
+    # Only reads, and DATEV still has the old IBAN only.
+    assert set(watching.calls) == {"list_vendors", "list_customers"}
+    [on_file] = [v for v in datev.list_vendors() if v.number == vendor.account]
+    assert [b.iban for b in on_file.bank_accounts] == [vendor.iban]
+    assert [r for r, _ in open_of(app, case_id)] == [ExceptionReason.IBAN_MISMATCH]
+
+
+@pytest.mark.req("PR-05", "PY-01")
+def test_a_blocked_invoice_never_goes_for_approval_or_into_a_payment_run(
+    app: Engine, fake: TestClient, datev: DatevConnectGateway
+) -> None:
+    _, _, case_id = changed_iban_case(app, fake)
+    match_vendors(app, datev, OWN_VAT_IDS, cases=[case_id])
+
+    for to in (CaseStatus.AWAITING_APPROVAL, CaseStatus.IN_PAYMENT_RUN, CaseStatus.RECEIVED):
+        reference = "BOOKING-TEST" if to is CaseStatus.IN_PAYMENT_RUN else None
+        with (
+            pytest.raises(CaseRuleBroken, match="open exception"),
+            unit_of_work(app, INTAKE) as db,
+        ):
+            move_case(
+                db, case_id, expected=CaseStatus.EXCEPTION, to=to, datev_booking_ref=reference
+            )
+    assert status_of(app, case_id)[0] is CaseStatus.EXCEPTION
+
+    # A person rejects it: the case closes and still can never be paid.
+    with unit_of_work(app, Actor.user("55555555-5555-4555-8555-555555555555")) as db:
+        exception_id: int
+        [exception_id] = db.execute(
+            text("select id from exception_item where case_id = :id and resolved_at is null"),
+            {"id": case_id},
+        ).scalars()
+        resolve_exception(
+            db,
+            exception_id,
+            Outcome.REJECTED,
+            resolution="Vendor confirmed by phone they did not change banks.",
+            case_to=CaseStatus.CLOSED,
+            closed_reason=ClosedReason.REJECTED,
+        )
+    assert status_of(app, case_id)[0] is CaseStatus.CLOSED
+    with pytest.raises(CaseRuleBroken, match="closed"), unit_of_work(app, INTAKE) as db:
+        move_case(
+            db,
+            case_id,
+            expected=CaseStatus.CLOSED,
+            to=CaseStatus.IN_PAYMENT_RUN,
+            datev_booking_ref="BOOKING-TEST",
+        )
+
+
+@pytest.mark.req("PR-05", "VM-04", "EX-02")
+def test_the_block_ends_by_itself_once_datev_holds_the_new_iban(
+    app: Engine, fake: TestClient, datev: DatevConnectGateway
+) -> None:
+    vendor, new_iban, case_id = changed_iban_case(app, fake)
+    match_vendors(app, datev, OWN_VAT_IDS, cases=[case_id])
+
+    # Someone changes the IBAN in DATEV, but not to the invoice's one: still blocked.
+    fake.put(
+        f"/_fake/creditors/{vendor.account}/bank-accounts",
+        json=[{"iban": other_iban(), "currency_code": "EUR"}],
+    ).raise_for_status()
+    still = match_vendors(app, datev, OWN_VAT_IDS, cases=[case_id])
+    assert (still.resolved, still.iban_mismatch) == (0, 0)
+    assert [r for r, _ in open_of(app, case_id)] == [ExceptionReason.IBAN_MISMATCH]
+
+    # Benjamin checked with the vendor and put the new IBAN into DATEV.
+    fake.put(
+        f"/_fake/creditors/{vendor.account}/bank-accounts",
+        json=[{"iban": new_iban, "currency_code": "EUR"}],
+    ).raise_for_status()
+    done = match_vendors(app, datev, OWN_VAT_IDS, cases=[case_id])
+
+    assert done.resolved == 1
+    assert status_of(app, case_id) == (CaseStatus.RECEIVED, str(vendor.account))
+    assert open_of(app, case_id) == []
+    [resolved] = events_of(app, case_id, "exception_resolved")
+    assert (resolved["actor"], resolved["outcome"]) == ("system:vendor-match", "fixed_in_datev")
+
+
+@pytest.mark.req("PR-05", "VM-02")
+def test_a_fixed_iban_does_not_let_a_vendor_without_an_approver_through(
+    app: Engine, fake: TestClient, datev: DatevConnectGateway
+) -> None:
+    vendor = Vendor()
+    fake.post("/_fake/creditors", json=vendor.creditor())
+    new_iban = other_iban()
+    case_id = case_from(app, vat_id=vendor.vat_id, iban=new_iban)
+
+    first = match_vendors(app, datev, OWN_VAT_IDS, cases=[case_id])
+    assert (first.iban_mismatch, first.without_approver) == (1, 1)
+    assert sorted(r for r, _ in open_of(app, case_id)) == sorted(
+        [ExceptionReason.IBAN_MISMATCH, ExceptionReason.VENDOR_WITHOUT_APPROVER]
+    )
+
+    fake.put(
+        f"/_fake/creditors/{vendor.account}/bank-accounts",
+        json=[{"iban": new_iban, "currency_code": "EUR"}],
+    ).raise_for_status()
+    match_vendors(app, datev, OWN_VAT_IDS, cases=[case_id])
+
+    assert status_of(app, case_id)[0] is CaseStatus.EXCEPTION
+    assert [r for r, _ in open_of(app, case_id)] == [ExceptionReason.VENDOR_WITHOUT_APPROVER]
+
+
+@pytest.mark.req("PR-05")
+def test_an_iban_of_another_vendor_is_named_in_the_detail(
+    app: Engine, fake: TestClient, datev: DatevConnectGateway
+) -> None:
+    vendor, other = Vendor(), Vendor()
+    for v in (vendor, other):
+        fake.post("/_fake/creditors", json=v.creditor())
+        give_approver(app, v)
+    case_id = case_from(app, vat_id=vendor.vat_id, iban=other.iban)
+
+    match_vendors(app, datev, OWN_VAT_IDS, cases=[case_id])
+
+    [(reason, detail)] = open_of(app, case_id)
+    assert reason is ExceptionReason.IBAN_MISMATCH
+    assert f"another vendor account in DATEV: {other.account}" in detail
+    [opened] = events_of(app, case_id, "exception_opened")
+    assert opened["facts"]["other_accounts"] == [str(other.account)]
+
+
+@pytest.mark.req("PR-05", "VM-03")
+def test_an_unknown_vendor_that_turns_up_with_another_iban_stays_blocked(
+    app: Engine, fake: TestClient, datev: DatevConnectGateway
+) -> None:
+    vendor = Vendor()
+    give_approver(app, vendor)
+    new_iban = other_iban()
+    case_id = case_from(app, vat_id=vendor.vat_id, iban=new_iban)
+    match_vendors(app, datev, OWN_VAT_IDS, cases=[case_id])
+    assert [r for r, _ in open_of(app, case_id)] == [ExceptionReason.UNKNOWN_VENDOR]
+
+    fake.post("/_fake/creditors", json=vendor.creditor())
+    done = match_vendors(app, datev, OWN_VAT_IDS, cases=[case_id])
+
+    assert (done.resolved, done.iban_mismatch) == (1, 1)
+    assert status_of(app, case_id)[0] is CaseStatus.EXCEPTION
+    assert [r for r, _ in open_of(app, case_id)] == [ExceptionReason.IBAN_MISMATCH]
+
+
+@pytest.mark.req("PR-05")
+def test_an_invoice_without_a_readable_iban_is_not_compared(
+    app: Engine, fake: TestClient, datev: DatevConnectGateway
+) -> None:
+    vendor = Vendor()
+    fake.post("/_fake/creditors", json=vendor.creditor())
+    give_approver(app, vendor)
+    case_id = case_from(app, vat_id=vendor.vat_id, name=vendor.name)
+
+    done = match_vendors(app, datev, OWN_VAT_IDS, cases=[case_id])
+
+    assert done.iban_mismatch == 0
+    assert status_of(app, case_id) == (CaseStatus.RECEIVED, str(vendor.account))
+
+
+@pytest.mark.req("PR-05", "NF-03")
+def test_ibans_are_masked_in_logs(
+    app: Engine,
+    fake: TestClient,
+    datev: DatevConnectGateway,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    vendor, new_iban, case_id = changed_iban_case(app, fake)
+    broken_vendor, broken_iban, broken = changed_iban_case(app, fake)
+
+    real = vendors._queue_iban_mismatch
+
+    def fails_for_one(db: Any, case: int, *args: Any) -> None:
+        if case == broken:
+            raise RuntimeError(f"boom {broken_iban} {broken_vendor.iban}")
+        real(db, case, *args)
+
+    monkeypatch.setattr(vendors, "_queue_iban_mismatch", fails_for_one)
+    with caplog.at_level(logging.DEBUG):
+        done = match_vendors(app, datev, OWN_VAT_IDS, cases=[case_id, broken])
+
+    assert (done.iban_mismatch, done.failed) == (1, 1)
+    logged = caplog.text + " ".join(str(r.args) for r in caplog.records)
+    for iban in (new_iban, vendor.iban):
+        assert iban not in logged
+    # The job's own formatter writes errors as their type only, never the message.
+    formatted = " ".join(SafeFormatter().format(r) for r in caplog.records)
+    assert broken_iban not in formatted and broken_vendor.iban not in formatted
+
+
+@pytest.mark.req("PR-05")
+def test_when_datev_is_down_a_blocked_invoice_stays_blocked(
+    app: Engine, fake: TestClient, datev: DatevConnectGateway
+) -> None:
+    _, _, case_id = changed_iban_case(app, fake)
+    match_vendors(app, datev, OWN_VAT_IDS, cases=[case_id])
+
+    done = match_vendors(app, Watching(datev, down=True), OWN_VAT_IDS, cases=[case_id])
+
+    assert done.skipped_datev_unavailable
+    assert [r for r, _ in open_of(app, case_id)] == [ExceptionReason.IBAN_MISMATCH]

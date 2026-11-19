@@ -35,7 +35,7 @@ REASON_TEXT: dict[ExceptionReason, str] = {
     ExceptionReason.UNKNOWN_CUSTOMER: "The customer is not known yet",
     ExceptionReason.VENDOR_WITHOUT_APPROVER: "The vendor has no approver",
     ExceptionReason.DUPLICATE: "This may be a duplicate invoice",
-    ExceptionReason.IBAN_MISMATCH: "The bank account differs from the one on file",
+    ExceptionReason.IBAN_MISMATCH: "Possible fraud: the bank account differs from DATEV",
     ExceptionReason.INVOICE_CHECK_FAILED: "The invoice failed a required check",
     ExceptionReason.BOOKING_ERROR: "Booking in DATEV failed",
     ExceptionReason.UNMATCHED_BANK_TRANSACTION: "A bank transaction matches no invoice",
