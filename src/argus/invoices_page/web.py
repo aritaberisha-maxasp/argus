@@ -16,6 +16,10 @@ Like the exception queue page (#126), there are two kinds of routes:
   ``POST /exceptions/{id}/resolution``, EX-01). The same two roles see how an open exception of
   a case can end and pick one with a short comment. See ``argus.invoices_page.resolve`` for
   which endings are offered and which rules the database checks; it records who and when.
+- **The trail of a case** (``GET /cases/{id}/trail`` and ``GET /cases/{id}/trail.csv``, NF-01,
+  AP-08). The same two roles read every step of one case, from its email to its last status,
+  and download it as a file. Both only read, in a read only transaction; there is no route that
+  changes the trail. See ``argus.invoices_page.trail``.
 
 Logs name only the person's ID, case and exception IDs, counts and outcome codes, never a
 vendor, customer, search word or comment (NF-03).
@@ -26,19 +30,19 @@ import json
 import logging
 from collections.abc import Callable
 from dataclasses import asdict
-from datetime import date
+from datetime import UTC, date, datetime
 from importlib.resources import files
 from typing import Annotated, Any
 
-from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi import Depends, FastAPI, HTTPException, Path, Request, status
 from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import Engine
+from sqlalchemy import Connection, Engine, text
 
 from argus.auth import Role, SignedInUser, require_role
 from argus.auth.tokens import TokenVerifier
 from argus.cases.model import CaseKind, CaseStatus, Outcome
-from argus.cases.store import CaseRuleBroken, unit_of_work
+from argus.cases.store import CaseRuleBroken, unit_of_work, verify_chain
 from argus.invoices_page.resolve import (
     MAX_COMMENT,
     AlreadyResolved,
@@ -48,6 +52,7 @@ from argus.invoices_page.resolve import (
     open_case_exception,
     resolve_from_page,
 )
+from argus.invoices_page.trail import CaseTrail, berlin, case_trail, trail_file
 from argus.invoices_page.views import (
     MAX_ROWS,
     MAX_SEARCH,
@@ -75,6 +80,8 @@ PAGE_PATHS = frozenset({PAGE_PATH} | set(_ASSETS))
 
 # Finance and admin see every case (NF-03). Approvers do not, see above.
 CaseReader = Annotated[SignedInUser, Depends(require_role(Role.FINANCE, Role.ADMIN))]
+# A case ID as the database stores it (bigint). Anything else is a 422, never a database error.
+CaseId = Annotated[int, Path(ge=1, le=2**63 - 1)]
 
 
 class CaseQuery(BaseModel):
@@ -152,6 +159,37 @@ def choices_json(found: OpenCaseException) -> dict[str, Any]:
         ],
         "note": found.note,
     }
+
+
+def trail_json(trail: CaseTrail) -> dict[str, Any]:
+    return {
+        "case": row_json(trail.case),
+        "steps": [
+            {
+                "chain_seq": s.chain_seq,
+                "occurred_at": s.occurred_at.isoformat(),
+                "event_type": s.event_type,
+                "what": s.what,
+                "actor_kind": s.actor_kind,
+                "actor": s.actor,
+                "actor_name": s.actor_name,
+                "from_status": s.from_status.value if s.from_status else None,
+                "to_status": s.to_status.value if s.to_status else None,
+                "facts": s.facts,
+                "comment": s.comment,
+                "hash": s.hash_hex,
+            }
+            for s in trail.steps
+        ],
+        "truncated": trail.truncated,
+    }
+
+
+def _read_only(connection: Connection) -> None:
+    """Makes this transaction read only, so the trail routes cannot change anything even by
+    mistake: the database would refuse it. Repeatable read, so the steps and the chain check
+    of a file come from one snapshot of the audit log (code review of PR 181)."""
+    connection.execute(text("set transaction isolation level repeatable read, read only"))
 
 
 def _json(body: dict[str, Any], status_code: int = status.HTTP_200_OK) -> Response:
@@ -261,4 +299,54 @@ def install_invoices_page(app: FastAPI, engine: Callable[[], Engine]) -> None:
                 "case_status_text": STATUS_TEXT[done.case_status],
                 "others_open": done.others_open,
             }
+        )
+
+    @app.get("/cases/{case_id}/trail")
+    def trail(case_id: CaseId, user: CaseReader) -> Response:
+        """Every step of one case, oldest first, with time, actor and what happened (NF-01)."""
+        with engine().connect() as connection:
+            _read_only(connection)
+            found = case_trail(connection, case_id)
+        if found is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "no such case")
+        log.info(
+            "user %s read the trail of case %s (%d steps)",
+            user.object_id,
+            case_id,
+            len(found.steps),
+        )
+        return _json(trail_json(found))
+
+    @app.get("/cases/{case_id}/trail.csv")
+    def trail_download(case_id: CaseId, user: CaseReader) -> Response:
+        """The trail of one case as a file for a spreadsheet, with a line that says whether the
+        whole hash chain of the audit log was intact when the file was made (NF-01)."""
+        with engine().connect() as connection:
+            _read_only(connection)
+            found = case_trail(connection, case_id)
+            broken_at = verify_chain(connection) if found is not None else None
+        if found is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "no such case")
+        now = datetime.now(UTC)
+        who = f"{user.name} ({user.object_id})" if user.name else user.object_id
+        body = trail_file(found, chain_broken_at=broken_at, exported_at=now, exported_by=who)
+        log.info(
+            "user %s exported the trail of case %s (%d steps, chain %s)",
+            user.object_id,
+            case_id,
+            len(found.steps),
+            "intact" if broken_at is None else f"broken at {broken_at}",
+        )
+        day = berlin(now)[:10]
+        return Response(
+            # A byte order mark, so a spreadsheet opens umlauts correctly.
+            "\ufeff" + body,
+            media_type="text/csv; charset=utf-8",
+            headers={
+                "Cache-Control": "no-store",
+                "X-Content-Type-Options": "nosniff",
+                "Content-Disposition": (
+                    f'attachment; filename="argus-case-{case_id}-trail-{day}.csv"'
+                ),
+            },
         )

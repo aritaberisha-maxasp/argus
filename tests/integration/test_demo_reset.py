@@ -15,9 +15,11 @@ from psycopg import errors as pg
 from sqlalchemy import Engine, create_engine, make_url, text
 from sqlalchemy.exc import DBAPIError
 
+from argus.approvers.table import list_vendor_approvers
 from argus.cases.model import Actor
 from argus.cases.store import unit_of_work
-from argus.demo import DemoRefused, reset_database, reset_documents
+from argus.demo import DemoRefused, load_demo_approvers, reset_database, reset_documents
+from argus.demo.reset import DEMO_APPROVERS
 from argus.documents.store import AzureDocumentStore
 from argus.intake.graph import InboxMessage
 from argus.intake.records import see_email
@@ -84,6 +86,24 @@ def test_reset_refuses_the_real_database_and_leaves_it_as_it_is(owner: Engine) -
     with pytest.raises(DemoRefused, match="not to a database ending in _demo"):
         reset_database(owner)
     assert audit_events(owner) == before
+
+
+@pytest.mark.req("VM-02")
+def test_the_demo_approver_table_is_filled_after_a_reset(demo_database: Engine) -> None:
+    """So demo invoices carry on to approval; 70008 stays without one for E13 (#35)."""
+    reset_database(demo_database)
+
+    assert load_demo_approvers(demo_database, DEMO_APPROVERS) == 7
+
+    with demo_database.connect() as connection:
+        accounts = [v.vendor_account for v in list_vendor_approvers(connection)]
+    assert accounts == [str(n) for n in range(70001, 70008)]
+
+
+@pytest.mark.req("NF-04")
+def test_demo_approvers_are_never_loaded_into_the_real_database(owner: Engine) -> None:
+    with pytest.raises(DemoRefused, match="not to a database ending in _demo"):
+        load_demo_approvers(owner, DEMO_APPROVERS)
 
 
 @pytest.mark.req("NF-04")

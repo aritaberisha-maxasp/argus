@@ -41,16 +41,19 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Final
 
+import httpx
 from sqlalchemy import Engine, text
 
 from argus.bank.importer import BankSettings
 from argus.bank.notices import remind_missing_statements
 from argus.connections import (
     DIGEST_TO_ENV,
+    Connections,
     ConnectionSettingsError,
     NotConnected,
     connections_from_env,
 )
+from argus.datev.datevconnect import DatevConnectGateway
 from argus.db import engine_from_env
 from argus.db.mode import DatabaseModeError
 from argus.db.mode import check_database_for_mode as _check_database_for_mode
@@ -339,6 +342,9 @@ def services_from_env(
         resources.callback(model.close)
         field_model = AzureOpenAIFieldModel.from_secret_store(secrets, openai_endpoint, deployment)
         resources.callback(field_model.close)
+        datev = _datev_gateway(connections)
+        if datev is not None:
+            resources.callback(datev[1].close)
         sorting = Sorting(
             documents=documents,
             model=model,
@@ -348,6 +354,8 @@ def services_from_env(
             # Inbox until it is set, as the sweep has always done (#27).
             reminders=graph if graph.forward_to else None,
             invoicing=Invoicing(reader, settings.own_vat_ids, field_model),
+            # Without DATEV, cases wait without a vendor account until it is set (#35).
+            vendors=datev[0] if datev is not None else None,
         )
         # A notice about a blocked statement goes out right away when the reminder address
         # is set; otherwise the daily statement job sends it (#166).
@@ -366,6 +374,16 @@ def removal_services_from_env(environ: Mapping[str, str]) -> Services:
     """Build what the 30 day removal needs. Its Graph client may only find ARGUS/Removed,
     check where an email is and delete it (#168)."""
     return services_from_env(environ, calls=REMOVAL_CALLS)
+
+
+def _datev_gateway(connections: Connections) -> tuple[DatevConnectGateway, httpx.Client] | None:
+    """The DATEV gateway and its HTTP client, or None while DATEV is not set (#35). The demo
+    sets the fake DATEV; live DATEV is set at go live (docs/runbooks/go-live.md)."""
+    if not connections.datev_url or not connections.datev_client:
+        log.info("DATEV is not set, so cases are not matched to vendor accounts")
+        return None
+    http = httpx.Client(base_url=connections.datev_url, timeout=30.0)
+    return DatevConnectGateway(http, connections.datev_client), http
 
 
 def statement_services_from_env(environ: Mapping[str, str]) -> StatementServices:
