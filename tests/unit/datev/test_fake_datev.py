@@ -50,6 +50,27 @@ def test_records_bookings_and_reset_forgets_them(fake: TestClient) -> None:
     assert retry.status_code == 201
 
 
+@pytest.mark.req("VM-03")
+def test_a_vendor_created_by_hand_is_served_until_reset(fake: TestClient) -> None:
+    """Stands in for Benjamin creating a vendor in DATEV (#35). Not a DATEVconnect route."""
+    creditor = {
+        "account_number": 70099,
+        "caption": "Beispiel Neu GmbH",
+        "eu_vat_id_number": "DE012345699",
+        "bank_accounts": [{"iban": "DE02000000000000700099"}],
+    }
+
+    assert fake.get(f"{FY}/creditors/70099").status_code == 404
+    assert fake.post("/_fake/creditors", json=creditor).status_code == 201
+    assert fake.post("/_fake/creditors", json=creditor).status_code == 409
+    assert fake.get(f"{FY}/creditors/70099").json()["caption"] == "Beispiel Neu GmbH"
+    assert 70099 in [c["account_number"] for c in fake.get(f"{FY}/creditors").json()]
+
+    fake.post("/_fake/reset")
+
+    assert fake.get(f"{FY}/creditors/70099").status_code == 404
+
+
 def test_an_unknown_client_is_not_found(fake: TestClient) -> None:
     other = f"{API_ROOT}/clients/someone-else/fiscal-years/20260101/creditors"
 

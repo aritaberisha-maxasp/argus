@@ -12,7 +12,8 @@ send <email>
 
 reset [--standins]
     Empties the demo database (``ARGUS_DATABASE_URL``, its name must end in ``_demo``) and
-    runs the migrations again, then deletes the files in the demo document store
+    runs the migrations again and fills the approver table from the synthetic fixture (#35),
+    then deletes the files in the demo document store
     (``ARGUS_DOCUMENTS_CONNECTION_STRING``, its account name must contain ``demo``). With
     ``--standins`` it also asks the stand ins to start over. In Azure the Demo workflow runs
     this as the database admin and restarts the stand ins itself.
@@ -36,6 +37,7 @@ from argus.demo.data import emails_folder
 from argus.demo.reset import (
     check_demo_database,
     check_demo_documents,
+    load_demo_approvers,
     reset_database,
     reset_documents,
     reset_standins,
@@ -80,9 +82,11 @@ def run_reset(environ: Mapping[str, str], standins: bool) -> int:
         engine = engine_from_env(url, environ=environ)
         try:
             revision = reset_database(engine)
+            approvers = load_demo_approvers(engine)
         finally:
             engine.dispose()
         print(f"demo database emptied, migrations run again up to {revision}")
+        print(f"demo approver table filled, {approvers} vendors have an approver")
     if documents:
         service = BlobServiceClient.from_connection_string(documents)
         deleted = reset_documents(service.get_container_client(DEFAULT_CONTAINER))

@@ -8,7 +8,10 @@ Like DATEVconnect for ARGUS, it has no way to create or change an account: there
 are only GET routes for creditors and debitors.
 
 The routes under ``/_fake`` exist only here. Tests use them to make the fake fail
-the way DATEV fails: a closed period or DATEV not answering.
+the way DATEV fails: a closed period or DATEV not answering. ``/_fake/creditors``
+stands in for Benjamin creating a vendor account in DATEV by hand, so a test can show
+that ARGUS carries on by itself once the vendor exists (#35, VM-03). ARGUS itself never
+calls it: the gateway's allow list only knows the DATEVconnect paths.
 
 Run it with ``uvicorn argus.datev.fake:app_from_env --factory`` or with Docker,
 see docs/design/datev-gateway.md.
@@ -47,10 +50,17 @@ class _State:
     down: bool = False
     sequences: dict[str, dict[str, Any]] = field(default_factory=dict)
     postings: list[dict[str, Any]] = field(default_factory=list)
+    # Vendor accounts a test created "by hand", as Benjamin does in DATEV (#35).
+    added_creditors: dict[int, dict[str, Any]] = field(default_factory=dict)
+
+    @property
+    def creditors(self) -> dict[int, dict[str, Any]]:
+        return {**self.seed.creditors, **self.added_creditors}
 
     def reset(self) -> None:
         self.closed_until = None
         self.down = False
+        self.added_creditors.clear()
         self.sequences.clear()
         self.postings = [dict(p) for p in self.seed.postings]
 
@@ -115,6 +125,21 @@ class _Outage(BaseModel):
     down: bool
 
 
+class _BankAccount(BaseModel):
+    iban: str
+    currency_code: str = "EUR"
+
+
+class _NewCreditor(BaseModel):
+    """A vendor account as Benjamin would create it in DATEV, in DATEVconnect's shape."""
+
+    account_number: int
+    caption: str
+    eu_vat_id_number: str | None = None
+    country: str | None = None
+    bank_accounts: list[_BankAccount] = []
+
+
 def create_fake_datev(
     data: FakeDatevData | None = None, client_id: str = DEFAULT_CLIENT_ID
 ) -> FastAPI:
@@ -135,7 +160,7 @@ def create_fake_datev(
         return None if client == client_id else _not_found("client_not_found", f"client {client}")
 
     def all_accounts() -> dict[int, dict[str, Any]]:
-        return {**state.seed.creditors, **state.seed.debitors}
+        return {**state.creditors, **state.seed.debitors}
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -143,11 +168,11 @@ def create_fake_datev(
 
     @app.get(f"{base}/creditors", response_model=None)
     def creditors(client: str, fiscal_year: str) -> Any:
-        return unknown_client(client) or list(state.seed.creditors.values())
+        return unknown_client(client) or list(state.creditors.values())
 
     @app.get(f"{base}/creditors/{{number}}", response_model=None)
     def creditor(client: str, fiscal_year: str, number: int) -> Any:
-        found = state.seed.creditors.get(number)
+        found = state.creditors.get(number)
         return (
             unknown_client(client) or found or _not_found("account_not_found", f"creditor {number}")
         )
@@ -259,6 +284,15 @@ def create_fake_datev(
     def set_outage(body: _Outage) -> _Outage:
         state.down = body.down
         return body
+
+    @app.post("/_fake/creditors", response_model=None)
+    def add_creditor(body: _NewCreditor) -> Any:
+        with lock:
+            if body.account_number in all_accounts():
+                return _error(409, "account_exists", f"account {body.account_number} exists")
+            creditor = {"id": str(body.account_number), **body.model_dump()}
+            state.added_creditors[body.account_number] = creditor
+            return JSONResponse(status_code=201, content=creditor)
 
     @app.get("/_fake/bookings")
     def bookings() -> list[dict[str, Any]]:

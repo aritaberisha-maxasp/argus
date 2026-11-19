@@ -13,6 +13,7 @@ import pytest
 from pydantic import SecretStr
 
 from argus.connections import Connections, ConnectionSettingsError, NotConnected
+from argus.datev import DatevConnectGateway
 from argus.intake import jobs
 from argus.intake.jobs import (
     FAILED_MARK,
@@ -163,6 +164,26 @@ def test_without_a_reminder_address_reminders_wait() -> None:
     services = services_from_env({**DEMO, "ARGUS_REMINDER_FORWARD_TO": ""})
     try:
         assert services.sorting.reminders is None
+    finally:
+        services.close()
+
+
+@pytest.mark.req("PR-02", "VM-03")
+def test_with_datev_set_the_sweep_matches_vendors() -> None:
+    services = services_from_env(
+        {**DEMO, "ARGUS_DATEV_URL": "http://ca-argus-standin-datev", "ARGUS_DATEV_CLIENT": "x"}
+    )
+    try:
+        assert isinstance(services.sorting.vendors, DatevConnectGateway)
+    finally:
+        services.close()
+
+
+@pytest.mark.req("PR-02")
+def test_without_datev_cases_wait_without_a_vendor_account() -> None:
+    services = services_from_env({**DEMO, "ARGUS_DATEV_URL": "", "ARGUS_DATEV_CLIENT": ""})
+    try:
+        assert services.sorting.vendors is None
     finally:
         services.close()
 
