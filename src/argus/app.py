@@ -33,6 +33,7 @@ from argus.cases.store import CaseRuleBroken, get_case
 from argus.connections import connections_from_env
 from argus.db import engine_from_env
 from argus.documents.store import AzureDocumentStore, DocumentStore
+from argus.intake.accounts import chart_from_env
 from argus.intake.graph import GraphClient
 from argus.intake.mode import (
     REASON_MAX,
@@ -181,7 +182,7 @@ def create_app(
             stores.append(documents_factory())
         return stores[0]
 
-    install_queue_page(app, engine, documents)
+    install_queue_page(app, engine, documents, chart_from_env(os.environ))
     install_invoices_page(app, engine)
     install_approver_routes(app, engine)
     # The fake mailbox page exists in demo mode only; otherwise its routes answer 404 (#135).

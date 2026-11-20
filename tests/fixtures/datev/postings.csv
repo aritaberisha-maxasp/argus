@@ -9,6 +9,7 @@ account,date,document_number,contra_account,tax_key,gross,description
 70005,2026-06-30,BBP-2026-0201,4900,9,5950.00,Beratung Juni
 70006,2026-09-05,MTS-2026-551004,4920,9,119.00,Telefon September
 70007,2026-09-30,DR-2026-0744,4250,9,476.00,Reinigung September
+70008,2026-09-18,ML-2026-0412,4730,9,297.50,Fracht September
 10001,2026-09-10,MA-2026-0092,8400,3,2380.00,Wartung September
 10002,2026-09-12,MA-2026-0094,8336,,1500.00,Lizenz EU
 10003,2026-09-15,MA-2026-0096,8338,,1200.00,Service USA

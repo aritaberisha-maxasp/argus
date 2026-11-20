@@ -500,6 +500,8 @@
     partner.append(el("span", c.partner_name || c.sender || "Not read yet", c.partner_name ? "strong" : "muted"));
     const extra = [];
     if (c.partner_account) extra.push("Account " + c.partner_account);
+    // The G/L account and tax key ARGUS proposes for the approver (#37).
+    if (c.gl_account) extra.push("G/L " + c.gl_account + (c.tax_key ? ", tax key " + c.tax_key : ", no tax key"));
     if (c.partner_name && c.sender) extra.push(c.sender);
     if (extra.length) partner.append(el("span", extra.join(" · "), "sub mono"));
 

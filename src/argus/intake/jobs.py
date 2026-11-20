@@ -58,6 +58,7 @@ from argus.db import engine_from_env
 from argus.db.mode import DatabaseModeError
 from argus.db.mode import check_database_for_mode as _check_database_for_mode
 from argus.documents.store import AzureDocumentStore
+from argus.intake.accounts import chart_from_env
 from argus.intake.digest import (
     DigestSettingsError,
     app_url_from_environment,
@@ -356,6 +357,7 @@ def services_from_env(
             invoicing=Invoicing(reader, settings.own_vat_ids, field_model),
             # Without DATEV, cases wait without a vendor account until it is set (#35).
             vendors=datev[0] if datev is not None else None,
+            chart=chart_from_env(environ),
         )
         # A notice about a blocked statement goes out right away when the reminder address
         # is set; otherwise the daily statement job sends it (#166).

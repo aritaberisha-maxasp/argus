@@ -11,6 +11,9 @@ Two kinds of routes:
 - **The correction** (``POST /exceptions/{id}/correction``, #112). The same two roles correct
   the invoice number, amount and currency of a case that waits with values to check. The
   database keeps who, when and why and refuses a job or a blank reason (migration 0013).
+- **The account** (``POST /exceptions/{id}/account``, #37). The same two roles enter the G/L
+  account and tax key of a case for which ARGUS had no booking history to propose from. The
+  database keeps who, when and why and refuses a job or a blank reason (migration 0019).
 
 Logs name only IDs, never a sender, subject or file name (NF-03).
 """
@@ -37,6 +40,14 @@ from argus.auth.tokens import LOCAL_HOSTS, TokenVerifier
 from argus.cases.money import to_cents
 from argus.cases.store import CaseRuleBroken, unit_of_work
 from argus.documents.store import DocumentStore
+from argus.intake.accounts import (
+    BadAccount,
+    Chart,
+    EnteredBy,
+    NotEnterable,
+    check_entered,
+    enter_account,
+)
 from argus.intake.corrections import (
     BadCorrection,
     CorrectedBy,
@@ -92,6 +103,14 @@ class CorrectionForm(BaseModel):
     document_number: str
     gross_amount: str
     currency: str
+    reason: str
+
+
+class AccountForm(BaseModel):
+    """What the person enters on the queue page (#37). Checked again by the database."""
+
+    gl_account: str
+    tax_key: str
     reason: str
 
 
@@ -192,6 +211,7 @@ def install_queue_page(
     app: FastAPI,
     engine: Callable[[], Engine],
     documents: Callable[[], DocumentStore],
+    chart: Chart = Chart.SKR03,
 ) -> None:
     @app.get("/queue", include_in_schema=False)
     def queue_page(request: Request) -> HTMLResponse:
@@ -287,6 +307,43 @@ def install_queue_page(
                 "outcome": "duplicate" if done.duplicate_of is not None else "continues",
             }
         )
+
+    @app.post("/exceptions/{exception_id}/account")
+    def enter_gl_account(exception_id: int, form: AccountForm, user: QueueReader) -> Response:
+        """Enter the G/L account and tax key of a case ARGUS could not propose them for, and
+        let it carry on (#37, PR-04, EX-01)."""
+        try:
+            entered = check_entered(chart, form.gl_account, form.tax_key, form.reason)
+        except BadAccount as problem:
+            return _json({"problem": str(problem)}, status.HTTP_422_UNPROCESSABLE_ENTITY)
+        by = EnteredBy(user.actor, user.name, user.sign_in_address)
+        try:
+            with unit_of_work(engine(), user.actor) as db:
+                done = enter_account(db, exception_id, entered, by, chart)
+        except NotEnterable:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND, "no open exception without an account proposal"
+            ) from None
+        except CaseRuleBroken as refusal:
+            # The database's sentence names IDs only, never the values or the reason.
+            log.warning(
+                "user %s: account for exception %s refused (%s)",
+                user.object_id,
+                exception_id,
+                type(refusal).__name__,
+            )
+            return _json(
+                {"problem": f"ARGUS refused the account: {refusal}."},
+                status.HTTP_409_CONFLICT,
+            )
+        log.info(
+            "user %s entered the account of case %s (exception %s, proposal %s)",
+            user.object_id,
+            done.case_id,
+            exception_id,
+            done.proposal_id,
+        )
+        return _json({"case_id": done.case_id, "proposal_id": done.proposal_id})
 
     @app.get("/exceptions/{exception_id}/files/{document_id}")
     def download_file(exception_id: int, document_id: int, user: QueueReader) -> Response:

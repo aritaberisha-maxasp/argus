@@ -43,6 +43,7 @@
     forward_failed: { label: "Forward failed", one: "Failed forward", many: "Failed forwards" },
     audit_copy_failed: { label: "Audit copy failed", one: "Failed audit copy", many: "Failed audit copies" },
     audit_check_failed: { label: "Audit check failed", one: "Failed audit check", many: "Failed audit checks" },
+    no_account_proposal: { label: "No G/L account", one: "No G/L account", many: "No G/L accounts" },
   };
 
   function reasonInfo(reason, text) {
@@ -649,6 +650,7 @@
     }
 
     if (x.correctable) parts.push(correction(x));
+    if (x.account_enterable) parts.push(accountEntry(x));
 
     if (x.email_id !== null) {
       const email = x.email
@@ -754,6 +756,79 @@
     return block("Correct the invoice values",
       el("p", "Open the invoice under \u201cFiles as stored\u201d, then enter the values as printed. " +
         "ARGUS checks for duplicates again before the case goes on.", "muted"),
+      form);
+  }
+
+  // --- entering the G/L account and tax key (#37) ----------------------------------------
+
+  // ARGUS had no booking history to propose from, or the latest postings disagree. The person
+  // enters the account and tax key the invoice is booked to; the case then carries on.
+  function accountEntry(x) {
+    const form = el("form", null, "correction");
+    const inputs = {};
+    const candidates = (x.facts && x.facts.candidates) || [];
+    const first = candidates[0] || {};
+    for (const [name, label, value, size] of [
+      ["gl_account", "G/L account (four digits)", first.gl_account || "", 4],
+      ["tax_key", "Tax key (empty when none)", first.tax_key || "", 4],
+    ]) {
+      const id = "account-" + name;
+      const input = el("input");
+      input.id = id;
+      input.name = name;
+      input.type = "text";
+      input.inputMode = "numeric";
+      input.maxLength = size;
+      input.value = candidates.length > 1 ? "" : value;
+      input.required = name === "gl_account";
+      const labelNode = el("label", label);
+      labelNode.htmlFor = id;
+      const row = el("p", null, "field");
+      row.append(labelNode, input);
+      form.append(row);
+      inputs[name] = input;
+    }
+    const reason = el("textarea");
+    reason.id = "account-reason";
+    reason.required = true;
+    reason.maxLength = 500;
+    reason.className = "reason";
+    const reasonLabel = el("label", "Why (kept in the audit log for ten years, so no personal details)");
+    reasonLabel.htmlFor = reason.id;
+    const reasonRow = el("p", null, "field");
+    reasonRow.append(reasonLabel, reason);
+    const button = el("button", "Save and let the case carry on", "button primary");
+    button.type = "submit";
+    const result = el("p");
+    result.setAttribute("role", "status");
+    form.append(reasonRow, button, result);
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      button.disabled = true;
+      result.className = "muted";
+      result.textContent = "Saving…";
+      try {
+        const answer = await (await send(state.token, "/exceptions/" + encodeURIComponent(x.exception_id) +
+          "/account", {
+          gl_account: inputs.gl_account.value,
+          tax_key: inputs.tax_key.value,
+          reason: reason.value,
+        })).json();
+        const back = el("a", "Back to all open exceptions");
+        back.href = "/queue";
+        const done = el("p", "Saved. Case " + answer.case_id +
+          " carries on with this account, and the approver sees it. ");
+        done.append(back);
+        form.replaceWith(done);
+      } catch (e) {
+        result.className = "problem";
+        result.textContent = e.message;
+        button.disabled = false;
+      }
+    });
+    return block("Enter the G/L account and tax key",
+      el("p", "Open the invoice under \u201cFiles as stored\u201d to see what it is for. " +
+        "The approver sees this account and tax key when they decide.", "muted"),
       form);
   }
 
