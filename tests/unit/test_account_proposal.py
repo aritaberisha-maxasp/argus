@@ -83,33 +83,42 @@ def test_only_payments_count_as_no_history() -> None:
 
 
 def test_the_chart_decides_which_accounts_are_money() -> None:
-    """1800 is a bank account in SKR04, so a posting to it there is a payment. In SKR03 it is
-    not a money account, so the same posting counts as history."""
-    postings = [posting("2026-08-01", 6815, "9", "OLD"), posting("2026-09-01", 1800, "")]
+    """4930 is an expense in SKR03 but revenue in SKR04, and 6815 the other way round."""
+    postings = [posting("2026-08-01", 6815, "9", "OLD"), posting("2026-09-01", 4930, "9", "NEW")]
 
     in_skr04 = propose(postings, Chart.SKR04)
     in_skr03 = propose(postings, Chart.SKR03)
 
     assert isinstance(in_skr04, Proposed) and in_skr04.gl_account == "6815"
-    assert isinstance(in_skr03, Proposed) and in_skr03.gl_account == "1800"
+    assert isinstance(in_skr03, Proposed) and in_skr03.gl_account == "4930"
 
 
 @pytest.mark.parametrize(
     ("chart", "account", "usable"),
     [
-        (Chart.SKR03, 4930, True),
+        (Chart.SKR03, 4930, True),  # Bürobedarf
+        (Chart.SKR03, 420, True),  # Büroeinrichtung (fixed asset)
+        (Chart.SKR03, 3400, True),  # Wareneingang
         (Chart.SKR03, 1000, False),  # Kasse
         (Chart.SKR03, 1200, False),  # Bank
-        (Chart.SKR03, 1299, False),
-        (Chart.SKR03, 1300, True),
+        (Chart.SKR03, 1360, False),  # Geldtransit
+        (Chart.SKR03, 1730, False),  # Kreditkartenabrechnung
+        (Chart.SKR03, 1800, False),  # Privatentnahmen
+        (Chart.SKR03, 1600, False),  # Verbindlichkeiten
         (Chart.SKR03, 3730, False),  # Erhaltene Skonti
-        (Chart.SKR03, 3400, True),  # Wareneingang
+        (Chart.SKR03, 3739, False),
+        (Chart.SKR03, 3740, True),
+        (Chart.SKR03, 9009, False),  # Saldenvorträge Kreditoren
+        (Chart.SKR04, 6815, True),  # Bürobedarf
+        (Chart.SKR04, 650, True),  # Büroeinrichtung (fixed asset)
+        (Chart.SKR04, 5400, True),  # Wareneingang
         (Chart.SKR04, 1800, False),  # Bank
         (Chart.SKR04, 1600, False),  # Kasse
         (Chart.SKR04, 1460, False),  # Geldtransit
+        (Chart.SKR04, 3610, False),  # Kreditkartenabrechnung
         (Chart.SKR04, 5736, False),  # Erhaltene Skonti
-        (Chart.SKR04, 6815, True),
-        (Chart.SKR04, 1200, True),
+        (Chart.SKR04, 4930, False),  # revenue in SKR04, not an expense
+        (Chart.SKR04, 9009, False),
         (Chart.SKR03, 10000, False),  # a customer account
         (Chart.SKR03, 70001, False),  # a vendor account
         (Chart.SKR03, 0, False),
@@ -119,6 +128,31 @@ def test_which_accounts_an_invoice_can_be_booked_to(
     chart: Chart, account: int, usable: bool
 ) -> None:
     assert is_invoice_account(chart, account) is usable
+
+
+def test_a_carry_forward_at_the_start_of_the_year_is_not_history() -> None:
+    """An invoice still open on 1 January is carried into the new year against 9009, and paid
+    later. The proposal is the account of the invoice, from December (code review of PR 190)."""
+    found = propose(
+        [
+            posting("2025-12-10", 4930, "9", "BB-DEC"),
+            posting("2026-01-01", 9009, ""),
+            posting("2026-01-15", 1200, ""),
+        ],
+        Chart.SKR03,
+    )
+
+    assert isinstance(found, Proposed)
+    assert (found.gl_account, found.from_document_number) == ("4930", "BB-DEC")
+
+
+@pytest.mark.parametrize(
+    ("chart", "expense", "card"), [(Chart.SKR03, 4930, 1730), (Chart.SKR04, 6815, 3610)]
+)
+def test_a_credit_card_payment_is_not_history(chart: Chart, expense: int, card: int) -> None:
+    found = propose([posting("2026-09-01", expense), posting("2026-09-20", card, "")], chart)
+
+    assert isinstance(found, Proposed) and found.gl_account == str(expense)
 
 
 def test_two_accounts_on_the_most_recent_day_are_no_guess() -> None:
@@ -211,8 +245,9 @@ def test_an_entered_account_is_cleaned() -> None:
         ("49300", "9", "fine reason", "four digits"),
         ("4g30", "9", "fine reason", "four digits"),
         ("٤٩٣٠", "9", "fine reason", "four digits"),  # digits, but not ASCII ones
-        ("1200", "9", "fine reason", "bank"),
-        ("1000", "9", "fine reason", "cash"),
+        ("1000", "9", "fine reason", "not an account an invoice"),
+        ("9009", "9", "fine reason", "not an account an invoice"),
+        ("1730", "9", "fine reason", "3000 to 4999"),
         ("4930", "12345", "fine reason", "tax key"),
         ("4930", "9a", "fine reason", "tax key"),
         ("4930", "9", "  ", "why"),

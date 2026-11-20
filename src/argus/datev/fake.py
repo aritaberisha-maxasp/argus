@@ -54,6 +54,8 @@ class _State:
     postings: list[dict[str, Any]] = field(default_factory=list)
     # Vendor accounts a test created "by hand", as Benjamin does in DATEV (#35).
     added_creditors: dict[int, dict[str, Any]] = field(default_factory=dict)
+    # The fiscal years set up in DATEV, by their ID (20260101). None means every year (#37).
+    fiscal_years: set[str] | None = None
 
     @property
     def creditors(self) -> dict[int, dict[str, Any]]:
@@ -63,6 +65,7 @@ class _State:
         self.closed_until = None
         self.down = False
         self.added_creditors.clear()
+        self.fiscal_years = None
         self.sequences.clear()
         self.postings = [dict(p) for p in self.seed.postings]
 
@@ -142,6 +145,10 @@ class _NewCreditor(BaseModel):
     bank_accounts: list[_BankAccount] = []
 
 
+class _FiscalYears(BaseModel):
+    open: list[str]
+
+
 def create_fake_datev(
     data: FakeDatevData | None = None, client_id: str = DEFAULT_CLIENT_ID
 ) -> FastAPI:
@@ -160,6 +167,11 @@ def create_fake_datev(
 
     def unknown_client(client: str) -> JSONResponse | None:
         return None if client == client_id else _not_found("client_not_found", f"client {client}")
+
+    def unknown_fiscal_year(fiscal_year: str) -> JSONResponse | None:
+        if state.fiscal_years is None or fiscal_year in state.fiscal_years:
+            return None
+        return _not_found("fiscal_year_not_found", f"fiscal year {fiscal_year}")
 
     def all_accounts() -> dict[int, dict[str, Any]]:
         return {**state.creditors, **state.seed.debitors}
@@ -194,12 +206,16 @@ def create_fake_datev(
     def account_postings(
         client: str, fiscal_year: str, account_number: int, date_from: date, date_to: date
     ) -> Any:
-        return unknown_client(client) or [
-            p
-            for p in state.postings
-            if p["account_number"] == account_number
-            and date_from <= date.fromisoformat(p["date"]) <= date_to
-        ]
+        return (
+            unknown_client(client)
+            or unknown_fiscal_year(fiscal_year)
+            or [
+                p
+                for p in state.postings
+                if p["account_number"] == account_number
+                and date_from <= date.fromisoformat(p["date"]) <= date_to
+            ]
+        )
 
     @app.post(f"{base}/accounting-sequences", response_model=None)
     def create_sequence(client: str, fiscal_year: str, body: dict[str, Any]) -> Any:
@@ -280,6 +296,12 @@ def create_fake_datev(
     @app.put("/_fake/closed-until")
     def close_period(body: _ClosedUntil) -> _ClosedUntil:
         state.closed_until = body.date
+        return body
+
+    @app.put("/_fake/fiscal-years")
+    def set_fiscal_years(body: _FiscalYears) -> _FiscalYears:
+        """Only these fiscal years are set up; the others answer 404 (#37)."""
+        state.fiscal_years = set(body.open)
         return body
 
     @app.put("/_fake/outage")

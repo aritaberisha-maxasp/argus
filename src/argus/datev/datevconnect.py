@@ -119,7 +119,11 @@ class DatevConnectGateway:
         return self._get_account("debitors", number)
 
     def list_postings(self, account: int, start: date, end: date) -> list[Posting]:
+        """A fiscal year DATEV has not set up, such as the new year in early January or a year
+        before the client came to DATEV, holds no postings and is skipped (#37). Only when no
+        year in the range is set up is it a setup problem (DatevError)."""
         postings: list[Posting] = []
+        found_a_year = False
         for year in range(start.year, end.year + 1):
             params = {
                 "account_number": str(account),
@@ -127,7 +131,14 @@ class DatevConnectGateway:
                 "date_to": min(end, date(year, 12, 31)).isoformat(),
             }
             path = self._path("account-postings", date(year, 1, 1))
-            postings += [_posting(item) for item in self._get_json(path, params)]
+            response = self._send("GET", path, params=params)
+            if _is_missing(response, "fiscal_year_not_found"):
+                continue
+            _raise_for_status(response)
+            found_a_year = True
+            postings += [_posting(item) for item in response.json()]
+        if not found_a_year:
+            raise DatevError(f"no fiscal year from {start.year} to {end.year} is set up in DATEV")
         return postings
 
     # Writing bookings

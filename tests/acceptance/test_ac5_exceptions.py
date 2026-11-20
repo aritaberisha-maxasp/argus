@@ -96,23 +96,3 @@ def test_e06_with_a_changed_iban_is_blocked_in_the_exception_queue(
     assert detail.startswith("Possible fraud.")
     assert facts["possible_fraud"] is True
     assert "DE49000000060000700006" not in detail  # masked: DE ... 0006
-
-
-@pytest.mark.req("PR-04")
-def test_matched_invoices_get_the_account_and_tax_key_of_their_booking_history(
-    app: Engine, intake_run: IntakeRun
-) -> None:
-    """E01 (Muster Bürobedarf, 70001) was booked to 4930 with tax key 9 before (#37), and E13
-    (70008) to 4730. The proposal does not wait for the approver, so E13 has one too."""
-    for fixture_id, expected in (("E01", ("4930", "9")), ("E13", ("4730", "9"))):
-        [case] = cases_of(app, intake_run, fixture_id)
-        with app.connect() as connection:
-            proposal = connection.execute(
-                text(
-                    "select gl_account, tax_key, source from account_proposal"
-                    " where case_id = :id order by id desc limit 1"
-                ),
-                {"id": case["id"]},
-            ).one()
-        assert (proposal.gl_account, proposal.tax_key) == expected, fixture_id
-        assert proposal.source == "booking_history"

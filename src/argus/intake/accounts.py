@@ -7,10 +7,11 @@ recent one (:func:`propose`). The proposal is stored on the case (``account_prop
 migration 0019), shown on the invoices page and read by the approval (#38) and the booking
 (#41) through :func:`current_proposal`.
 
-What counts as history: postings on the vendor account whose contra account is an expense or
-asset account. A payment, a cash discount or a transfer between personal accounts also sits on
-the vendor account, but says nothing about where the invoice belongs, so it is skipped. Which
-accounts those are depends on the chart of accounts (SKR03 or SKR04, #18), which is a setting:
+What counts as history: postings on the vendor account whose contra account is one an invoice
+can be booked to (fixed assets, goods and materials, expenses). A payment, a card clearing, a
+carry forward at the start of the year or a cash discount also sits on the vendor account, but
+says nothing about where the invoice belongs, so it is skipped. Which accounts count depends on
+the chart of accounts (SKR03 or SKR04, #18), which is a setting:
 ``ARGUS_CHART_OF_ACCOUNTS``, ``SKR03`` unless set. The proposal itself only copies what the
 history says, so it works with either chart.
 
@@ -59,24 +60,32 @@ class Chart(StrEnum):
     SKR04 = "SKR04"
 
 
-# Contra accounts on a vendor account that are not an invoice: cash, bank and money in transit
-# (a payment), and received cash discounts (Erhaltene Skonti). Provisional until Max ASP's
-# chart is confirmed (#2, #18); the DATEV standard numbers.
-_NOT_AN_INVOICE: dict[Chart, tuple[range, ...]] = {
+# The accounts an invoice can be booked to, per chart: fixed assets, goods and materials, and
+# expenses. Everything else on a vendor account is not an invoice: cash, bank, card clearing and
+# money in transit (a payment), carry forwards at the start of a year (9009), liabilities,
+# private accounts and other personal accounts (code review of PR 190). Received cash discounts
+# sit inside the goods class and are cut out of it. An allow list, so an account nobody thought
+# of counts as "not history" rather than becoming the proposal (PR-04: never guess). The DATEV
+# standard numbers; widened once Max ASP's own chart is known (#18).
+_INVOICE_ACCOUNTS: dict[Chart, tuple[range, ...]] = {
     Chart.SKR03: (
-        range(1000, 1300),  # Kasse, Postbank, Bank
-        range(1360, 1361),  # Geldtransit
-        range(3730, 3740),  # Erhaltene Skonti
+        range(10, 500),  # Anlagevermögen (fixed assets)
+        range(3000, 3730),  # Wareneingang (goods), up to the received discounts
+        range(3740, 4000),
+        range(4000, 5000),  # Betriebliche Aufwendungen (expenses)
     ),
     Chart.SKR04: (
-        range(1460, 1461),  # Geldtransit
-        range(1600, 1900),  # Kasse, Postbank, Bank
-        range(5730, 5740),  # Erhaltene Skonti
+        range(10, 1000),  # Anlagevermögen (fixed assets)
+        range(5000, 5730),  # Material und Waren, up to the received discounts
+        range(5740, 6000),
+        range(6000, 7000),  # Betriebliche Aufwendungen (expenses)
     ),
 }
-# Personal accounts (customers and vendors) have five digits, G/L accounts four (the same
-# assumption as the gateway, which treats 70000 and up as vendors).
-FIRST_PERSONAL_ACCOUNT = 10000
+# What the form tells a person the chart allows.
+_ALLOWED_WORDS: dict[Chart, str] = {
+    Chart.SKR03: "0010 to 0499, 3000 to 4999 without 3730 to 3739",
+    Chart.SKR04: "0010 to 0999, 5000 to 6999 without 5730 to 5739",
+}
 
 
 def chart_from_env(environ: Mapping[str, str]) -> Chart:
@@ -92,11 +101,9 @@ def chart_from_env(environ: Mapping[str, str]) -> Chart:
 
 
 def is_invoice_account(chart: Chart, account: int) -> bool:
-    """A G/L account an invoice can be booked to: not a personal account, not cash or bank
-    and not a received discount."""
-    if not 0 < account < FIRST_PERSONAL_ACCOUNT:
-        return False
-    return not any(account in r for r in _NOT_AN_INVOICE[chart])
+    """A G/L account an invoice can be booked to in this chart: a fixed asset, goods or
+    materials, or an expense. Never a payment, carry forward, liability or personal account."""
+    return any(account in r for r in _INVOICE_ACCOUNTS[chart])
 
 
 # ------------------------------------------------------------------------------- the rule
@@ -450,8 +457,8 @@ def check_entered(chart: Chart, gl_account: str, tax_key: str, reason: str) -> E
         raise BadAccount("Enter the G/L account as its four digits, for example 4930.")
     if not is_invoice_account(chart, int(gl)):
         raise BadAccount(
-            f"{gl} is a cash, bank or discount account in {chart.value}. Enter the account "
-            "the invoice is booked to."
+            f"{gl} is not an account an invoice is booked to in {chart.value}. Enter a fixed "
+            f"asset, goods or expense account ({_ALLOWED_WORDS[chart]})."
         )
     key = tax_key.strip()
     if not (key == "" or (key.isascii() and key.isdigit() and len(key) <= 4)):

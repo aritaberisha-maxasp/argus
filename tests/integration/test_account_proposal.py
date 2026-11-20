@@ -730,7 +730,7 @@ def test_a_value_the_person_can_fix_comes_back_with_a_sentence(
     )
 
     assert answer.status_code == 422
-    assert "cash, bank or discount account" in answer.json()["problem"]
+    assert "not an account an invoice is booked to" in answer.json()["problem"]
 
 
 def test_an_approver_cannot_enter_an_account(
@@ -829,3 +829,27 @@ def test_a_downgrade_keeps_the_proposals_and_their_rules(owner: Engine, app: Eng
     other = matched_case(app, account)
     run(app, History({account: [posting(account, "2026-09-01", 4806)]}), other)
     assert proposal_of(app, other).gl_account == "4806"
+
+
+def test_a_fiscal_year_datev_has_not_set_up_holds_no_postings(app: Engine) -> None:
+    """Early January, before the new year is opened in DATEV, or a client with less than three
+    years in DATEV: the years that exist still count (code review of PR 190)."""
+    with TestClient(create_fake_datev()) as fake:
+        fake.put("/_fake/fiscal-years", json={"open": ["20260101"]})
+        datev = DatevConnectGateway(fake, DEFAULT_CLIENT_ID, today=lambda: TODAY)
+        case_id = matched_case(app, "70001")
+        done = propose_accounts(app, datev, Chart.SKR03, cases=[case_id], today=date(2027, 1, 5))
+
+    assert (done.proposed, done.failed) == (1, 0)
+    assert proposal_of(app, case_id).gl_account == "4930"
+
+
+def test_no_fiscal_year_set_up_at_all_is_a_setup_problem(app: Engine) -> None:
+    with TestClient(create_fake_datev()) as fake:
+        fake.put("/_fake/fiscal-years", json={"open": ["20200101"]})
+        datev = DatevConnectGateway(fake, DEFAULT_CLIENT_ID, today=lambda: TODAY)
+        case_id = matched_case(app, "70001")
+        done = propose_accounts(app, datev, Chart.SKR03, cases=[case_id], today=TODAY)
+
+    assert done.failed == 1
+    assert open_of(app, case_id) == [] and proposal_of(app, case_id) is None

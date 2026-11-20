@@ -8,14 +8,16 @@ Approvers should not have to know the chart of accounts. So once an incoming inv
 
 At the end of every live sweep, right after vendor matching, ARGUS looks at every matched incoming case in Received or Exception that has no proposal yet. For each vendor account it reads the postings of this year and the two before from DATEV, through the gateway (`list_postings`), once per pass. It then takes the most recent posting and proposes its contra account as the G/L account and its tax key as the tax key. A blank tax key stays blank, for example for tax free rent.
 
-**Payments are not history.** A payment, a received cash discount or a transfer to another personal account also sits on the vendor account and is often the newest posting. It says nothing about where the invoice belongs, so it is skipped. Which accounts those are depends on the chart of accounts:
+**Only accounts an invoice is booked to count.** A payment, a card clearing, a carry forward at the start of the year (9009) or a received cash discount also sits on the vendor account and is often the newest posting. It says nothing about where the invoice belongs. So ARGUS uses an allow list per chart and treats every other account as not history (code review of PR 190):
 
-| Skipped contra accounts | SKR03 | SKR04 |
+| Counts as history | SKR03 | SKR04 |
 |---|---|---|
-| Cash, Postbank, bank | 1000 to 1299 | 1600 to 1899 |
-| Money in transit (Geldtransit) | 1360 | 1460 |
-| Received cash discounts (Erhaltene Skonti) | 3730 to 3739 | 5730 to 5739 |
-| Personal accounts (customers and vendors) | 10000 and up | 10000 and up |
+| Fixed assets (Anlagevermögen) | 0010 to 0499 | 0010 to 0999 |
+| Goods and materials (Wareneingang, Material) | 3000 to 3999 | 5000 to 5999 |
+| Expenses (Betriebliche Aufwendungen) | 4000 to 4999 | 6000 to 6999 |
+| Cut out: received cash discounts (Erhaltene Skonti) | 3730 to 3739 | 5730 to 5739 |
+
+Everything else is skipped, for example cash and bank, money in transit, card clearing (1730 in SKR03, 3610 in SKR04), liabilities, private accounts, carry forwards and statistical accounts in class 9, and other personal accounts. An account nobody thought of is therefore skipped rather than proposed. The queue form uses the same list, so a person cannot enter 9009 or a bank account either.
 
 The chart is a setting, `ARGUS_CHART_OF_ACCOUNTS` (`SKR03` or `SKR04`). It is `SKR03` when not set, the default Arita confirmed on #18. Any other value stops the job and the web app at start, so a typo never proposes a wrong account. The proposal itself only copies what the history says, so it works with either chart.
 
@@ -24,7 +26,7 @@ The chart is a setting, `ARGUS_CHART_OF_ACCOUNTS` (`SKR03` or `SKR04`). It is `S
 - the vendor has no usable posting in this year and the two before, or
 - the postings of the most recent day point to more than one account or tax key, for example an invoice split over two accounts. The detail names them.
 
-When DATEV does not answer, the cases wait for the next sweep. A setup problem, such as an unknown fiscal year, is never read as "no history": the case waits and the pass counts it as failed, so healthy invoices never land in the queue because of it.
+When DATEV does not answer, the cases wait for the next sweep. A fiscal year DATEV has not set up, such as the new year in early January or a year before Max ASP came to DATEV, holds no postings and is skipped; the other years still count. A real setup problem, such as an unknown client or no year in the range set up at all, is never read as "no history": the case waits and the pass counts it as failed, so healthy invoices never land in the queue because of it.
 
 ## Stored on the case
 
@@ -57,10 +59,14 @@ Proposals are part of the audit trail. A downgrade below 0019 with proposals in 
 
 ## What is provisional
 
-- the skipped account ranges are the DATEV standard numbers; Max ASP's own chart may add accounts (#18)
+- the allowed account ranges are the DATEV standard numbers; Max ASP's own chart may need more, for example neutral expenses in class 2 (SKR03) or 7 (SKR04) (#18)
+- that DATEV answers a fiscal year it has not set up with 404 and the code `fiscal_year_not_found`; the fake does, the real code is a question for #2
 - G/L accounts have four digits and personal accounts five, as the gateway assumes
-- reading three fiscal years assumes DATEV has them open for Max ASP's client; if an old year is missing, the gateway raises a setup error and the proposals wait (#2)
+- the fixture postings are dated 2026 and the window follows today's date, so from 2029 the demo and AC-2 find no history for them until the fixtures move on
 
 ## Follow ups
 
-- A database rule that an incoming invoice cannot go for approval without a proposal fits best in #38, which adds the step to approval.
+- #38: a database rule that an incoming invoice cannot go for approval without a proposal, and the approval page shows the proposal.
+- #38 (compliance review of PR 190): once a person entered the account for a case, refuse a later proposal from the history for it, so automation never overrides a person's reasoned choice.
+- #38 and #41 (compliance review of PR 190): a blank tax key entered by a person shows clearly as "no tax key" on the approval page, and the booking treats it as something to confirm, not a silent default.
+- #41: how an invoice split over two accounts is booked; the queue form takes one account.
