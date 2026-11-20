@@ -10,7 +10,7 @@ from typing import Annotated
 from alembic.script import ScriptDirectory
 from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import Engine, text
 from sqlalchemy.exc import NoResultFound
 
@@ -29,12 +29,20 @@ from argus.auth import (
     verifier_from_env,
 )
 from argus.cases.model import CaseKind, CaseStatus
-from argus.cases.store import get_case
+from argus.cases.store import CaseRuleBroken, get_case
 from argus.connections import connections_from_env
 from argus.db import engine_from_env
 from argus.documents.store import AzureDocumentStore, DocumentStore
 from argus.intake.graph import GraphClient
-from argus.intake.mode import IntakeMode, SwitchedBy, intake_mode, switch_intake_mode
+from argus.intake.mode import (
+    REASON_MAX,
+    REASON_MIN,
+    IntakeMode,
+    SwitchedBy,
+    intake_mode,
+    switch_intake_mode,
+    trimmed_reason,
+)
 from argus.intake.shadow import PersonFolders, ShadowReport, shadow_report
 from argus.invoices_page.web import PAGE_PATHS as INVOICES_PAGE_PATHS
 from argus.invoices_page.web import install_invoices_page
@@ -89,10 +97,25 @@ class ModeView(BaseModel):
     may_switch: bool
 
 
+BLANK_REASON = (
+    "Please give a reason of at least 3 characters. Spaces, tabs and line breaks alone do not "
+    "count."
+)
+
+
 class ModeChange(BaseModel):
     mode: IntakeMode
-    # Why, for example "shadow report of 21 Nov, no invoice to Other". Kept in the audit log.
-    reason: str = Field(min_length=3, max_length=500, pattern=r"\S")
+    # Why, for example "shadow report of 21 Nov, no invoice to Other". Kept in the audit log,
+    # trimmed. Spaces, tabs or line breaks alone are no reason (#170).
+    reason: str = Field(max_length=REASON_MAX)
+
+    @field_validator("reason")
+    @classmethod
+    def reason_is_not_blank(cls, reason: str) -> str:
+        reason = trimmed_reason(reason)
+        if len(reason) < REASON_MIN:
+            raise ValueError(BLANK_REASON)
+        return reason
 
 
 class ModeChanged(BaseModel):
@@ -234,10 +257,18 @@ def create_app(
         by = SwitchedBy(
             actor=user.actor,
             name=user.name,
-            reason=change.reason.strip(),
+            reason=change.reason,  # already trimmed
             sign_in_address=user.sign_in_address,
         )
-        changed = switch_intake_mode(engine(), by, change.mode)
+        try:
+            changed = switch_intake_mode(engine(), by, change.mode)
+        except CaseRuleBroken as refusal:
+            # The database checks the name and the reason again (migration 0017). Its sentence
+            # names no values, so it goes back as it is: a 422 the page can show, not a server
+            # error (#170).
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY, f"ARGUS refused the switch: {refusal}."
+            ) from None
         if changed:
             # Who and why are in the audit log; the app log only says that it happened.
             log.warning("ARGUS was switched to %s mode", change.mode)

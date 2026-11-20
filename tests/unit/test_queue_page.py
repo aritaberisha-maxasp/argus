@@ -14,7 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine
 
-from argus.app import PUBLIC_PATHS, create_app
+from argus.app import BLANK_REASON, PUBLIC_PATHS, create_app
 from argus.auth import Role, TokenVerifier
 from argus.auth.tokens import EntraSettings
 from argus.cases.model import ExceptionReason
@@ -299,3 +299,15 @@ def test_an_approver_or_a_person_without_a_role_sees_no_mode(
     token = entra.token(ALICE, roles=[role] if role else [])
     assert client.get("/intake/mode", headers=bearer(token)).status_code == 403
     assert client.get("/intake/mode").status_code == 401
+
+
+@pytest.mark.req("NF-01", "NF-03")
+def test_the_mode_form_treats_tabs_and_line_breaks_as_a_blank_reason() -> None:
+    """#170: the page trims like the server and the database, and shows a sentence for a
+    refused reason instead of a general error."""
+    script = (STATIC / "app.js").read_text(encoding="utf-8")
+
+    assert "const why = trimReason(reason.value);" in script
+    assert r"/^[\s\u180e\u200b\ufeff]+|[\s\u180e\u200b\ufeff]+$/g" in script
+    assert BLANK_REASON in script
+    assert "problem.textContent = e.detail || BLANK_REASON;" in script
