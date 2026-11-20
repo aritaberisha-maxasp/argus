@@ -247,6 +247,39 @@ def test_history_is_read_one_fiscal_year_at_a_time() -> None:
     ]
 
 
+@pytest.mark.req("PR-04")
+def test_a_fiscal_year_that_is_not_set_up_holds_no_postings() -> None:
+    def answer(request: httpx.Request) -> httpx.Response:
+        if "/fiscal-years/20240101/" in request.url.path:
+            return httpx.Response(
+                404, json={"error": {"code": "fiscal_year_not_found", "message": "no 2024"}}
+            )
+        return httpx.Response(200, json=[])
+
+    assert gateway_answering(answer).list_postings(70001, date(2024, 1, 1), date(2026, 2, 15)) == []
+
+
+@pytest.mark.req("PR-04")
+@pytest.mark.parametrize("code", ["client_not_found", "something_else"])
+def test_an_unknown_client_is_still_a_setup_problem(code: str) -> None:
+    def answer(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"error": {"code": code, "message": "missing"}})
+
+    with pytest.raises(DatevError):
+        gateway_answering(answer).list_postings(70001, date(2024, 1, 1), date(2026, 2, 15))
+
+
+@pytest.mark.req("PR-04")
+def test_no_fiscal_year_set_up_at_all_is_a_setup_problem() -> None:
+    def answer(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            404, json={"error": {"code": "fiscal_year_not_found", "message": "none"}}
+        )
+
+    with pytest.raises(DatevError, match="no fiscal year"):
+        gateway_answering(answer).list_postings(70001, date(2024, 1, 1), date(2026, 2, 15))
+
+
 @pytest.mark.req("VM-03", "EX-01")
 def test_a_wrong_client_is_an_error_not_a_missing_account(fake: TestClient) -> None:
     gateway = DatevConnectGateway(fake, "wrong-client")

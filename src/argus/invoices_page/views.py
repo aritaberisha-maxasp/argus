@@ -16,6 +16,8 @@ Where each column comes from:
   invoice and due date as read, and when the case last changed.
 - **Open exception**: the oldest open exception of the case, so the page can link to it in the
   exception queue.
+- **G/L account and tax key**: the current proposal of an incoming invoice or credit note
+  (#37, ``account_proposal``), for the vendor account the case has now.
 
 Nothing here logs. Names are personal data and stay out of the log (NF-03).
 """
@@ -82,6 +84,8 @@ class CaseRow:
     exception_id: int | None  # the oldest open exception of the case
     exception_reason: ExceptionReason | None
     exception_text: str | None
+    gl_account: str | None = None  # the proposed G/L account (#37)
+    tax_key: str | None = None  # its tax key; blank when the history has none
 
 
 @dataclass(frozen=True)
@@ -114,7 +118,8 @@ _LIST_HEAD = """
            c.updated_at, d.received_at, d.partner_name, d.sender,
            r.reading -> 'fields' -> 'invoice_date' -> 'value' as invoice_date,
            r.reading -> 'fields' -> 'due_date' -> 'value' as due_date,
-           x.id as exception_id, x.reason as exception_reason
+           x.id as exception_id, x.reason as exception_reason,
+           a.gl_account, a.tax_key
     """
 _OPEN_EXCEPTION = """
     left join lateral (
@@ -122,6 +127,11 @@ _OPEN_EXCEPTION = """
       where e.case_id = c.id and e.resolved_at is null
       order by e.opened_at, e.id limit 1
     ) x on true
+    left join lateral (
+      select p.gl_account, p.tax_key from account_proposal p
+      where p.case_id = c.id and p.vendor_account = c.partner_account
+      order by p.id desc limit 1
+    ) a on true
     """
 _LIST_TAIL = " order by d.received_at desc, c.id desc limit :limit"
 _COUNT_HEAD = "select c.status, count(*) as n "
@@ -216,6 +226,8 @@ def _row(r: Any) -> CaseRow:
         exception_id=r["exception_id"],
         exception_reason=reason,
         exception_text=REASON_TEXT[reason] if reason else None,
+        gl_account=r["gl_account"],
+        tax_key=r["tax_key"],
     )
 
 
