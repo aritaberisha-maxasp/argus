@@ -217,6 +217,7 @@ def build_reading(
             "iban_on_document",
             flag=Flag.SEVERAL_VALUES,
             note=f"the document states {len(stated)} IBANs: {', '.join(stated)}",
+            values=tuple(stated),
         )
     rates = vat_rates(analysis.pages)
     if len(rates) > 1 and fields.get("vat_rate", ReadField("vat_rate")).source is Source.PAGE_TEXT:
@@ -319,6 +320,7 @@ def _add_page_text(
                 current.words,
                 Flag.READERS_DISAGREE,
                 f"the reader says {current.value}, the page text says {found.value}",
+                values=(str(current.value), str(found.value)),
             )
 
 

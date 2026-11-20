@@ -236,8 +236,34 @@ def test_flagged_values_are_not_used_to_find_the_vendor() -> None:
         }
     }
 
-    assert InvoiceParty.from_reading(reading) == InvoiceParty(vat_id="DE012345601")
+    party = InvoiceParty.from_reading(reading)
+    # Not used to find the vendor, but still kept for the IBAN check (#36, PR 185 reviews).
+    assert (party.vat_id, party.iban, party.name) == ("DE012345601", None, None)
+    assert party.stated_ibans == ("DE44000000020000700001",)
+    assert party.iban_flagged
     assert InvoiceParty.from_reading({}) == InvoiceParty()
+
+
+def test_every_stated_iban_is_kept_whatever_the_flag() -> None:
+    several = {
+        "fields": {
+            "iban_on_document": {
+                "value": None,
+                "flag": "several_values",
+                "note": "the document states 2 IBANs: "
+                "DE44000000020000700001, DE52000000030000700002",
+                "values": ["DE44000000020000700001", "DE52000000030000700002"],
+            }
+        }
+    }
+    clean = {"fields": {"iban_on_document": {"value": "DE44 0000 0002 0000 7000 01"}}}
+
+    assert InvoiceParty.from_reading(several).stated_ibans == (
+        "DE44000000020000700001",
+        "DE52000000030000700002",
+    )
+    assert InvoiceParty.from_reading(clean).stated_ibans == ("DE44000000020000700001",)
+    assert not InvoiceParty.from_reading(clean).iban_flagged
 
 
 def test_an_iban_shown_to_people_is_masked() -> None:

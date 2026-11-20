@@ -21,8 +21,9 @@ What each exception can end as here:
   case carries on, the comment says why), or reject the invoice.
 - **Values to check**: reject the invoice. Correcting the values stays on the exception queue
   page, which has the form for it (#112).
-- **IBAN mismatch**: reject the invoice. "Fixed in DATEV" needs ARGUS to check the IBAN again,
-  which comes with #36, so it is not offered yet (PR-05, VM-04).
+- **IBAN mismatch**: reject the invoice. "Fixed in DATEV" is never offered here: ARGUS checks
+  the IBAN against DATEV again on every sweep and ends the block by itself once DATEV holds the
+  invoice's IBAN (#36, PR-05, VM-04). A click cannot stand in for that check.
 - **Payment failed**: nothing yet. Where the case goes depends on the payment run (#40 onwards).
 - **Customer question**: answered, the case carries on.
 - **Booking error**: fixed in DATEV, the case carries on.
@@ -107,7 +108,7 @@ FIXED_IN_DATEV = Choice(
 _CARRY_ON: dict[ExceptionReason, tuple[Choice, ...]] = {
     ExceptionReason.DUPLICATE: (NOT_A_DUPLICATE,),
     ExceptionReason.VALUES_TO_CHECK: (),  # corrected on the queue page (#112)
-    ExceptionReason.IBAN_MISMATCH: (),  # fixed_in_datev needs the check again of #36
+    ExceptionReason.IBAN_MISMATCH: (),  # ARGUS ends it itself after checking DATEV (#36)
     ExceptionReason.PAYMENT_FAILED: (),  # depends on the payment run
     ExceptionReason.CUSTOMER_QUERY: (ANSWERED,),
     ExceptionReason.BOOKING_ERROR: (FIXED_IN_DATEV,),
@@ -121,8 +122,8 @@ NOTES: dict[ExceptionReason, str] = {
         "To correct the invoice number, amount or currency, open it in the exception queue."
     ),
     ExceptionReason.IBAN_MISMATCH: (
-        "Once the IBAN is fixed in DATEV, ARGUS will check it again. That check is not built"
-        " yet, so this page can only reject the invoice."
+        "Possible fraud. Once the IBAN is right in DATEV, ARGUS sees it on the next sweep and"
+        " carries on by itself, so this page can only reject the invoice."
     ),
     ExceptionReason.PAYMENT_FAILED: (
         "A failed payment cannot be resolved from this page yet. It depends on the payment run."
@@ -196,8 +197,8 @@ def _note(
             else "it is not an incoming invoice still waiting before booking"
         )
         return (
-            "Once the IBAN is fixed in DATEV, ARGUS will check it again. That check is not built"
-            f" yet, and this case cannot be rejected here because {why}."
+            "Possible fraud. Once the IBAN is right in DATEV, ARGUS sees it on the next sweep and"
+            f" carries on by itself. This case cannot be rejected here because {why}."
         )
     if reason in NOTES:
         return NOTES[reason]

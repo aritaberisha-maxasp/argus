@@ -73,6 +73,10 @@ class ReadField:
     words: str | None = None  # the text on the page the value was read from
     flag: Flag | None = None
     note: str | None = None  # what the flag means for this field, for the person who checks
+    # Every value the document states for this field, when it states more than one or two
+    # readers disagree. Kept in a form a later check can use, not only in the note: the IBAN
+    # check compares each of them with DATEV (#36, compliance review of PR 185).
+    values: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.name not in FIELDS:
@@ -93,6 +97,7 @@ class ReadField:
             "words": self.words,
             "flag": self.flag.value if self.flag else None,
             "note": self.note,
+            **({"values": list(self.values)} if self.values else {}),
         }
 
 

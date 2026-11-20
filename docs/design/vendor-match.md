@@ -24,7 +24,7 @@ A match fails, and nothing weaker is tried, when:
 - two vendor accounts fit equally well;
 - the IBAN or name points to a vendor account that holds a different VAT ID than the invoice.
 
-When the VAT ID matches but the IBAN differs, the match stands. Blocking a changed IBAN is #36's job (PR-05, VM-04).
+When the VAT ID matches but the IBAN differs, the match stands, and the IBAN check below blocks the invoice.
 
 Every match writes `vendor_matched` into the audit log with the account number, the rule (`by`) and `weaker: true` for a name only match. No name, VAT ID or IBAN goes into the log.
 
@@ -43,9 +43,24 @@ The case then goes back to where it was and carries on. Nobody has to touch it (
 
 Every pass also looks at matched cases still in Received whose vendor has no approver row. That happens when a person presses "Checked, carry on" on `vendor_without_approver` on the invoices page (#62), or when an approver row is removed before approval. ARGUS opens `vendor_without_approver` again, so no case reaches approval without an approver (VM-02, code review of PR 182). This check needs no DATEV, so it also runs while DATEV does not answer. For `unknown_vendor`, carry on brings the case back without a vendor account, and the next pass opens `unknown_vendor` again.
 
+## When the IBAN differs (#36)
+
+Covers PR-05 and VM-04. A changed bank account is a classic fraud pattern, so once the vendor account is found ARGUS compares every IBAN the invoice states with the IBANs DATEV holds for that account. When any of them is not among them, the case goes to the exception queue as `iban_mismatch`, marked as possible fraud. This also covers an IBAN that belongs to another vendor account; the detail names that account. Only an invoice that states no IBAN at all is not compared.
+
+**Flags stop finding, never blocking** (compliance and code review of PR 185). A flagged IBAN is not used to find the vendor, but it is always checked. That covers every flag: several values (the usual "we changed banks" letter that prints the old and the new IBAN), low confidence, found only by the language model, readers disagree and wrong check digits. The readers keep every IBAN they saw in the field's `values` (several values, readers disagree), so the check does not depend on the note text; for readings stored before that, the IBANs the note names count too. The audit facts say `read_with_flag` and how many IBANs were stated and differ. A flagged IBAN that is on file carries on as before.
+
+- **The invoice is blocked.** An open exception stops every status change of the case in the database (migration 0002), so it is never sent for approval and never goes into a payment run.
+- **ARGUS never takes bank details from an invoice (VM-04).** The gateway has no way to change a vendor account, and nothing in ARGUS reads the invoice's IBAN as new master data.
+- **How it ends.** Benjamin checks with the vendor on a phone number Max ASP already knows. If the new IBAN is right, Benjamin changes it in DATEV; every pass looks at open IBAN mismatches again and resolves the exception as `fixed_in_datev` once DATEV holds every IBAN the invoice states on that vendor account. If it is not right, a person rejects the invoice on the invoices page. The page offers only reject: "fixed in DATEV" is ARGUS's own check, never a click. The database already allows only these two endings (migration 0002).
+- **Masked everywhere.** The detail shows IBANs as country and last four characters (`DE ... 0006`). The audit log gets the account number, `possible_fraud`, how many IBANs are on file and any other account that holds the invoice's IBAN, never an IBAN. The pass logs only case IDs.
+
+**Cases matched before this check.** The check runs when a case is matched. A case that vendor matching (#35) matched before this change deployed, and that still waits in Received, was never compared. Nothing is live yet and every demo reset empties the cases, so there are none to worry about; this only matters if real cases were matched before this deploys.
+
+The payment run (from #40) must still pay only to the IBAN DATEV holds when the run is prepared, not the one on the invoice. This check stops a changed IBAN at the door; that rule stops a change made in DATEV after approval from reaching Wise unseen.
+
 ## When it runs
 
-At the end of every live sweep, after filing, so it needs no job of its own. It asks DATEV only when there is a vendor to find: a new case, or an open `unknown_vendor`. When DATEV does not answer, those wait for the next sweep; the approver checks still run. In shadow mode no cases are opened, so there is nothing to match.
+At the end of every live sweep, after filing, so it needs no job of its own. It asks DATEV only when there is a vendor to find or an IBAN to check again: a new case, an open `unknown_vendor` or an open `iban_mismatch`. When DATEV does not answer, those wait for the next sweep; the approver checks still run. In shadow mode no cases are opened, so there is nothing to match.
 
 The job builds the gateway from `ARGUS_DATEV_URL` and `ARGUS_DATEV_CLIENT` (`argus.connections`). The demo points them at the fake DATEV. Live they are set at go live ([go live runbook](../runbooks/go-live.md)); until then cases wait without a vendor account.
 
@@ -53,4 +68,4 @@ The demo reset (`python -m argus.demo reset`) fills the approver table from the 
 
 ## Testing against the fake DATEV
 
-The fake DATEV has a test control `POST /_fake/creditors` that stands in for Benjamin creating a vendor by hand. ARGUS never calls it: the gateway's allow list only knows DATEVconnect's paths. `/_fake/reset` removes such vendors again.
+The fake DATEV has a test control `POST /_fake/creditors` that stands in for Benjamin creating a vendor by hand. `PUT /_fake/creditors/{number}/bank-accounts` stands in for Benjamin changing a vendor's bank details. ARGUS never calls it: the gateway's allow list only knows DATEVconnect's paths. `/_fake/reset` removes such vendors again.

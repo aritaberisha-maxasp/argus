@@ -94,7 +94,8 @@ The email lands in the Inbox of the fake mailbox. The sweep picks it up within 5
 
 | Email | What it shows |
 |---|---|
-| E12 | Invoice from a vendor that is not in DATEV (the default). Today it shows as Received in Incoming invoices: the check against the DATEV vendor list is not built yet, so it does not reach the queue |
+| E12 | Invoice from a vendor that is not in DATEV (the default). It waits in the exception queue as an unknown vendor |
+| E06 | Invoice from a known vendor asking to pay a new bank account. ARGUS blocks it in the exception queue as possible fraud |
 | E14 | Three invoices in one email, so three cases |
 | E05 | Incoming invoice over EUR 5,000 |
 | E04 | English invoice in GBP from a UK vendor |

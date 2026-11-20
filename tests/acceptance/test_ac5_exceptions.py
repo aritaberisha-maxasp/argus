@@ -69,9 +69,30 @@ def test_e01_from_a_known_vendor_with_an_approver_is_matched_and_carries_on(
     assert (case["status"], case["partner_account"], case["open"]) == ("received", "70001", [])
 
 
-@pytest.mark.req("AC-5", "PR-05")
-@pytest.mark.waits_on(36)
-def test_e06_with_a_changed_iban_is_blocked_in_the_exception_queue() -> None:
+@pytest.mark.req("AC-5", "PR-05", "VM-04")
+def test_e06_with_a_changed_iban_is_blocked_in_the_exception_queue(
+    app: Engine, intake_run: IntakeRun
+) -> None:
     """After intake E06 has one open exception with reason iban_mismatch, flagged as a possible
-    fraud case, no approval request and no place in a payment run."""
-    pytest.fail("write this scenario when #36 is built")
+    fraud case (#36). The case is matched to Muster Telekom (70006) by its VAT ID, but the
+    invoice asks to pay another IBAN. It stays in Exception, so it is never sent for approval
+    and never added to a payment run, and DATEV still has the old IBAN only."""
+    [case] = cases_of(app, intake_run, "E06")
+    assert (case["status"], case["partner_account"], case["open"]) == (
+        "exception",
+        "70006",
+        ["iban_mismatch"],
+    )
+    with app.connect() as connection:
+        row = connection.execute(
+            text(
+                "select detail, facts from exception_item"
+                " where case_id = :id and resolved_at is null"
+            ),
+            {"id": case["id"]},
+        ).one()
+    detail: str = row.detail
+    facts: dict[str, Any] = row.facts
+    assert detail.startswith("Possible fraud.")
+    assert facts["possible_fraud"] is True
+    assert "DE49000000060000700006" not in detail  # masked: DE ... 0006

@@ -10,8 +10,10 @@ are only GET routes for creditors and debitors.
 The routes under ``/_fake`` exist only here. Tests use them to make the fake fail
 the way DATEV fails: a closed period or DATEV not answering. ``/_fake/creditors``
 stands in for Benjamin creating a vendor account in DATEV by hand, so a test can show
-that ARGUS carries on by itself once the vendor exists (#35, VM-03). ARGUS itself never
-calls it: the gateway's allow list only knows the DATEVconnect paths.
+that ARGUS carries on by itself once the vendor exists (#35, VM-03).
+``/_fake/creditors/{number}/bank-accounts`` stands in for Benjamin changing a vendor's bank
+details in DATEV (#36, VM-04). ARGUS itself never calls either: the gateway's allow list
+only knows the DATEVconnect paths.
 
 Run it with ``uvicorn argus.datev.fake:app_from_env --factory`` or with Docker,
 see docs/design/datev-gateway.md.
@@ -293,6 +295,16 @@ def create_fake_datev(
             creditor = {"id": str(body.account_number), **body.model_dump()}
             state.added_creditors[body.account_number] = creditor
             return JSONResponse(status_code=201, content=creditor)
+
+    @app.put("/_fake/creditors/{number}/bank-accounts", response_model=None)
+    def change_bank_accounts(number: int, body: list[_BankAccount]) -> Any:
+        with lock:
+            found = state.creditors.get(number)
+            if found is None:
+                return _not_found("account_not_found", f"creditor {number}")
+            changed = {**found, "bank_accounts": [b.model_dump() for b in body]}
+            state.added_creditors[number] = changed
+            return changed
 
     @app.get("/_fake/bookings")
     def bookings() -> list[dict[str, Any]]:
