@@ -267,6 +267,17 @@ def test_cases_without_a_vendor_account_or_outgoing_are_left_alone(app: Engine) 
     assert datev.asked == []
 
 
+def test_a_fixed_asset_account_below_1000_is_stored(app: Engine) -> None:
+    """A laptop booked to SKR03 0420 (QA on PR 190): DATEV says 420, the proposal 0420."""
+    account = vendor()
+    case_id = matched_case(app, account)
+
+    done = run(app, History({account: [posting(account, "2026-09-01", 420)]}), case_id)
+
+    assert (done.proposed, done.failed) == (1, 0)
+    assert proposal_of(app, case_id).gl_account == "0420"
+
+
 def test_the_chart_setting_decides_what_a_payment_is(app: Engine) -> None:
     account = vendor()
     datev = History(

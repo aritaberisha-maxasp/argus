@@ -140,7 +140,7 @@ def propose(postings: Iterable[Posting], chart: Chart) -> Proposed | NotProposed
         return NotProposed(NoProposalReason.NO_HISTORY, len(read))
     latest = max(p.date for p in usable)
     on_day = [p for p in usable if p.date == latest]
-    pairs = sorted({(str(p.contra_account), p.tax_key.strip()) for p in on_day})
+    pairs = sorted({(f"{p.contra_account:04d}", p.tax_key.strip()) for p in on_day})
     if len(pairs) > 1:
         return NotProposed(NoProposalReason.SEVERAL_ACCOUNTS, len(read), tuple(pairs))
     source = max(on_day, key=lambda p: p.document_number)

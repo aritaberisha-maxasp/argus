@@ -6,7 +6,7 @@ Approvers should not have to know the chart of accounts. So once an incoming inv
 
 ## How the proposal is made
 
-At the end of every live sweep, right after vendor matching, ARGUS looks at every matched incoming case in Received or Exception that has no proposal yet. For each vendor account it reads the postings of this year and the two before from DATEV, through the gateway (`list_postings`), once per pass. It then takes the most recent posting and proposes its contra account as the G/L account and its tax key as the tax key. A blank tax key stays blank, for example for tax free rent.
+At the end of every live sweep, right after vendor matching, ARGUS looks at every matched incoming case in Received or Exception that has no proposal yet. For each vendor account it reads the postings of this year and the two before from DATEV, through the gateway (`list_postings`), once per pass. It then takes the most recent posting and proposes its contra account, always with four digits (DATEV gives 0420 as the number 420), as the G/L account and its tax key as the tax key. A blank tax key stays blank, for example for tax free rent.
 
 **Only accounts an invoice is booked to count.** A payment, a card clearing, a carry forward at the start of the year (9009) or a received cash discount also sits on the vendor account and is often the newest posting. It says nothing about where the invoice belongs. So ARGUS uses an allow list per chart and treats every other account as not history (code review of PR 190):
 
@@ -60,6 +60,7 @@ Proposals are part of the audit trail. A downgrade below 0019 with proposals in 
 ## What is provisional
 
 - the allowed account ranges are the DATEV standard numbers; Max ASP's own chart may need more, for example neutral expenses in class 2 (SKR03) or 7 (SKR04) (#18)
+- SKR03 3700 to 3769 also holds received rebates and bonuses (Nachlässe, Boni), not only the cash discounts 3730 to 3739, so a bonus credit note booked to 3750 would still become the proposal; to be narrowed once Max ASP's chart is known (QA on PR 190, #18)
 - that DATEV answers a fiscal year it has not set up with 404 and the code `fiscal_year_not_found`; the fake does, the real code is a question for #2
 - G/L accounts have four digits and personal accounts five, as the gateway assumes
 - the fixture postings are dated 2026 and the window follows today's date, so from 2029 the demo and AC-2 find no history for them until the fixtures move on

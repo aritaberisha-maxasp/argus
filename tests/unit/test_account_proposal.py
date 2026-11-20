@@ -52,6 +52,25 @@ def test_the_most_recent_account_and_tax_key_are_proposed() -> None:
     assert found == Proposed("4806", "9", "BB-3", date(2026, 9, 15), postings_used=3)
 
 
+@pytest.mark.parametrize(
+    ("chart", "account", "shown"), [(Chart.SKR03, 420, "0420"), (Chart.SKR04, 10, "0010")]
+)
+def test_a_fixed_asset_account_keeps_its_four_digits(
+    chart: Chart, account: int, shown: str
+) -> None:
+    """DATEV gives the account as a number, so 0420 arrives as 420 (QA on PR 190)."""
+    found = propose([posting("2026-09-01", account)], chart)
+
+    assert isinstance(found, Proposed) and found.gl_account == shown
+
+
+def test_a_tie_names_the_accounts_with_four_digits() -> None:
+    found = propose([posting("2026-09-01", 420), posting("2026-09-01", 4930)], Chart.SKR03)
+
+    assert isinstance(found, NotProposed)
+    assert found.candidates == (("0420", "9"), ("4930", "9"))
+
+
 def test_a_vendor_without_history_gets_no_guess() -> None:
     found = propose([], Chart.SKR03)
 
