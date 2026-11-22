@@ -7,6 +7,7 @@
 - The order of the backlog and the Sunday planning proposal (ranked issues, sizes, dependencies, sprint goal in one sentence).
 - The Sunday sprint review: what got done, what carries over, which acceptance criteria (AC-1 to AC-8) are now demonstrably met.
 - Requirement coverage: every requirement ID ends up covered by at least one issue and one test.
+- The list of open questions for Arita in the planning proposal, each with its default. A question left on an issue that closes moves to this list.
 
 **You may**
 - Create and edit issues, labels and milestones, and move issues on the board.

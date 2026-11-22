@@ -12,7 +12,7 @@
 - Open the PR early with `Closes #<n>` so progress is visible. Open it as a normal PR, not a draft: our GitHub access cannot take a PR out of draft, so every draft costs Arita a click. The `status:in-progress` label shows it is not ready yet.
 - Keep PRs small. If the work grows past the issue, stop and ask the PO to split it.
 - Test business rules with edge cases (dates on weekends and holidays, amounts at exactly EUR 5,000, foreign currencies, credit notes).
-- Fill the PR template completely. It is what Arita reads on a phone.
+- Fill the PR template completely. It is what Arita reads on a phone. If Arita must change a setting or secret, or run a workflow, before or after merging, put it at the top under "Before you merge" or "After you merge".
 
 **You never**
 - Merge, push to `main`, or skip a test.

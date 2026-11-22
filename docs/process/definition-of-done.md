@@ -12,3 +12,4 @@ A PR is ready for Arita only when all of this is true:
 - **It is connected, or says what is not.** If the feature only works once another story connects it, the PR names that follow up issue.
 - **It is documented.** Behaviour a user or operator would notice is described in the docs, and any design decision has an ADR.
 - **The PR description is easy to review on a phone:** what changed in plain language, why, how it was tested and what the risks are.
+- **Steps for Arita are named.** If Arita must change a setting or secret, or run a workflow, before or after merging, the PR says so at the top under "Before you merge" or "After you merge".
