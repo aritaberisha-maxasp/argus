@@ -181,6 +181,7 @@ def test_the_sweep_sends_a_checked_invoice_for_approval_with_the_approval_client
             approval_domain="maxasp-test.example",
         ),
         APP_URL,
+        "maxasp-test.example",
     )
     sorting = Sorting(
         documents=documents,

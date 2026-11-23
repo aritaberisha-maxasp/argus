@@ -19,6 +19,11 @@ asked: the case goes to the
 exception queue as ``approver_absent``. Every pass looks at those again and carries on by itself
 once the approver is back or the vendor has a deputy.
 
+When the person who would be asked has an address outside Max ASP's own domain
+(``ARGUS_OWN_DOMAIN``), nothing is written and nothing is sent: the case goes to the exception
+queue as ``approver_address_outside`` and carries on by itself once the approver table holds a
+Max ASP address (compliance review of PR 200).
+
 The email goes out after the move, outside any unit of work (note from PR 79 on #41). It is sent
 with a Graph client that may send approval requests and nothing else (#168). Right before it
 sends, that client reads the request again from the database (:func:`stored_requests`) and
@@ -61,13 +66,23 @@ class ApprovalMailbox(Protocol):
 
 @dataclass(frozen=True)
 class Approvals:
-    """What the pass needs: the approval client and the address of the ARGUS app."""
+    """What the pass needs: the approval client, the address of the ARGUS app and Max ASP's
+    own email domain (``ARGUS_OWN_DOMAIN``), the only one approval requests go to."""
 
     mailbox: ApprovalMailbox
     app_url: str
+    own_domain: str
+
+    def inside(self, address: str) -> bool:
+        return is_own_address(address, self.own_domain)
 
     def link(self, case_id: int) -> str:
         return approval_link(self.app_url, case_id)
+
+
+def is_own_address(address: str, own_domain: str) -> bool:
+    """Whether an email address is at Max ASP's own domain, ignoring case."""
+    return address.rpartition("@")[2].lower() == own_domain.strip().lower()
 
 
 def approval_link(app_url: str, case_id: int) -> str:
@@ -82,6 +97,7 @@ class ApprovalPass:
 
     requested: int = 0  # cases moved to Awaiting approval
     absent: int = 0  # cases sent to the queue because nobody can be asked
+    outside: int = 0  # cases sent to the queue because the address is not a Max ASP one
     resumed: int = 0  # absent approver exceptions ARGUS resolved itself
     sent: int = 0
     failed: int = 0
@@ -94,20 +110,26 @@ class _Asked:
 
     approver_name: str
     available: bool  # the approver is in, or a deputy who is in stands in
+    name: str | None  # who would get the email, the same way migration 0020 picks them
+    address: str | None
 
 
 def _who(connection: Connection, vendor_account: str) -> _Asked | None:
     row = connection.execute(
         text(
-            "select a.name, (not a.absent or (d.object_id is not null and not d.absent))"
-            " as available"
+            "select a.name as approver_name,"
+            " (not a.absent or (d.object_id is not null and not d.absent)) as available,"
+            " case when not a.absent then a.name when d.object_id is not null and not d.absent"
+            " then d.name end as name,"
+            " case when not a.absent then a.email when d.object_id is not null and not d.absent"
+            " then d.email end as address"
             " from vendor_approver v join approver a on a.object_id = v.approver_id"
             " left join approver d on d.object_id = v.deputy_id"
             " where v.vendor_account = :account"
         ),
         {"account": vendor_account},
     ).first()
-    return _Asked(row.name, row.available) if row else None
+    return _Asked(row.approver_name, row.available, row.name, row.address) if row else None
 
 
 def _only(cases: Collection[int] | None) -> list[int] | None:
@@ -126,8 +148,8 @@ def request_approvals(
         log.info("Approval requests wait, ARGUS runs in shadow mode")
         return result
     only = _only(cases)
-    _look_again(engine, only, result)
-    _move_checked(engine, only, result)
+    _look_again(engine, approvals, only, result)
+    _move_checked(engine, approvals, only, result)
     _send_unsent(engine, approvals, only, result)
     return result
 
@@ -135,12 +157,15 @@ def request_approvals(
 # ------------------------------------------------------------------------- absent approvers
 
 
-def _look_again(engine: Engine, only: list[int] | None, result: ApprovalPass) -> None:
+def _look_again(
+    engine: Engine, approvals: Approvals, only: list[int] | None, result: ApprovalPass
+) -> None:
     with engine.connect() as connection:
         rows = connection.execute(
             text(
-                "select e.id, e.case_id from exception_item e"
-                " where e.resolved_at is null and e.reason::text = 'approver_absent'"
+                "select e.id, e.case_id, e.reason::text as reason from exception_item e"
+                " where e.resolved_at is null"
+                " and e.reason::text in ('approver_absent', 'approver_address_outside')"
                 " and (cast(:only as bigint[]) is null or e.case_id = any(cast(:only as bigint[])))"
                 " order by e.id"
             ),
@@ -149,6 +174,7 @@ def _look_again(engine: Engine, only: list[int] | None, result: ApprovalPass) ->
     for row in rows:
         exception_id: int = row.id
         case_id: int = row.case_id
+        outside = row.reason == ExceptionReason.APPROVER_ADDRESS_OUTSIDE
         try:
             with unit_of_work(engine, APPROVAL_ACTOR) as db:
                 still_open = db.execute(
@@ -161,18 +187,21 @@ def _look_again(engine: Engine, only: list[int] | None, result: ApprovalPass) ->
                 asked = _who(db, account) if account else None
                 if not still_open or asked is None or not asked.available:
                     continue
-                resolve_exception(
-                    db,
-                    exception_id,
-                    Outcome.RETRIED,
-                    resolution=(
-                        f"Someone can approve the invoices of vendor account {account} again. "
-                        "ARGUS carried on and sends the invoice for approval."
-                    ),
+                if outside and not (asked.address and approvals.inside(asked.address)):
+                    continue
+                # An absent approver who is back with an outside address goes on to Received;
+                # the move then opens approver_address_outside instead.
+                resolution = (
+                    f"The approver table holds a Max ASP address for vendor account {account} "
+                    "now. ARGUS carried on and sends the invoice for approval."
+                    if outside
+                    else f"Someone can approve the invoices of vendor account {account} again. "
+                    "ARGUS carried on and sends the invoice for approval."
                 )
+                resolve_exception(db, exception_id, Outcome.RETRIED, resolution=resolution)
                 result.resumed += 1
         except Exception:
-            log.exception("Absent approver check failed on case %s, next sweep retries", case_id)
+            log.exception("Approver check failed on case %s, next sweep retries", case_id)
             result.failed += 1
 
 
@@ -193,19 +222,21 @@ _CHECKED = """
 """
 
 
-def _move_checked(engine: Engine, only: list[int] | None, result: ApprovalPass) -> None:
+def _move_checked(
+    engine: Engine, approvals: Approvals, only: list[int] | None, result: ApprovalPass
+) -> None:
     with engine.connect() as connection:
         work = [row.id for row in connection.execute(text(_CHECKED), {"only": only})]
     for case_id in work:
         try:
             with unit_of_work(engine, APPROVAL_ACTOR) as db:
-                _move_one(db, case_id, result)
+                _move_one(db, approvals, case_id, result)
         except Exception:
             log.exception("Approval request failed on case %s, next sweep retries", case_id)
             result.failed += 1
 
 
-def _move_one(db: Connection, case_id: int, result: ApprovalPass) -> None:
+def _move_one(db: Connection, approvals: Approvals, case_id: int, result: ApprovalPass) -> None:
     db.execute(text("select id from invoice_case where id = :id for update"), {"id": case_id})
     case = get_case(db, case_id)
     if case.status is not CaseStatus.RECEIVED or case.partner_account is None:
@@ -230,7 +261,32 @@ def _move_one(db: Connection, case_id: int, result: ApprovalPass) -> None:
         )
         result.absent += 1
         return
-    db.execute(text("insert into approval_request (case_id) values (:id)"), {"id": case_id})
+    if not (asked.address and approvals.inside(asked.address)):
+        # Compliance review of PR 200: a typo or a wrong entry in the approver table must not
+        # send invoice details from the accounts mailbox outside Max ASP, nor leave the
+        # invoice waiting for an email that never goes out.
+        open_exception(
+            db,
+            ExceptionReason.APPROVER_ADDRESS_OUTSIDE,
+            (
+                f"{asked.name}, who approves the invoices of vendor account "
+                f"{case.partner_account}, has the email address {asked.address} in the "
+                f"approver table, which is not at {approvals.own_domain}. ARGUS sends approval "
+                "requests only to Max ASP addresses. Correct the address in the approver "
+                "table, and ARGUS carries on by itself. Or reject the invoice."
+            ),
+            case_id=case_id,
+            facts={"account": case.partner_account},
+        )
+        result.outside += 1
+        return
+    stored: str = db.execute(
+        text("insert into approval_request (case_id) values (:id) returning recipient_address"),
+        {"id": case_id},
+    ).scalar_one()
+    if not approvals.inside(stored):
+        # The approver table changed between the two reads; the next pass queues it.
+        raise RuntimeError(f"the person on approval request for case {case_id} changed")
     move_case(db, case_id, expected=CaseStatus.RECEIVED, to=CaseStatus.AWAITING_APPROVAL)
     result.requested += 1
 
