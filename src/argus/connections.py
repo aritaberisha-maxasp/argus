@@ -149,15 +149,17 @@ class Connections:
             tokens = _StaticToken(self.graph_standin_token)
         elif tokens is None:
             raise NotConnected("the Microsoft 365 sign in for the real mailbox is not set up")
+        # The approval request client sends approval requests and nothing else (#191).
+        approvals = GraphCall.SEND_APPROVAL_REQUEST in calls
         return GraphClient(
             tokens,
             self.mailbox,
             base_url=self.graph_url,
             transport=transport,
             standin=self.demo,
-            forward_to=None if digest else self.reminder_forward_to,
-            digest_to=self.digest_to if digest else None,
-            statement_folder=None if digest else statement_folder,
+            forward_to=None if digest or approvals else self.reminder_forward_to,
+            digest_to=self.digest_to if digest and not approvals else None,
+            statement_folder=None if digest or approvals else statement_folder,
             calls=calls,
         )
 

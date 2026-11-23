@@ -33,6 +33,7 @@ from argus.cases.store import (
 from argus.documents.store import MemoryDocumentStore
 from argus.invoices_page.trail import FILE_COLUMNS
 from standins.entra.app import FakeEntra
+from tests.integration.approval_helpers import prepare_for_approval
 from tests.integration.test_queue_page import received_email
 
 # Exceptions open only once ARGUS runs live (#72), like in the other page tests.
@@ -96,6 +97,8 @@ def booked_case_from_email(app: Engine, store: MemoryDocumentStore, number: str)
     for step in (CaseStatus.AWAITING_APPROVAL, CaseStatus.APPROVED, CaseStatus.BOOKED):
         actor = Actor.user(ALICE) if step is CaseStatus.APPROVED else INTAKE
         with unit_of_work(app, actor) as db:
+            if step is CaseStatus.AWAITING_APPROVAL:
+                prepare_for_approval(db, case_id)
             move_case(
                 db,
                 case_id,

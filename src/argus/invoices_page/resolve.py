@@ -110,6 +110,8 @@ _CARRY_ON: dict[ExceptionReason, tuple[Choice, ...]] = {
     ExceptionReason.VALUES_TO_CHECK: (),  # corrected on the queue page (#112)
     ExceptionReason.NO_ACCOUNT_PROPOSAL: (),  # the account is entered on the queue page (#37)
     ExceptionReason.IBAN_MISMATCH: (),  # ARGUS ends it itself after checking DATEV (#36)
+    # ARGUS ends it itself once the approver is back or the vendor has a deputy (#191).
+    ExceptionReason.APPROVER_ABSENT: (),
     ExceptionReason.PAYMENT_FAILED: (),  # depends on the payment run
     ExceptionReason.CUSTOMER_QUERY: (ANSWERED,),
     ExceptionReason.BOOKING_ERROR: (FIXED_IN_DATEV,),
@@ -128,6 +130,11 @@ NOTES: dict[ExceptionReason, str] = {
     ExceptionReason.IBAN_MISMATCH: (
         "Possible fraud. Once the IBAN is right in DATEV, ARGUS sees it on the next sweep and"
         " carries on by itself, so this page can only reject the invoice."
+    ),
+    ExceptionReason.APPROVER_ABSENT: (
+        "Mark the approver back, or give the vendor a deputy, in the approver table. ARGUS sees"
+        " it on the next sweep and sends the invoice for approval by itself, so this page can"
+        " only reject the invoice."
     ),
     ExceptionReason.PAYMENT_FAILED: (
         "A failed payment cannot be resolved from this page yet. It depends on the payment run."

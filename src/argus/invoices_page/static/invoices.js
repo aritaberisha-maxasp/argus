@@ -523,6 +523,11 @@
           "Resolve the exception of case " + c.case_id, (panel, close) => loadChoices(panel, c, close)));
         status.append(resolve);
       }
+    } else if (c.status === "awaiting_approval" && c.approval_to) {
+      // Who the approval request went to, and when it was emailed (#191).
+      status.append(el("span", c.approval_sent_at
+        ? "Sent to " + c.approval_to + " for approval, " + berlinTime(new Date(c.approval_sent_at))
+        : "Waiting to email " + c.approval_to, "sub"));
     } else if (c.status === "closed" && c.closed_reason) {
       status.append(el("span", CLOSED_REASONS[c.closed_reason] || words(c.closed_reason), "sub"));
     }

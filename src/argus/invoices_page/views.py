@@ -18,6 +18,8 @@ Where each column comes from:
   exception queue.
 - **G/L account and tax key**: the current proposal of an incoming invoice or credit note
   (#37, ``account_proposal``), for the vendor account the case has now.
+- **Approval**: who the newest approval request went to and when it was emailed (#191,
+  ``approval_request``), while the case waits for approval.
 
 Nothing here logs. Names are personal data and stay out of the log (NF-03).
 """
@@ -86,6 +88,10 @@ class CaseRow:
     exception_text: str | None
     gl_account: str | None = None  # the proposed G/L account (#37)
     tax_key: str | None = None  # its tax key; blank when the history has none
+    # The newest approval request (#191): who it went to, and when it was emailed (None while
+    # the email has not gone out yet).
+    approval_to: str | None = None
+    approval_sent_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -119,7 +125,8 @@ _LIST_HEAD = """
            r.reading -> 'fields' -> 'invoice_date' -> 'value' as invoice_date,
            r.reading -> 'fields' -> 'due_date' -> 'value' as due_date,
            x.id as exception_id, x.reason as exception_reason,
-           a.gl_account, a.tax_key
+           a.gl_account, a.tax_key, q.recipient_name as approval_to,
+           q.sent_at as approval_sent_at
     """
 _OPEN_EXCEPTION = """
     left join lateral (
@@ -132,6 +139,11 @@ _OPEN_EXCEPTION = """
       where p.case_id = c.id and p.vendor_account = c.partner_account
       order by p.id desc limit 1
     ) a on true
+    left join lateral (
+      select q.recipient_name, q.sent_at from approval_request q
+      where q.case_id = c.id
+      order by q.id desc limit 1
+    ) q on true
     """
 _LIST_TAIL = " order by d.received_at desc, c.id desc limit :limit"
 _COUNT_HEAD = "select c.status, count(*) as n "
@@ -228,6 +240,8 @@ def _row(r: Any) -> CaseRow:
         exception_text=REASON_TEXT[reason] if reason else None,
         gl_account=r["gl_account"],
         tax_key=r["tax_key"],
+        approval_to=r["approval_to"],
+        approval_sent_at=r["approval_sent_at"],
     )
 
 
