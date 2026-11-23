@@ -1,0 +1,56 @@
+name: Issue labels
+
+# Takes the board labels off an issue when it closes (#195, docs/process/workflow.md "Board
+# columns"). Run it by hand for the one time clean up of every closed issue that still has one.
+on:
+  issues:
+    types: [closed]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Only list what would change, change nothing
+        type: boolean
+        default: false
+
+# The built in token may change issue labels and comments, nothing else.
+permissions:
+  issues: write
+
+concurrency:
+  group: issue-labels-${{ github.event.issue.number || 'sweep' }}
+
+jobs:
+  closed:
+    name: Tidy the closed issue
+    if: github.event_name == 'issues' && !github.event.issue.pull_request
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Take the board labels off
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ISSUE: ${{ github.event.issue.number }}
+        run: python3 tools/tidy_issue_labels.py closed "$ISSUE"
+
+  sweep:
+    name: Tidy every closed issue
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Take the board labels off every closed issue
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          if [ "$DRY_RUN" = "true" ]; then
+            python3 tools/tidy_issue_labels.py sweep --dry-run
+          else
+            python3 tools/tidy_issue_labels.py sweep
+          fi
