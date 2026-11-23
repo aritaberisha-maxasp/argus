@@ -8,8 +8,8 @@ anything, so a run that starts twice or late does no harm.
   it every 5 minutes. Only one sweep works at a time: a run that finds another one holding the
   sweep lock does nothing and counts as a clean run. The sweep also sends each checked invoice
   to its approver (#191), with a second Graph client that may send approval requests only;
-  without ``ARGUS_APP_URL`` for the link, checked invoices wait in Received. Filing into the ARGUS folders happens at
-  the end of every sweep (#26), so it needs no job of its own.
+  without ``ARGUS_APP_URL`` for the link, checked invoices wait in Received. Filing into the
+  ARGUS folders happens at the end of every sweep (#26), so it needs no job of its own.
 - ``python -m argus.intake removal``: one pass of :func:`argus.intake.filing.remove_due`, the
   30 day removal from ARGUS/Removed. Azure starts it once a day.
 - ``python -m argus.intake digest``: :func:`argus.intake.digest.send_daily_digest`, the daily
