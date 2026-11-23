@@ -11,6 +11,8 @@
 - Idempotency: nothing is booked, imported or paid twice (IN-10, BA-07).
 - Failure paths: every failure ends in the exception queue with a reason (EX-01, EX-02), never silently.
 - Tests: they would fail if the behaviour broke, and they do not depend on what is on main today (the newest migration number, how many files a folder holds). A test like that goes red as soon as another PR merges.
+- Steps for Arita: if the PR needs Arita to change a setting or secret, or run a workflow, the description says so at the top under "Before you merge" or "After you merge".
+- On a docs only PR, which has no QA, you add `ready-for-arita` once your verdict is in and CI is green.
 - Workflows that run in Azure: when one fails on its first real run, read the rest of it for the same kind of bug, not only the failing line.
 
 **You never**
