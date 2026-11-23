@@ -27,7 +27,6 @@ from argus.cases.store import (
     change_case,
     create_case,
     get_case,
-    move_case,
     open_exception,
     record_event,
     resolve_exception,
@@ -49,6 +48,7 @@ from argus.intake.accounts import (
 )
 from argus.invoices_page.web import DATA_PATH as SEARCH
 from standins.entra.app import FakeEntra
+from tests.integration.approval_helpers import send_for_approval
 from tests.integration.conftest import migrate
 
 pytestmark = pytest.mark.req("PR-04")
@@ -580,7 +580,7 @@ def test_a_proposal_after_received_is_refused(app: Engine) -> None:
     case_id = matched_case(app, account)
     with unit_of_work(app, INTAKE) as db:
         change_case(db, case_id, duplicate_key=f"dup-{uuid.uuid4().hex}")
-        move_case(db, case_id, expected=CaseStatus.RECEIVED, to=CaseStatus.AWAITING_APPROVAL)
+        assert send_for_approval(db, case_id)
 
     with (
         pytest.raises(CaseRuleBroken, match="settled before approval"),

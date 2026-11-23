@@ -20,6 +20,7 @@ from argus.cases.store import create_case, get_case, move_case, open_exception, 
 from argus.documents.store import MemoryDocumentStore
 from argus.intake.duplicates import flag_if_duplicate
 from standins.entra.app import FakeEntra
+from tests.integration.approval_helpers import prepare_for_approval
 
 # Exceptions open only once ARGUS runs live (#72), like in the other page tests.
 pytestmark = [pytest.mark.req("EX-01", "NF-05", "NF-03"), pytest.mark.usefixtures("live")]
@@ -85,6 +86,8 @@ def case_in_exception(
         # Only a person approves (migration 0002); the rest is done by jobs.
         actor = APPROVER if step is CaseStatus.APPROVED else INTAKE
         with unit_of_work(app, actor) as db:
+            if step is CaseStatus.AWAITING_APPROVAL:
+                prepare_for_approval(db, case_id)
             move_case(
                 db,
                 case_id,

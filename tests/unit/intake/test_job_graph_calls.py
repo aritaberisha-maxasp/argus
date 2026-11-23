@@ -12,8 +12,9 @@ import httpx
 import pytest
 
 from argus.intake import jobs
-from argus.intake.graph import ALL_CALLS, GraphCall, GraphCallRefused, GraphClient
+from argus.intake.graph import ALL_CALLS, ApprovalMail, GraphCall, GraphCallRefused, GraphClient
 from argus.intake.jobs import (
+    APPROVAL_REQUEST_CALLS,
     DIGEST_CALLS,
     REMINDER_FORWARD_CALLS,
     REMOVAL_CALLS,
@@ -44,7 +45,22 @@ JOBS: dict[str, frozenset[GraphCall]] = {
     "digest": DIGEST_CALLS,
     "statement reminder": STATEMENT_REMINDER_CALLS,
     "mailbox page": MAILBOX_PAGE_CALLS,
+    "approval requests": APPROVAL_REQUEST_CALLS,
 }
+
+MAIL = ApprovalMail(
+    request_id=1,
+    case_id=7,
+    recipient_address="approver@maxasp.example",
+    recipient_name="Alice Test",
+    on_behalf_of_name=None,
+    vendor_name="Muster GmbH",
+    document_number="RE-1",
+    gross_cents=11900,
+    currency="EUR",
+    credit_note=False,
+    link="https://argus.example/approvals/7",
+)
 
 
 def list_statement_folder(graph: GraphClient) -> object:
@@ -70,6 +86,7 @@ CALLS: dict[GraphCall, Callable[[GraphClient], object]] = {
     GraphCall.SEND_NOTICE: lambda g: g.send_notice("ARGUS: Kontoauszug fehlt", "Bitte senden."),
     GraphCall.CREATE_DIGEST: lambda g: g.create_digest("ARGUS: offene Fälle", "<p>2</p>"),
     GraphCall.SEND_DRAFT: lambda g: g._post(f"{USER}/messages/{EMAIL}/send"),
+    GraphCall.SEND_APPROVAL_REQUEST: lambda g: g.send_approval_request(MAIL),
 }
 
 
@@ -86,7 +103,8 @@ class Recorder:
 
 def client(calls: frozenset[GraphCall], recorder: Recorder) -> GraphClient:
     """A client with every address set and the stand in switch on, so that only ``calls``
-    decides what may go out."""
+    decides what may go out. The approval client cannot hold the other addresses at all."""
+    approvals = GraphCall.SEND_APPROVAL_REQUEST in calls
     return GraphClient(
         StaticTokens(),
         MAILBOX,
@@ -94,8 +112,8 @@ def client(calls: frozenset[GraphCall], recorder: Recorder) -> GraphClient:
         transport=httpx.MockTransport(recorder),
         standin=True,
         sleep=lambda _: None,
-        forward_to=FORWARD_TO,
-        digest_to=DIGEST_TO,
+        forward_to=None if approvals else FORWARD_TO,
+        digest_to=None if approvals else DIGEST_TO,
         statement_folder="ARGUS/Kontoauszüge",
         calls=calls,
     )
@@ -116,7 +134,9 @@ def every_job_and_call() -> Iterator[tuple[str, GraphCall]]:
 
 
 def test_every_kind_of_call_is_tried() -> None:
-    assert set(CALLS) == set(GraphCall) == ALL_CALLS
+    assert set(CALLS) == set(GraphCall)
+    # Only a client built for it alone may send an approval request (#191).
+    assert set(GraphCall) - {GraphCall.SEND_APPROVAL_REQUEST} == ALL_CALLS
 
 
 @pytest.mark.req("NF-03", "NF-01")
@@ -207,5 +227,51 @@ def test_the_digest_job_builds_its_client_with_its_own_list() -> None:
     services = digest_services_from_env(environ)
     try:
         assert services.graph.calls == DIGEST_CALLS
+    finally:
+        services.close()
+
+
+@pytest.mark.req("NF-03", "AP-02")
+def test_only_the_approval_client_may_send_an_approval_request_and_nothing_else() -> None:
+    sending = [job for job, calls in JOBS.items() if GraphCall.SEND_APPROVAL_REQUEST in calls]
+    assert sending == ["approval requests"]
+    assert {GraphCall.SEND_APPROVAL_REQUEST} == APPROVAL_REQUEST_CALLS
+    with pytest.raises(ValueError, match="approval requests only"):
+        GraphClient(
+            StaticTokens(),
+            MAILBOX,
+            BASE_URL,
+            standin=True,
+            calls=APPROVAL_REQUEST_CALLS | {GraphCall.SEND_NOTICE},
+        )
+    with pytest.raises(ValueError, match="approval requests only"):
+        GraphClient(
+            StaticTokens(),
+            MAILBOX,
+            BASE_URL,
+            standin=True,
+            forward_to=FORWARD_TO,
+            calls=APPROVAL_REQUEST_CALLS,
+        )
+
+
+@pytest.mark.req("NF-03", "AP-02")
+def test_the_sweep_job_builds_the_approval_client_with_its_own_list() -> None:
+    services = services_from_env({**DEMO, "ARGUS_APP_URL": "https://argus.example"})
+    try:
+        approvals = services.sorting.approvals
+        assert approvals is not None
+        assert approvals.mailbox.calls == APPROVAL_REQUEST_CALLS  # type: ignore[attr-defined]
+        assert approvals.link(12) == "https://argus.example/approvals/12"
+        assert GraphCall.SEND_APPROVAL_REQUEST not in services.graph.calls
+    finally:
+        services.close()
+
+
+@pytest.mark.req("AP-02")
+def test_without_the_app_address_checked_invoices_wait() -> None:
+    services = services_from_env(DEMO)
+    try:
+        assert services.sorting.approvals is None
     finally:
         services.close()

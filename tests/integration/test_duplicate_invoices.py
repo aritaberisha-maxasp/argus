@@ -32,6 +32,7 @@ from argus.cases.store import (
 )
 from argus.intake.duplicates import duplicate_key, flag_if_duplicate, resolve_duplicate
 from argus.intake.sweep import DocumentArchive, sweep
+from tests.integration.approval_helpers import send_for_approval
 from tests.integration.test_invoice_split import model as recorded_model
 from tests.integration.test_invoice_split import record_for, setup
 from tests.integration.test_reminder_forward import (
@@ -433,7 +434,7 @@ def test_only_a_duplicate_exception_can_be_resolved_as_one(app: Engine) -> None:
 
 def walk_to_approval(app: Engine, case_id: int) -> None:
     with unit_of_work(app, INTAKE) as db:
-        assert move_case(db, case_id, expected=CaseStatus.RECEIVED, to=CaseStatus.AWAITING_APPROVAL)
+        assert send_for_approval(db, case_id)
 
 
 @pytest.mark.req("IN-10")

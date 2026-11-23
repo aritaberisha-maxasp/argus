@@ -120,6 +120,7 @@ def row_json(row: CaseRow) -> dict[str, Any]:
     out = asdict(row)
     out["received_at"] = row.received_at.isoformat()
     out["updated_at"] = row.updated_at.isoformat()
+    out["approval_sent_at"] = row.approval_sent_at.isoformat() if row.approval_sent_at else None
     return out
 
 

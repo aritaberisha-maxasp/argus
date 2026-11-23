@@ -47,6 +47,7 @@ from argus.intake.reminders import (
 from argus.intake.sweep import SWEEP_ACTOR, DocumentArchive, see, store
 from argus.sorting import Attachment, Category, EmailToSort, Route, SortingDecision
 from standins.graph.app import MAILBOX, Mailbox, create_app
+from tests.integration.approval_helpers import prepare_for_approval
 from tests.unit.intake.graph_helpers import BASE_URL, TOKEN, StaticTokens, standin_transport
 from tests.unit.sorting_helpers import EMAILS, decision_for, read_fixture_email
 
@@ -660,6 +661,8 @@ def test_paid_invoices_and_our_own_invoices_are_not_marked(app: Engine) -> None:
     ):
         with unit_of_work(app, APPROVER if to is CaseStatus.APPROVED else INTAKE) as db:
             case = get_case(db, paid)
+            if to is CaseStatus.AWAITING_APPROVAL:
+                prepare_for_approval(db, paid)
             ref = f"DATEV-27-{paid}" if to is CaseStatus.BOOKED else None
             assert move_case(db, paid, expected=case.status, to=to, datev_booking_ref=ref)
     outgoing = new_invoice(app, number, CaseKind.OUTGOING_INVOICE)

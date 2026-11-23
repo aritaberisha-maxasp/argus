@@ -76,6 +76,8 @@ EVENT_TEXT: dict[str, str] = {
     "reminder_forwarded": "ARGUS forwarded a payment reminder",
     "bank_import_refused": "ARGUS refused a bank statement",
     "bank_import_from_folder": "ARGUS imported a bank statement from the folder",
+    "approval_requested": "ARGUS sent the case for approval",
+    "approval_request_sent": "ARGUS emailed the approval request",
 }
 
 OUTCOME_TEXT: dict[Outcome, str] = {
@@ -182,6 +184,15 @@ def describe(event_type: str, from_status: Any, to_status: Any, details: dict[st
         who = "A person entered" if details.get("source") == "person" else "ARGUS proposed"
         key = f"tax key {details['tax_key']}" if details.get("tax_key") else "no tax key"
         return f"{who} G/L account {details['gl_account']} with {key}"
+    if event_type == "approval_requested" and details.get("name"):
+        deputy = (
+            f", as deputy of {details['on_behalf_of_name']}"
+            if details.get("on_behalf_of_name")
+            else ""
+        )
+        return f"ARGUS sent the case for approval to {details['name']}{deputy}"
+    if event_type == "approval_request_sent" and details.get("name"):
+        return f"Sent to {details['name']} for approval"
     if event_type == "status_changed" and from_status and to_status:
         return f"The status changed from {_status_text(from_status)} to {_status_text(to_status)}"
     if event_type == "case_created" and to_status:

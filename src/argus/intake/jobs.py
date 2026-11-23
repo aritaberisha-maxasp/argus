@@ -6,8 +6,10 @@ anything, so a run that starts twice or late does no harm.
 
 - ``python -m argus.intake sweep``: one pass of :func:`argus.intake.sweep.sweep`. Azure starts
   it every 5 minutes. Only one sweep works at a time: a run that finds another one holding the
-  sweep lock does nothing and counts as a clean run. Filing into the ARGUS folders happens at
-  the end of every sweep (#26), so it needs no job of its own.
+  sweep lock does nothing and counts as a clean run. The sweep also sends each checked invoice
+  to its approver (#191), with a second Graph client that may send approval requests only;
+  without ``ARGUS_APP_URL`` for the link, checked invoices wait in Received. Filing into the
+  ARGUS folders happens at the end of every sweep (#26), so it needs no job of its own.
 - ``python -m argus.intake removal``: one pass of :func:`argus.intake.filing.remove_due`, the
   30 day removal from ARGUS/Removed. Azure starts it once a day.
 - ``python -m argus.intake digest``: :func:`argus.intake.digest.send_daily_digest`, the daily
@@ -59,7 +61,9 @@ from argus.db.mode import DatabaseModeError
 from argus.db.mode import check_database_for_mode as _check_database_for_mode
 from argus.documents.store import AzureDocumentStore
 from argus.intake.accounts import chart_from_env
+from argus.intake.approvals import Approvals
 from argus.intake.digest import (
+    APP_URL_ENV,
     DigestSettingsError,
     app_url_from_environment,
     berlin_today,
@@ -237,6 +241,10 @@ DIGEST_CALLS: Final = frozenset(
 )
 # The statement reminder (bank/notices.py, #166): send a notice about a missing statement.
 STATEMENT_REMINDER_CALLS: Final = frozenset({GraphCall.SEND_NOTICE})
+# Approval requests, run by the sweep (approvals.py, #191): email a checked invoice to the
+# person on its stored approval request. A client of its own, with this call only, so no other
+# step of the sweep can send one, and it can send nothing else.
+APPROVAL_REQUEST_CALLS: Final = frozenset({GraphCall.SEND_APPROVAL_REQUEST})
 
 
 @dataclass
@@ -346,6 +354,9 @@ def services_from_env(
         datev = _datev_gateway(connections)
         if datev is not None:
             resources.callback(datev[1].close)
+        approvals = None
+        if calls == SWEEP_JOB_CALLS:
+            approvals = _approvals(environ, connections, resources)
         sorting = Sorting(
             documents=documents,
             model=model,
@@ -358,6 +369,7 @@ def services_from_env(
             # Without DATEV, cases wait without a vendor account until it is set (#35).
             vendors=datev[0] if datev is not None else None,
             chart=chart_from_env(environ),
+            approvals=approvals,
         )
         # A notice about a blocked statement goes out right away when the reminder address
         # is set; otherwise the daily statement job sends it (#166).
@@ -376,6 +388,20 @@ def removal_services_from_env(environ: Mapping[str, str]) -> Services:
     """Build what the 30 day removal needs. Its Graph client may only find ARGUS/Removed,
     check where an email is and delete it (#168)."""
     return services_from_env(environ, calls=REMOVAL_CALLS)
+
+
+def _approvals(
+    environ: Mapping[str, str], connections: Connections, resources: ExitStack
+) -> Approvals | None:
+    """The approval request client and the app's address for the link (#191), or None while
+    ``ARGUS_APP_URL`` is not set: checked invoices then wait in Received."""
+    if not environ.get(APP_URL_ENV, "").strip():
+        log.info("ARGUS_APP_URL is not set, so checked invoices wait in Received")
+        return None
+    app_url = app_url_from_environment(environ)
+    client = connections.graph_client(calls=APPROVAL_REQUEST_CALLS)
+    resources.callback(client.close)
+    return Approvals(client, app_url)
 
 
 def _datev_gateway(connections: Connections) -> tuple[DatevConnectGateway, httpx.Client] | None:
