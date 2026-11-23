@@ -16,8 +16,9 @@ Who checks what:
     DATEV" and every other one that does not close it) comes only from a person, with a
     comment that is not blank. A short list of automatic endings stays with the job that
     checks again: the IBAN recheck (#36, its own rule follows in #186), an unknown vendor the
-    vendor match found, a vendor that now has an approver, a missing account found in the
-    booking history, and a bank balance difference after the corrected statement.
+    vendor match found, a vendor that now has an approver, an approver who is back, a
+    missing account found in the booking history, and a bank balance difference after the
+    corrected statement.
   - Rejecting or confirming a duplicate closes the case, so it is refused for an outgoing
     invoice or credit note, a bank transaction, and a case that was booked, in a payment run
     or paid before the exception.

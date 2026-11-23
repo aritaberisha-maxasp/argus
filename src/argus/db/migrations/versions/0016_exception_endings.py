@@ -24,6 +24,8 @@ database, so no other code path can get round them:
     0019 already demands the proposal from the booking history for that.
   - ``bank_balance_difference`` as ``data_corrected`` from ``system:bank-import``, once the
     corrected statement of that balance and month is imported (#94).
+  - ``approver_absent`` as ``retried`` from ``system:approval-request``, once someone can
+    approve the vendor's invoices again (#191, migration 0020).
   - ``iban_mismatch`` is left out of this rule. PR 185 ends it as ``fixed_in_datev`` from
     ``system:vendor-match`` once DATEV holds every IBAN of the invoice, and 0002 already allows
     it only that ending or ``rejected``. #186 sets its own rule so only that job may pick
@@ -55,7 +57,7 @@ Every statement can run twice. A downgrade keeps the two name columns when any e
 a name, because they are part of the audit trail (NF-01); it only removes the rules.
 
 Revision ID: 0016
-Revises: 0019
+Revises: 0020
 Create Date: 2026-11-23
 """
 
@@ -64,7 +66,7 @@ from alembic import op
 from argus.db import run_script
 
 revision = "0016"
-down_revision = "0019"
+down_revision = "0020"
 branch_labels = None
 depends_on = None
 
@@ -99,7 +101,8 @@ begin
       (old.reason::text, new.outcome, a[2]) in (
         ('vendor_without_approver', 'retried', 'vendor-match'),
         ('no_account_proposal', 'fixed_in_datev', 'account-proposal'),
-        ('bank_balance_difference', 'data_corrected', 'bank-import'))
+        ('bank_balance_difference', 'data_corrected', 'bank-import'),
+        ('approver_absent', 'retried', 'approval-request'))
       or ((old.reason::text, new.outcome, a[2]) = ('unknown_vendor', 'fixed_in_datev',
                                                    'vendor-match')
           and (select partner_account from invoice_case where id = old.case_id) is not null));

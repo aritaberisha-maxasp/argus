@@ -30,6 +30,7 @@ from argus.cases.store import (
     resolve_exception,
     unit_of_work,
 )
+from tests.integration.approval_helpers import prepare_for_approval
 from tests.integration.conftest import migrate
 
 pytestmark = pytest.mark.req("EX-01", "NF-01")
@@ -74,6 +75,9 @@ def walk(app: Engine, case_id: int, *statuses: CaseStatus) -> None:
     for to in statuses:
         with unit_of_work(app, APPROVER if to is S.APPROVED else INTAKE) as db:
             case = get_case(db, case_id)
+            if to is S.AWAITING_APPROVAL:
+                # Proposal, duplicate key and approval request first, as the sweep does (#191).
+                prepare_for_approval(db, case_id)
             ref = f"DATEV-ENDINGS-{case_id}" if to is S.BOOKED else None
             move_case(db, case_id, expected=case.status, to=to, datev_booking_ref=ref)
 
@@ -507,7 +511,7 @@ def test_rows_resolved_before_0016_stay_as_they_were(app: Engine, owner: Engine)
             db, ExceptionReason.INVOICE_CHECK_FAILED, "x", case_id=case_id
         )
 
-    migrate(owner, "0019", down=True)
+    migrate(owner, "0020", down=True)
     try:
         # Code from before 0016: a person without a name, and no comment.
         with unit_of_work(app, NAMELESS) as db:
