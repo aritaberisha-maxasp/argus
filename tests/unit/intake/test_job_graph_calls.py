@@ -117,6 +117,7 @@ def client(calls: frozenset[GraphCall], recorder: Recorder) -> GraphClient:
         statement_folder="ARGUS/Kontoauszüge",
         calls=calls,
         approval_lookup=(lambda _: MAIL) if approvals else None,
+        approval_domain="maxasp.example" if approvals else None,
     )
 
 

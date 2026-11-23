@@ -358,7 +358,7 @@ def services_from_env(
         resources.callback(engine.dispose)
         approvals = None
         if calls == SWEEP_JOB_CALLS:
-            approvals = _approvals(environ, connections, engine, resources)
+            approvals = _approvals(environ, connections, engine, resources, settings.own_domain)
         sorting = Sorting(
             documents=documents,
             model=model,
@@ -391,16 +391,23 @@ def removal_services_from_env(environ: Mapping[str, str]) -> Services:
 
 
 def _approvals(
-    environ: Mapping[str, str], connections: Connections, engine: Engine, resources: ExitStack
+    environ: Mapping[str, str],
+    connections: Connections,
+    engine: Engine,
+    resources: ExitStack,
+    own_domain: str,
 ) -> Approvals | None:
     """The approval request client and the app's address for the link (#191), or None while
-    ``ARGUS_APP_URL`` is not set: checked invoices then wait in Received."""
+    ``ARGUS_APP_URL`` is not set: checked invoices then wait in Received. Requests go only to
+    addresses at ``own_domain``."""
     if not environ.get(APP_URL_ENV, "").strip():
         log.info("ARGUS_APP_URL is not set, so checked invoices wait in Received")
         return None
     app_url = app_url_from_environment(environ)
     client = connections.graph_client(
-        calls=APPROVAL_REQUEST_CALLS, approval_lookup=stored_requests(engine, app_url)
+        calls=APPROVAL_REQUEST_CALLS,
+        approval_lookup=stored_requests(engine, app_url),
+        approval_domain=own_domain,
     )
     resources.callback(client.close)
     return Approvals(client, app_url)

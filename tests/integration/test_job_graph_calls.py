@@ -83,6 +83,7 @@ def job_client(
     digest_to: str | None = None,
     statement_folder: str | None = None,
     approval_lookup: Callable[[int], ApprovalMail | None] | None = None,
+    approval_domain: str | None = None,
 ) -> GraphClient:
     """A client like the one the job builds: its own calls and its own addresses."""
     return GraphClient(
@@ -96,6 +97,7 @@ def job_client(
         statement_folder=statement_folder,
         calls=calls,
         approval_lookup=approval_lookup,
+        approval_domain=approval_domain,
     )
 
 
@@ -172,7 +174,12 @@ def test_the_sweep_sends_a_checked_invoice_for_approval_with_the_approval_client
     graph = job_client(fake, SWEEP_JOB_CALLS, forward_to=FORWARD_TO)
     documents = MemoryDocumentStore()
     approvals = Approvals(
-        job_client(fake, APPROVAL_REQUEST_CALLS, approval_lookup=stored_requests(app, APP_URL)),
+        job_client(
+            fake,
+            APPROVAL_REQUEST_CALLS,
+            approval_lookup=stored_requests(app, APP_URL),
+            approval_domain="maxasp-test.example",
+        ),
         APP_URL,
     )
     sorting = Sorting(

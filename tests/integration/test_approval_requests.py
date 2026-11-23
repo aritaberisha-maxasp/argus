@@ -18,7 +18,7 @@ from fastapi import FastAPI
 from sqlalchemy import Engine, text
 
 from argus.approvers.table import ChangedBy, save_approver, set_absent, set_vendor_approver
-from argus.cases.model import Actor, CaseKind, CaseStatus, ExceptionReason
+from argus.cases.model import Actor, CaseKind, CaseStatus, ClosedReason, ExceptionReason
 from argus.cases.store import (
     CaseRuleBroken,
     NotAllowed,
@@ -48,6 +48,7 @@ INTAKE = Actor.system("intake")
 JOB = Actor.system("approval-request")
 ADMIN = ChangedBy(Actor.user("44444444-4444-4444-8444-444444444444"), "Arita Test")
 APP_URL = "https://argus.example"
+DOMAIN = "maxasp-test.example"  # where person() puts every made up address
 
 # Vendor accounts nobody else uses.
 _numbers = itertools.count(850_000_000 + uuid.uuid4().int % 1_000_000 * 100)
@@ -67,6 +68,7 @@ def approvals(app: Engine, fake: FastAPI) -> Approvals:
         transport=standin_transport(fake),
         calls=frozenset({GraphCall.SEND_APPROVAL_REQUEST}),
         approval_lookup=stored_requests(app, APP_URL),
+        approval_domain=DOMAIN,
     )
     return Approvals(client, APP_URL)
 
@@ -464,6 +466,35 @@ def test_the_client_sends_only_what_the_database_holds_for_an_unsent_request(
     with pytest.raises(GraphCallRefused, match="no unsent stored request"):
         client.send_approval_request(mail)
     assert len(sent(fake)) == 1
+
+
+@pytest.mark.req("NF-03")
+@pytest.mark.usefixtures("live")
+def test_an_approver_address_outside_max_asp_gets_no_email(
+    app: Engine, approvals: Approvals, fake: FastAPI
+) -> None:
+    account = str(next(_numbers))
+    object_id = str(uuid.uuid4())
+    save_approver(app, ADMIN, object_id, "Otto Outside", f"otto.{object_id[:8]}@outside.example")
+    set_vendor_approver(app, ADMIN, account, object_id, None, False)
+    case_id = checked_case(app, account)
+
+    result = request_approvals(app, approvals, cases=[case_id])
+
+    # The request is kept, so the trail shows who the table named, but nothing goes out and
+    # it stays unsent until someone fixes the address.
+    assert (result.requested, result.sent, result.failed) == (1, 0, 1)
+    assert requests_of(app, case_id)[0]["sent_at"] is None
+    assert sent(fake) == []
+    # Rejected, so the unsent request does not wait for other tests' sweeps.
+    with unit_of_work(app, INTAKE) as db:
+        move_case(
+            db,
+            case_id,
+            expected=CaseStatus.AWAITING_APPROVAL,
+            to=CaseStatus.CLOSED,
+            closed_reason=ClosedReason.REJECTED,
+        )
 
 
 @pytest.mark.req("NF-03")

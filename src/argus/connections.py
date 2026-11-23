@@ -133,6 +133,7 @@ class Connections:
         statement_folder: str | None = None,
         calls: frozenset[GraphCall] = ALL_CALLS,
         approval_lookup: Callable[[int], ApprovalMail | None] | None = None,
+        approval_domain: str | None = None,
     ) -> GraphClient:
         """The Graph client for the accounts mailbox. In demo mode it signs in to the fake
         Graph with the stand in token. Live, ``tokens`` signs in to Microsoft 365.
@@ -163,6 +164,7 @@ class Connections:
             statement_folder=None if digest or approvals else statement_folder,
             calls=calls,
             approval_lookup=approval_lookup if approvals else None,
+            approval_domain=approval_domain if approvals else None,
         )
 
     def datev_gateway(self) -> DatevConnectGateway:
