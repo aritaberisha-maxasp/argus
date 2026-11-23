@@ -7,6 +7,7 @@ PostgreSQL with the client the job builds in production, from the lists in
 """
 
 import logging
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import date, timedelta
 
@@ -17,7 +18,7 @@ from sqlalchemy import Engine, text
 from argus.bank.importer import import_statement
 from argus.bank.notices import NoticeKind, remind_missing_statements
 from argus.documents.store import MemoryDocumentStore
-from argus.intake.approvals import Approvals
+from argus.intake.approvals import Approvals, stored_requests
 from argus.intake.digest import send_daily_digest
 from argus.intake.email_text import EmailReader
 from argus.intake.filing import REMOVED_FOLDER, Folders, remove_due
@@ -81,6 +82,8 @@ def job_client(
     forward_to: str | None = None,
     digest_to: str | None = None,
     statement_folder: str | None = None,
+    approval_lookup: Callable[[int], ApprovalMail | None] | None = None,
+    approval_domain: str | None = None,
 ) -> GraphClient:
     """A client like the one the job builds: its own calls and its own addresses."""
     return GraphClient(
@@ -93,6 +96,8 @@ def job_client(
         digest_to=digest_to,
         statement_folder=statement_folder,
         calls=calls,
+        approval_lookup=approval_lookup,
+        approval_domain=approval_domain,
     )
 
 
@@ -168,7 +173,15 @@ def test_the_sweep_sends_a_checked_invoice_for_approval_with_the_approval_client
     fake = create_app(token=TOKEN, emails=[])
     graph = job_client(fake, SWEEP_JOB_CALLS, forward_to=FORWARD_TO)
     documents = MemoryDocumentStore()
-    approvals = Approvals(job_client(fake, APPROVAL_REQUEST_CALLS), APP_URL)
+    approvals = Approvals(
+        job_client(
+            fake,
+            APPROVAL_REQUEST_CALLS,
+            approval_lookup=stored_requests(app, APP_URL),
+            approval_domain="maxasp-test.example",
+        ),
+        APP_URL,
+    )
     sorting = Sorting(
         documents=documents,
         model=RecordedModel.from_file(MODEL_ANSWERS),

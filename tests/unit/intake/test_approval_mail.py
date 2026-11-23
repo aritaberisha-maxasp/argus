@@ -41,6 +41,7 @@ MAIL = ApprovalMail(
     link="https://argus.example/approvals/42",
 )
 APPROVALS = frozenset({GraphCall.SEND_APPROVAL_REQUEST})
+DOMAIN = "maxasp.example"
 
 
 def body_bytes(body: object) -> bytes:
@@ -139,7 +140,13 @@ def test_a_repeated_key_is_refused() -> None:
 def test_the_client_sends_the_stored_request_to_the_fake_graph() -> None:
     standin = create_app(token=TOKEN)
     graph = GraphClient(
-        StaticTokens(), MAILBOX, BASE_URL, transport=standin_transport(standin), calls=APPROVALS
+        StaticTokens(),
+        MAILBOX,
+        BASE_URL,
+        transport=standin_transport(standin),
+        calls=APPROVALS,
+        approval_lookup=lambda _: MAIL,
+        approval_domain=DOMAIN,
     )
     graph.send_approval_request(MAIL)
     (sent,) = standin.state.mailbox.notices
@@ -155,7 +162,13 @@ def test_the_client_refuses_a_body_that_is_not_the_request_being_sent() -> None:
         return httpx.Response(202)
 
     graph = GraphClient(
-        StaticTokens(), MAILBOX, BASE_URL, transport=httpx.MockTransport(record), calls=APPROVALS
+        StaticTokens(),
+        MAILBOX,
+        BASE_URL,
+        transport=httpx.MockTransport(record),
+        calls=APPROVALS,
+        approval_lookup=lambda _: MAIL,
+        approval_domain=DOMAIN,
     )
     other = approval_body(replace(MAIL, recipient_address="mallory@evil.example"))
     # Outside send_approval_request no request is being sent, so nothing may go out.
@@ -171,3 +184,61 @@ def test_another_client_cannot_send_an_approval_request() -> None:
     graph = GraphClient(StaticTokens(), MAILBOX, BASE_URL, forward_to="reminders@maxasp.example")
     with pytest.raises(GraphCallRefused):
         graph.send_approval_request(MAIL)
+
+
+def test_the_client_checks_against_the_stored_request_not_what_it_is_handed() -> None:
+    standin = create_app(token=TOKEN)
+
+    def client(lookup: object) -> GraphClient:
+        return GraphClient(
+            StaticTokens(),
+            MAILBOX,
+            BASE_URL,
+            transport=standin_transport(standin),
+            calls=APPROVALS,
+            approval_lookup=lookup,  # type: ignore[arg-type]
+            approval_domain=DOMAIN,
+        )
+
+    # No stored, unsent request with that ID: nothing goes out.
+    with pytest.raises(GraphCallRefused, match="no unsent stored request"):
+        client(lambda _: None).send_approval_request(MAIL)
+    # The caller changes the address, but the database holds Alice: refused.
+    with pytest.raises(GraphCallRefused, match="not the person on the request"):
+        client(lambda _: MAIL).send_approval_request(
+            replace(MAIL, recipient_address="mallory@evil.example")
+        )
+    # Without a lookup the client cannot send at all.
+    with pytest.raises(GraphCallRefused, match="not the approval client"):
+        client(None).send_approval_request(MAIL)
+    assert standin.state.mailbox.notices == []
+
+
+def test_an_address_outside_max_asp_gets_nothing() -> None:
+    """Compliance review of PR 200: a typo or a wrong entry in the approver table must not send
+    invoice details from the accounts mailbox to an outside address."""
+    standin = create_app(token=TOKEN)
+    outside = replace(MAIL, recipient_address="alice@maxasp.example.evil.example")
+    graph = GraphClient(
+        StaticTokens(),
+        MAILBOX,
+        BASE_URL,
+        transport=standin_transport(standin),
+        calls=APPROVALS,
+        approval_lookup=lambda _: outside,
+        approval_domain=DOMAIN,
+    )
+    with pytest.raises(GraphCallRefused, match=r"not at maxasp\.example"):
+        graph.send_approval_request(outside)
+    # Without the domain the approval client cannot send at all.
+    no_domain = GraphClient(
+        StaticTokens(),
+        MAILBOX,
+        BASE_URL,
+        transport=standin_transport(standin),
+        calls=APPROVALS,
+        approval_lookup=lambda _: MAIL,
+    )
+    with pytest.raises(GraphCallRefused, match="not the approval client"):
+        no_domain.send_approval_request(MAIL)
+    assert standin.state.mailbox.notices == []
