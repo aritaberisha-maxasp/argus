@@ -215,6 +215,8 @@ def test_a_job_cannot_end_an_exception_without_a_case_either(app: Engine, outcom
     [
         (ExceptionReason.VENDOR_WITHOUT_APPROVER, Outcome.RETRIED, "vendor-match"),
         (ExceptionReason.UNKNOWN_VENDOR, Outcome.FIXED_IN_DATEV, "vendor-match"),
+        (ExceptionReason.APPROVER_ABSENT, Outcome.RETRIED, "approval-request"),
+        (ExceptionReason.APPROVER_ADDRESS_OUTSIDE, Outcome.RETRIED, "approval-request"),
     ],
 )
 def test_the_listed_automatic_endings_need_no_person(
@@ -239,6 +241,7 @@ def test_the_listed_automatic_endings_need_no_person(
         (ExceptionReason.INVOICE_CHECK_FAILED, Outcome.FIXED_IN_DATEV, "account-proposal"),
         # The listed reason and outcome, but another job.
         (ExceptionReason.VENDOR_WITHOUT_APPROVER, Outcome.RETRIED, "intake"),
+        (ExceptionReason.APPROVER_ADDRESS_OUTSIDE, Outcome.RETRIED, "vendor-match"),
     ],
 )
 def test_only_the_listed_job_reason_and_outcome_go_together(

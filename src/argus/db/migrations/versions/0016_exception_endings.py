@@ -26,6 +26,8 @@ database, so no other code path can get round them:
     corrected statement of that balance and month is imported (#94).
   - ``approver_absent`` as ``retried`` from ``system:approval-request``, once someone can
     approve the vendor's invoices again (#191, migration 0020).
+  - ``approver_address_outside`` as ``retried`` from ``system:approval-request``, once the
+    approver table holds a Max ASP address for whoever approves the vendor's invoices (#191).
   - ``iban_mismatch`` is left out of this rule. PR 185 ends it as ``fixed_in_datev`` from
     ``system:vendor-match`` once DATEV holds every IBAN of the invoice, and 0002 already allows
     it only that ending or ``rejected``. #186 sets its own rule so only that job may pick
@@ -102,7 +104,8 @@ begin
         ('vendor_without_approver', 'retried', 'vendor-match'),
         ('no_account_proposal', 'fixed_in_datev', 'account-proposal'),
         ('bank_balance_difference', 'data_corrected', 'bank-import'),
-        ('approver_absent', 'retried', 'approval-request'))
+        ('approver_absent', 'retried', 'approval-request'),
+        ('approver_address_outside', 'retried', 'approval-request'))
       or ((old.reason::text, new.outcome, a[2]) = ('unknown_vendor', 'fixed_in_datev',
                                                    'vendor-match')
           and (select partner_account from invoice_case where id = old.case_id) is not null));
