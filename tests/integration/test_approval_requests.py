@@ -18,7 +18,7 @@ from fastapi import FastAPI
 from sqlalchemy import Engine, text
 
 from argus.approvers.table import ChangedBy, save_approver, set_absent, set_vendor_approver
-from argus.cases.model import Actor, CaseKind, CaseStatus, ClosedReason, ExceptionReason
+from argus.cases.model import Actor, CaseKind, CaseStatus, ExceptionReason
 from argus.cases.store import (
     CaseRuleBroken,
     NotAllowed,
@@ -70,7 +70,7 @@ def approvals(app: Engine, fake: FastAPI) -> Approvals:
         approval_lookup=stored_requests(app, APP_URL),
         approval_domain=DOMAIN,
     )
-    return Approvals(client, APP_URL)
+    return Approvals(client, APP_URL, DOMAIN)
 
 
 def sent(fake: FastAPI) -> list[dict[str, Any]]:
@@ -156,6 +156,19 @@ def events_of(app: Engine, case_id: int, *types: str) -> list[dict[str, Any]]:
 def status_of(app: Engine, case_id: int) -> CaseStatus:
     with app.connect() as db:
         return get_case(db, case_id).status
+
+
+def exception_ids(app: Engine, case_id: int) -> list[int]:
+    with app.connect() as db:
+        return list(
+            db.execute(
+                text(
+                    "select id from exception_item"
+                    " where case_id = :id and resolved_at is null order by id"
+                ),
+                {"id": case_id},
+            ).scalars()
+        )
 
 
 def open_reasons(app: Engine, case_id: int) -> list[str]:
@@ -411,7 +424,7 @@ def test_a_failed_send_is_tried_again_and_a_sent_request_never_again(
     account, _, _ = vendor(app)
     case_id = checked_case(app, account)
     failing = Failing(approvals, times=1)
-    flaky = Approvals(failing, APP_URL)
+    flaky = Approvals(failing, APP_URL, DOMAIN)
 
     first = request_approvals(app, flaky, cases=[case_id])
 
@@ -445,7 +458,7 @@ def test_the_client_sends_only_what_the_database_holds_for_an_unsent_request(
     account, _, _ = vendor(app)
     case_id = checked_case(app, account)
     failing = Failing(approvals, times=1)
-    request_approvals(app, Approvals(failing, APP_URL), cases=[case_id])
+    request_approvals(app, Approvals(failing, APP_URL, DOMAIN), cases=[case_id])
     (mail,) = failing.mails
     client = approvals.mailbox
 
@@ -470,31 +483,65 @@ def test_the_client_sends_only_what_the_database_holds_for_an_unsent_request(
 
 @pytest.mark.req("NF-03")
 @pytest.mark.usefixtures("live")
-def test_an_approver_address_outside_max_asp_gets_no_email(
+def test_an_approver_address_outside_max_asp_goes_to_the_queue_until_fixed(
     app: Engine, approvals: Approvals, fake: FastAPI
 ) -> None:
+    """Compliance review of PR 200 and QA: a wrong address in the approver table sends nothing
+    outside Max ASP, and the invoice does not wait for an email that never goes out."""
     account = str(next(_numbers))
     object_id = str(uuid.uuid4())
     save_approver(app, ADMIN, object_id, "Otto Outside", f"otto.{object_id[:8]}@outside.example")
     set_vendor_approver(app, ADMIN, account, object_id, None, False)
     case_id = checked_case(app, account)
 
+    first = request_approvals(app, approvals, cases=[case_id])
+
+    assert (first.outside, first.requested, first.sent, first.failed) == (1, 0, 0, 0)
+    assert open_reasons(app, case_id) == ["approver_address_outside"]
+    assert status_of(app, case_id) is CaseStatus.EXCEPTION
+    assert requests_of(app, case_id) == [] and sent(fake) == []
+    # Nothing changes while the address is still wrong.
+    again = request_approvals(app, approvals, cases=[case_id])
+    assert (again.outside, again.resumed) == (0, 0)
+    # A person cannot wave it through, only reject the invoice.
+    (exception_id,) = exception_ids(app, case_id)
+    with (
+        pytest.raises(CaseRuleBroken, match="retried or rejected"),
+        unit_of_work(app, Actor.user("55555555-5555-4555-8555-555555555555")) as db,
+    ):
+        db.execute(
+            text("update exception_item set outcome = 'accepted_with_comment' where id = :id"),
+            {"id": exception_id},
+        )
+
+    save_approver(app, ADMIN, object_id, "Otto Outside", f"otto.{object_id[:8]}@{DOMAIN}")
+    fixed = request_approvals(app, approvals, cases=[case_id])
+
+    assert (fixed.resumed, fixed.requested, fixed.sent) == (1, 1, 1)
+    assert open_reasons(app, case_id) == []
+    assert status_of(app, case_id) is CaseStatus.AWAITING_APPROVAL
+    (mail,) = sent(fake)
+    assert mail["toRecipients"][0]["emailAddress"]["address"].endswith(f"@{DOMAIN}")
+
+
+@pytest.mark.req("AP-06", "NF-03")
+@pytest.mark.usefixtures("live")
+def test_a_deputy_with_an_outside_address_gets_nothing_either(
+    app: Engine, approvals: Approvals, fake: FastAPI
+) -> None:
+    account = str(next(_numbers))
+    approver, _ = person(app, "Alice Approver")
+    deputy = str(uuid.uuid4())
+    save_approver(app, ADMIN, deputy, "Dora Deputy", f"dora.{deputy[:8]}@gmail.example")
+    set_vendor_approver(app, ADMIN, account, approver, deputy, False)
+    set_absent(app, ADMIN, approver, True)
+    case_id = checked_case(app, account)
+
     result = request_approvals(app, approvals, cases=[case_id])
 
-    # The request is kept, so the trail shows who the table named, but nothing goes out and
-    # it stays unsent until someone fixes the address.
-    assert (result.requested, result.sent, result.failed) == (1, 0, 1)
-    assert requests_of(app, case_id)[0]["sent_at"] is None
+    assert (result.outside, result.requested) == (1, 0)
+    assert open_reasons(app, case_id) == ["approver_address_outside"]
     assert sent(fake) == []
-    # Rejected, so the unsent request does not wait for other tests' sweeps.
-    with unit_of_work(app, INTAKE) as db:
-        move_case(
-            db,
-            case_id,
-            expected=CaseStatus.AWAITING_APPROVAL,
-            to=CaseStatus.CLOSED,
-            closed_reason=ClosedReason.REJECTED,
-        )
 
 
 @pytest.mark.req("NF-03")
@@ -505,7 +552,7 @@ def test_the_client_sends_nothing_for_a_case_that_no_longer_waits_for_approval(
     account, _, _ = vendor(app)
     case_id = checked_case(app, account)
     failing = Failing(approvals, times=1)
-    request_approvals(app, Approvals(failing, APP_URL), cases=[case_id])
+    request_approvals(app, Approvals(failing, APP_URL, DOMAIN), cases=[case_id])
     (mail,) = failing.mails
     with unit_of_work(app, INTAKE) as db:
         open_exception(db, ExceptionReason.IBAN_MISMATCH, "Held.", case_id=case_id)
@@ -682,7 +729,7 @@ def test_the_invoices_page_and_the_trail_say_who_it_was_sent_to(
     case_id = checked_case(app, account)
     failing = Failing(approvals, times=1)
 
-    request_approvals(app, Approvals(failing, APP_URL), cases=[case_id])
+    request_approvals(app, Approvals(failing, APP_URL, DOMAIN), cases=[case_id])
     with app.connect() as db:
         waiting = case_row(db, case_id)
     request_approvals(app, approvals, cases=[case_id])

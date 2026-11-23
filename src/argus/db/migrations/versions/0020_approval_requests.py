@@ -21,6 +21,9 @@ This migration adds:
 - A new exception reason ``approver_absent``: the approver is marked away and the vendor has no
   deputy, or the deputy is away too, so nobody can be asked. It always belongs to a case and
   ends only as ``retried`` (someone can be asked again) or ``rejected``.
+- A new exception reason ``approver_address_outside``: the person ARGUS would ask has an address
+  outside Max ASP's own domain, so no request is written and no email goes out (compliance
+  review of PR 200). It belongs to a case and ends only as ``retried`` or ``rejected``.
 - A request is refused at commit unless its case went for approval in the same transaction, so
   no request can wait to be emailed for a case that never went (code review of PR 200).
 - A rule on account proposals (compliance review of PR 190): once a person entered the account
@@ -49,6 +52,7 @@ depends_on = None
 
 UPGRADE = r"""
 alter type exception_reason add value if not exists 'approver_absent';
+alter type exception_reason add value if not exists 'approver_address_outside';
 
 create table if not exists approval_request (
   id bigint generated always as identity primary key,
@@ -263,19 +267,22 @@ set search_path = pg_catalog, public, pg_temp as $$
 declare account text;
 begin
   if tg_op = 'INSERT' then
-    if new.reason::text = 'approver_absent' and new.case_id is null then
-      raise exception 'an absent approver always belongs to a case';
+    if new.reason::text in ('approver_absent', 'approver_address_outside')
+       and new.case_id is null then
+      raise exception 'an absent approver or an approver address always belongs to a case';
     end if;
     return new;
   end if;
-  if old.reason::text <> 'approver_absent' or new.outcome is null
-     or old.outcome is not null then
+  if old.reason::text not in ('approver_absent', 'approver_address_outside')
+     or new.outcome is null or old.outcome is not null then
     return new;
   end if;
   if new.outcome not in ('retried', 'rejected') then
-    raise exception 'an absent approver can only end as retried or rejected';
+    raise exception 'exception % can only end as retried or rejected', old.id;
   end if;
-  if new.outcome = 'retried' then
+  -- Whether an address is Max ASP's is known to ARGUS (ARGUS_OWN_DOMAIN), not to the
+  -- database; the approval client refuses any other address before sending either way.
+  if new.outcome = 'retried' and old.reason::text = 'approver_absent' then
     select partner_account into account from invoice_case where id = old.case_id;
     if not exists (
          select 1 from vendor_approver va join approver ap on ap.object_id = va.approver_id
@@ -312,10 +319,11 @@ DOWNGRADE = r"""
 -- Approval requests are part of the audit trail (NF-01). So a downgrade with requests or
 -- absent approver exceptions in the database keeps the table and all its rules, as 0019 does:
 -- code from before 0020 never touches them, and the upgrade picks them up again. The enum
--- keeps 'approver_absent' either way (see 0019 for why).
+-- keeps 'approver_absent' and 'approver_address_outside' either way (see 0019 for why).
 do $$ begin
   if exists (select 1 from approval_request)
-     or exists (select 1 from exception_item where reason::text = 'approver_absent') then
+     or exists (select 1 from exception_item
+                where reason::text in ('approver_absent', 'approver_address_outside')) then
     raise notice 'approval requests exist; their table and rules stay (NF-01)';
     return;
   end if;

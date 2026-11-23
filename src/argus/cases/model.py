@@ -63,6 +63,9 @@ class ExceptionReason(StrEnum):
     # The vendor's approver is marked away and the vendor has no deputy, so nobody can be asked
     # to approve. ARGUS carries on by itself once someone can (#191).
     APPROVER_ABSENT = "approver_absent"
+    # The person ARGUS would ask has an email address outside Max ASP's own domain, so no
+    # approval request goes out. ARGUS carries on once the approver table is fixed (#191).
+    APPROVER_ADDRESS_OUTSIDE = "approver_address_outside"
 
 
 class Outcome(StrEnum):

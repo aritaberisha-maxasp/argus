@@ -181,6 +181,7 @@ def test_the_sweep_sends_a_checked_invoice_for_approval_with_the_approval_client
             approval_domain="maxasp-test.example",
         ),
         APP_URL,
+        "maxasp-test.example",
     )
     sorting = Sorting(
         documents=documents,
@@ -197,14 +198,19 @@ def test_the_sweep_sends_a_checked_invoice_for_approval_with_the_approval_client
 
     assert result.approvals is not None
     with app.connect() as connection:
-        sent_at: object = connection.execute(
-            text("select sent_at from approval_request where case_id = :id"), {"id": case_id}
-        ).scalar_one()
+        request_id, sent_at = connection.execute(
+            text("select id, sent_at from approval_request where case_id = :id"), {"id": case_id}
+        ).one()
     assert sent_at is not None
     assert any(
         f"/approvals/{case_id}" in mail["body"]["content"] for mail in fake.state.mailbox.notices
     )
-    assert "Refused Graph" not in caplog.text
+    # The sweep sends every unsent request in the shared database, so other tests' requests
+    # may be refused on purpose (an address outside Max ASP). Nothing of this case's is, and
+    # the sweep's own client makes no call outside its list.
+    assert f"Refused Graph approval request {request_id}:" not in caplog.text
+    assert "Refused Graph approval request:" not in caplog.text  # a body that is not the stored one
+    assert "Refused Graph call" not in caplog.text
     # The sweep's own client cannot send an approval request.
     with pytest.raises(GraphCallRefused):
         graph.send_approval_request(approval_mail(case_id))

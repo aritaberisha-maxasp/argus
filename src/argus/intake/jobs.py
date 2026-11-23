@@ -410,7 +410,7 @@ def _approvals(
         approval_domain=own_domain,
     )
     resources.callback(client.close)
-    return Approvals(client, app_url)
+    return Approvals(client, app_url, own_domain)
 
 
 def _datev_gateway(connections: Connections) -> tuple[DatevConnectGateway, httpx.Client] | None:
