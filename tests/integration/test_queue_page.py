@@ -235,7 +235,7 @@ def test_a_resolved_exception_leaves_the_queue(
 ) -> None:
     email = received_email(app, store)
     exception_id = email_exception(app, email.email_id)
-    with unit_of_work(app, Actor.user(BENJAMIN)) as db:
+    with unit_of_work(app, Actor.user(BENJAMIN, "Benjamin Test")) as db:
         resolve_exception(db, exception_id, Outcome.ANSWERED, resolution="routed by hand")
 
     listed = client.get("/exceptions", headers=as_role(entra, Role.FINANCE)).json()
@@ -594,7 +594,7 @@ def test_a_refusal_from_the_database_comes_back_as_a_conflict(
     """The person enters exactly what the case already holds: nothing to correct."""
     email = received_email(app, store)
     case_id, exception_id = values_exception(app, email, f"RE-QUEUE-{uuid.uuid4().hex[:6]}")
-    with unit_of_work(app, Actor.user(BENJAMIN)) as db:
+    with unit_of_work(app, Actor.user(BENJAMIN, "Benjamin Test")) as db:
         correct_case(
             db,
             case_id,
@@ -613,3 +613,44 @@ def test_a_refusal_from_the_database_comes_back_as_a_conflict(
 
     assert response.status_code == 409
     assert "changes nothing" in response.json()["problem"]
+
+
+@pytest.mark.req("AP-08")
+def test_a_correction_keeps_the_name_and_sign_in_address_with_the_resolution(
+    app: Engine, client: TestClient, entra: FakeEntra, store: MemoryDocumentStore
+) -> None:
+    """#180: resolving from the queue page fills in who decided from the token (ADR 0008)."""
+    email = received_email(app, store)
+    _, exception_id = values_exception(app, email, f"RE-QUEUE-{uuid.uuid4().hex[:6]}")
+    token = entra.token(
+        BENJAMIN,
+        roles=[Role.FINANCE],
+        name="Benjamin Beispiel",
+        sign_in_address="benjamin@max-asp-test.example",
+    )
+
+    response = client.post(
+        f"/exceptions/{exception_id}/correction",
+        json=CORRECTION,
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    with app.connect() as connection:
+        row = (
+            connection.execute(
+                text(
+                    "select outcome, resolved_by, resolved_by_name, resolved_by_address"
+                    " from exception_item where id = :id"
+                ),
+                {"id": exception_id},
+            )
+            .mappings()
+            .one()
+        )
+    assert dict(row) == {
+        "outcome": "data_corrected",
+        "resolved_by": f"user:{BENJAMIN}",
+        "resolved_by_name": "Benjamin Beispiel",
+        "resolved_by_address": "benjamin@max-asp-test.example",
+    }

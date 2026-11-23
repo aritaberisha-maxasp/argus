@@ -40,7 +40,7 @@ from tests.integration.test_reminder_forward import (
 )
 
 INTAKE = Actor.system("intake")
-CLERK = Actor.user("accounts-clerk-entra-id")
+CLERK = Actor.user("accounts-clerk-entra-id", "Clerk Test")
 
 _counter = iter(range(1, 1_000_000))
 

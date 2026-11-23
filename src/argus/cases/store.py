@@ -135,8 +135,38 @@ def _run(connection: Connection, sql: str, params: Mapping[str, Any]) -> Any:
 
 
 def set_actor(connection: Connection, actor: Actor) -> None:
-    """Name who makes the changes in this transaction (``SET LOCAL argus.actor``)."""
-    _run(connection, "select set_config('argus.actor', :actor, true)", {"actor": str(actor)})
+    """Name who makes the changes in this transaction (``SET LOCAL argus.actor``).
+
+    For a person it also sets their name and sign in address (``argus.actor_name`` and
+    ``argus.actor_address``), which the database keeps with their decisions (ADR 0008). A job
+    sets them empty, so nothing from an earlier transaction carries over."""
+    person = actor.kind == "user"
+    _run(
+        connection,
+        """
+        select set_config('argus.actor', :actor, true),
+               set_config('argus.actor_name', :name, true),
+               set_config('argus.actor_address', :address, true)
+        """,
+        {
+            "actor": str(actor),
+            "name": (actor.display_name or "") if person else "",
+            "address": (actor.sign_in_address or "") if person else "",
+        },
+    )
+
+
+def name_person(connection: Connection, name: str, sign_in_address: str | None) -> None:
+    """Name the person of this transaction, as they were at that moment (ADR 0008), when the
+    caller knows the name better than the actor does. The actor itself stays as it was."""
+    _run(
+        connection,
+        """
+        select set_config('argus.actor_name', :name, true),
+               set_config('argus.actor_address', :address, true)
+        """,
+        {"name": name, "address": sign_in_address or ""},
+    )
 
 
 def create_case(

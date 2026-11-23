@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from sqlalchemy import Connection, text
 
 from argus.cases.model import Actor, CaseKind, ExceptionReason, Outcome
-from argus.cases.store import correct_case, open_exception, resolve_exception
+from argus.cases.store import correct_case, name_person, open_exception, resolve_exception
 from argus.intake.duplicates import flag_if_duplicate
 
 # The values a correction sets, in the words the reading uses for them.
@@ -181,7 +181,9 @@ def correct_flagged_values(
         sign_in_address=by.sign_in_address,
         exception_id=exception_id,
     )
-    # The reason is on the correction and in the audit log; the exception points to it.
+    # The reason is on the correction and in the audit log; the exception points to it. The
+    # database keeps the person's name with the resolution too (migration 0016).
+    name_person(connection, by.name, by.sign_in_address)
     resolve_exception(
         connection,
         exception_id,

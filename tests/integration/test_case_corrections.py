@@ -42,7 +42,11 @@ pytestmark = pytest.mark.req("EX-01", "IN-10", "PR-01")
 
 INTAKE = Actor.system("intake")
 BENJAMIN_ID = "33333333-3333-4333-8333-333333333333"  # made up
-BENJAMIN = CorrectedBy(Actor.user(BENJAMIN_ID), "Benjamin Test", "benjamin@max-asp-test.example")
+BENJAMIN = CorrectedBy(
+    Actor.user(BENJAMIN_ID, "Benjamin Test", "benjamin@max-asp-test.example"),
+    "Benjamin Test",
+    "benjamin@max-asp-test.example",
+)
 APPROVER = Actor.user("approver-entra-id")
 
 _counter = iter(range(1, 1_000_000))

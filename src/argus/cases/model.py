@@ -2,7 +2,7 @@
 
 They must match the enums and checks in the migrations; a test compares them."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 
 
@@ -79,10 +79,17 @@ class Outcome(StrEnum):
 @dataclass(frozen=True)
 class Actor:
     """Who makes a change: a job (``system:intake``) or a person by Entra object ID
-    (``user:<id>``). The database refuses any change without one (ADR 0005 rule 2)."""
+    (``user:<id>``). The database refuses any change without one (ADR 0005 rule 2).
+
+    For a person, ``display_name`` and ``sign_in_address`` are their name and sign in address as
+    the sign in gave them. The database keeps them next to the object ID with the person's
+    decisions, such as resolving an exception (ADR 0008, migration 0016). They do not take part
+    in comparing two actors: the object ID alone says who someone is."""
 
     kind: str
     name: str
+    display_name: str | None = field(default=None, compare=False)
+    sign_in_address: str | None = field(default=None, compare=False)
 
     def __post_init__(self) -> None:
         if self.kind not in ("system", "user") or not self.name.strip():
@@ -93,8 +100,13 @@ class Actor:
         return cls("system", job)
 
     @classmethod
-    def user(cls, entra_object_id: str) -> "Actor":
-        return cls("user", entra_object_id)
+    def user(
+        cls,
+        entra_object_id: str,
+        display_name: str | None = None,
+        sign_in_address: str | None = None,
+    ) -> "Actor":
+        return cls("user", entra_object_id, display_name, sign_in_address)
 
     def __str__(self) -> str:
         return f"{self.kind}:{self.name}"

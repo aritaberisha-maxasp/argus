@@ -41,7 +41,7 @@ class SignedInUser:
 
     @property
     def actor(self) -> Actor:
-        return Actor.user(self.object_id)
+        return Actor.user(self.object_id, self.name, self.sign_in_address)
 
 
 def roles_from_groups(groups: Iterable[str], role_groups: Mapping[Role, str]) -> frozenset[Role]:

@@ -41,7 +41,13 @@ from enum import StrEnum
 from sqlalchemy import Connection, Engine, text
 
 from argus.cases.model import Actor, ExceptionReason, Outcome
-from argus.cases.store import get_case, open_exception, resolve_exception, unit_of_work
+from argus.cases.store import (
+    get_case,
+    name_person,
+    open_exception,
+    resolve_exception,
+    unit_of_work,
+)
 from argus.datev.gateway import DatevError, DatevGateway, DatevUnavailable
 from argus.datev.models import Posting
 
@@ -521,6 +527,7 @@ def enter_account(
             "address": by.sign_in_address,
         },
     ).scalar_one()
+    name_person(db, by.name, by.sign_in_address)  # kept with the resolution (migration 0016)
     resolve_exception(
         db,
         exception_id,

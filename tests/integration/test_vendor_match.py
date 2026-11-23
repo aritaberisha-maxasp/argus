@@ -315,7 +315,7 @@ def test_a_person_who_resolved_the_exception_first_wins(
     assert status_of(app, case_id) == (CaseStatus.CLOSED, None)
 
 
-PERSON = Actor.user("55555555-5555-4555-8555-555555555555")
+PERSON = Actor.user("55555555-5555-4555-8555-555555555555", "Person Test")
 
 
 def open_exception_of(app: Engine, case_id: int) -> int:
@@ -581,7 +581,7 @@ def test_a_blocked_invoice_never_goes_for_approval_or_into_a_payment_run(
     assert status_of(app, case_id)[0] is CaseStatus.EXCEPTION
 
     # A person rejects it: the case closes and still can never be paid.
-    with unit_of_work(app, Actor.user("55555555-5555-4555-8555-555555555555")) as db:
+    with unit_of_work(app, PERSON) as db:
         exception_id: int
         [exception_id] = db.execute(
             text("select id from exception_item where case_id = :id and resolved_at is null"),

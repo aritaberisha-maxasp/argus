@@ -38,7 +38,7 @@ BENJAMIN = "benjamin@maxasp.example"  # synthetic, like every address in the fix
 FOLDER = "ARGUS/Kontoauszüge"
 SETTINGS = BankSettings(statement_senders=frozenset({BENJAMIN}), statement_folder=FOLDER)
 DECEMBER_2ND = date(2026, 12, 2)
-PERSON = Actor.user("55555555-5555-4555-8555-555555555555")  # made up, for the tests
+PERSON = Actor.user("55555555-5555-4555-8555-555555555555", "Person Test")  # made up, for the tests
 # What Exchange Online writes for a message whose From domain passed DKIM and DMARC.
 PASSED = (
     "mx.microsoft.com; spf=pass smtp.mailfrom=maxasp.example;"

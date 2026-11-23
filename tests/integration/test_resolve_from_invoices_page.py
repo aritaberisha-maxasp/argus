@@ -28,7 +28,7 @@ BENJAMIN = "33333333-3333-4333-8333-333333333333"  # finance, made up
 ARITA = "44444444-4444-4444-8444-444444444444"  # admin, made up
 ALICE = "11111111-1111-4111-8111-111111111111"  # approver, made up
 INTAKE = Actor.system("intake")
-APPROVER = Actor.user(ALICE)
+APPROVER = Actor.user(ALICE, "Alice Test")
 COMMENT = "Rang Erika Mustermann, she confirmed it"  # made up, must stay out of log and audit
 
 
@@ -429,3 +429,44 @@ def test_an_iban_mismatch_that_cannot_be_rejected_here_says_why(
         assert offered["choices"] == []
         assert "can only reject" not in offered["note"]
         assert why in offered["note"]
+
+
+# --- #180: the database keeps the person's name and sign in address with the decision ---
+
+
+@pytest.mark.req("AP-08")
+def test_the_page_stores_the_name_and_sign_in_address_from_the_token(
+    app: Engine, owner: Engine, client: TestClient, entra: FakeEntra, tag: str
+) -> None:
+    _, exception_id = case_in_exception(app, ExceptionReason.INVOICE_CHECK_FAILED, tag)
+    token = entra.token(
+        BENJAMIN,
+        roles=[Role.FINANCE],
+        name="Benjamin Beispiel",
+        sign_in_address="benjamin@max-asp-test.example",
+    )
+
+    response = client.post(
+        f"/exceptions/{exception_id}/resolution",
+        json={"outcome": "accepted_with_comment", "comment": COMMENT},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    with owner.connect() as db:
+        row = (
+            db.execute(
+                text(
+                    "select resolved_by, resolved_by_name, resolved_by_address"
+                    " from exception_item where id = :id"
+                ),
+                {"id": exception_id},
+            )
+            .mappings()
+            .one()
+        )
+    assert dict(row) == {
+        "resolved_by": f"user:{BENJAMIN}",
+        "resolved_by_name": "Benjamin Beispiel",
+        "resolved_by_address": "benjamin@max-asp-test.example",
+    }
