@@ -47,6 +47,7 @@ REASON_TEXT: dict[ExceptionReason, str] = {
     ExceptionReason.AUDIT_COPY_FAILED: "The nightly copy of the audit log failed",
     ExceptionReason.AUDIT_CHECK_FAILED: "The audit log did not match its copies",
     ExceptionReason.VALUES_TO_CHECK: "The invoice number, amount or currency needs checking",
+    ExceptionReason.NO_ACCOUNT_PROPOSAL: "ARGUS cannot propose a G/L account and tax key",
 }
 
 
@@ -105,6 +106,8 @@ class ExceptionDetail:
     correctable: bool = False
     # What ARGUS read for those values, per field: value, flag and note. Empty without a case.
     read_values: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # The person can enter the G/L account and tax key here (#37).
+    account_enterable: bool = False
 
 
 @dataclass(frozen=True)
@@ -236,6 +239,7 @@ def open_exception_detail(connection: Connection, exception_id: int) -> Exceptio
         files=email_files(connection, email_id, row["case_id"]) if email_id is not None else [],
         correctable=reason is ExceptionReason.VALUES_TO_CHECK and case is not None,
         read_values=read_values(connection, case.id) if case is not None else {},
+        account_enterable=reason is ExceptionReason.NO_ACCOUNT_PROPOSAL and case is not None,
     )
 
 

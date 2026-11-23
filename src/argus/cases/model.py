@@ -57,6 +57,9 @@ class ExceptionReason(StrEnum):
     # The invoice number, gross amount or currency is missing or not confirmed, so the case
     # cannot be checked for duplicates. A person corrects the values (#112).
     VALUES_TO_CHECK = "values_to_check"
+    # ARGUS cannot propose a G/L account and tax key from the vendor's booking history, and
+    # does not guess. A person enters them on the queue page (#37).
+    NO_ACCOUNT_PROPOSAL = "no_account_proposal"
 
 
 class Outcome(StrEnum):

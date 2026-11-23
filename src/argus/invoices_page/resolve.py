@@ -108,6 +108,7 @@ FIXED_IN_DATEV = Choice(
 _CARRY_ON: dict[ExceptionReason, tuple[Choice, ...]] = {
     ExceptionReason.DUPLICATE: (NOT_A_DUPLICATE,),
     ExceptionReason.VALUES_TO_CHECK: (),  # corrected on the queue page (#112)
+    ExceptionReason.NO_ACCOUNT_PROPOSAL: (),  # the account is entered on the queue page (#37)
     ExceptionReason.IBAN_MISMATCH: (),  # ARGUS ends it itself after checking DATEV (#36)
     ExceptionReason.PAYMENT_FAILED: (),  # depends on the payment run
     ExceptionReason.CUSTOMER_QUERY: (ANSWERED,),
@@ -120,6 +121,9 @@ _NEVER_CLOSE = frozenset({ExceptionReason.PAYMENT_FAILED})
 NOTES: dict[ExceptionReason, str] = {
     ExceptionReason.VALUES_TO_CHECK: (
         "To correct the invoice number, amount or currency, open it in the exception queue."
+    ),
+    ExceptionReason.NO_ACCOUNT_PROPOSAL: (
+        "To enter the G/L account and tax key, open it in the exception queue."
     ),
     ExceptionReason.IBAN_MISMATCH: (
         "Possible fraud. Once the IBAN is right in DATEV, ARGUS sees it on the next sweep and"

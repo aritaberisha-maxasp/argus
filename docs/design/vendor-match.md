@@ -60,7 +60,7 @@ The payment run (from #40) must still pay only to the IBAN DATEV holds when the 
 
 ## When it runs
 
-At the end of every live sweep, after filing, so it needs no job of its own. It asks DATEV only when there is a vendor to find or an IBAN to check again: a new case, an open `unknown_vendor` or an open `iban_mismatch`. When DATEV does not answer, those wait for the next sweep; the approver checks still run. In shadow mode no cases are opened, so there is nothing to match.
+At the end of every live sweep, after filing, so it needs no job of its own. Right after it, the sweep proposes the G/L account and tax key of each matched case ([account-proposal.md](account-proposal.md), #37). It asks DATEV only when there is a vendor to find or an IBAN to check again: a new case, an open `unknown_vendor` or an open `iban_mismatch`. When DATEV does not answer, those wait for the next sweep; the approver checks still run. In shadow mode no cases are opened, so there is nothing to match.
 
 The job builds the gateway from `ARGUS_DATEV_URL` and `ARGUS_DATEV_CLIENT` (`argus.connections`). The demo points them at the fake DATEV. Live they are set at go live ([go live runbook](../runbooks/go-live.md)); until then cases wait without a vendor account.
 

@@ -67,6 +67,7 @@ EVENT_TEXT: dict[str, str] = {
     "case_created": "ARGUS opened the case",
     "case_changed": "The case data changed",
     "case_corrected": "A person corrected the invoice number, amount or currency",
+    "account_proposed": "A G/L account and tax key were proposed",
     "status_changed": "The status changed",
     "exception_opened": "An exception stopped the case",
     "exception_resolved": "The exception was resolved",
@@ -177,6 +178,10 @@ def _plain(value: Any) -> str:
 
 def describe(event_type: str, from_status: Any, to_status: Any, details: dict[str, Any]) -> str:
     """One plain sentence for an event of the trail."""
+    if event_type == "account_proposed" and details.get("gl_account"):
+        who = "A person entered" if details.get("source") == "person" else "ARGUS proposed"
+        key = f"tax key {details['tax_key']}" if details.get("tax_key") else "no tax key"
+        return f"{who} G/L account {details['gl_account']} with {key}"
     if event_type == "status_changed" and from_status and to_status:
         return f"The status changed from {_status_text(from_status)} to {_status_text(to_status)}"
     if event_type == "case_created" and to_status:
@@ -218,7 +223,8 @@ _STEPS = """
            t.from_status, t.to_status, t.details, t.statement_id,
            encode(t.hash, 'hex') as hash_hex,
            case when t.event_type = 'exception_resolved' then x.resolution
-                when t.event_type = 'case_corrected' then t.details ->> 'reason' end as comment
+                when t.event_type in ('case_corrected', 'account_proposed')
+                  then t.details ->> 'reason' end as comment
     from audit_event t
     left join exception_item x on x.id = t.exception_id
     where t.id in (
@@ -254,7 +260,9 @@ def _name_of(
     a step without one falls back to the name ARGUS knows today (code review of PR 181)."""
     if actor_type != "user":
         return None
-    if event_type == "case_corrected" and isinstance(details.get("name"), str):
+    if event_type in ("case_corrected", "account_proposed") and isinstance(
+        details.get("name"), str
+    ):
         return str(details["name"])
     return names.get(actor)
 
