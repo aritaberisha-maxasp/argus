@@ -16,7 +16,33 @@ Requirement coverage is in [coverage.md](coverage.md). Open business questions a
 
 Sizes: S is about one night, M is two or three nights. Nothing is L.
 
-## Sprint 4 (16 to 22 Nov 2026, approved by Arita on 16 Nov)
+## Sprint 5 (23 to 29 Nov 2026, approved by Arita on 23 Nov)
+
+**Sprint goal:** a checked invoice reaches its approver by email, and the approver can approve, reject or ask a question on a page, with a second approval above EUR 5,000 and reminders, all logged, while ARGUS still cannot book or pay anything.
+
+Ranks 1 to 9 are core, 10 to 13 are stretch. #195 is action item 2 of the Sprint 4 retro. The open questions on #38, #39 and #40 are not answered yet, so those stories are built on the defaults written on each issue. PR 190 (#37) goes first in the merge list, because #191, #180 and #41 chain after its migration 0019.
+
+| Rank | Issue | Story | Requirement IDs | Size | Depends on | Stretch |
+|---|---|---|---|---|---|---|
+| 1 | [#195](https://github.com/aritaberisha-maxasp/argus/issues/195) | Take the status labels off an issue by itself when it closes | none, team tooling | S | nothing |  |
+| 2 | [#191](https://github.com/aritaberisha-maxasp/argus/issues/191) | Send each checked invoice to its approver by email | AP-02, AP-06, PR-04, PR-05, VM-04, NF-01, NF-03 | M | #37 (PR 190) |  |
+| 3 | [#180](https://github.com/aritaberisha-maxasp/argus/issues/180) | Let the database enforce who may end an exception and how, and keep the decision maker's name | NF-01, AP-08, EX-01, EX-02, PR-05, VM-04 | M | #37 (PR 190, migration chain) |  |
+| 4 | [#186](https://github.com/aritaberisha-maxasp/argus/issues/186) | Let only ARGUS's own DATEV check end an IBAN hold as fixed in DATEV | PR-05, VM-04, NF-01 | S | #180, same developer thread |  |
+| 5 | [#38](https://github.com/aritaberisha-maxasp/argus/issues/38) | Let the vendor's approver approve or reject an invoice on a page, without DATEV or Wise | AP-02, AP-03, AP-04, AP-07, AP-08, AP-10, PR-04 | M | #191 |  |
+| 6 | [#192](https://github.com/aritaberisha-maxasp/argus/issues/192) | Let the approver send an invoice back with a question, and Benjamin answer it | AP-03, AP-05, AP-08, EX-01, EX-02 | S | #38, #191 |  |
+| 7 | [#39](https://github.com/aritaberisha-maxasp/argus/issues/39) | Ask Benjamin for a second approval above EUR 5,000 | AP-09, AP-08 | S | #38, #191 |  |
+| 8 | [#40](https://github.com/aritaberisha-maxasp/argus/issues/40) | Remind approvers after 3 working days and escalate after 5 | AP-05, AP-06, AP-08 | S | #191, #38 (#192 for the clock restart) |  |
+| 9 | [#188](https://github.com/aritaberisha-maxasp/argus/issues/188) | Show the reasons behind an exception in plain words on the queue page | EX-01, EX-02 | S | #36 done, #37 for one part |  |
+| 10 | [#41](https://github.com/aritaberisha-maxasp/argus/issues/41) | Book approved invoices in DATEV automatically, on the assumed DATEV answers | BK-01, BK-02, BK-03, BK-06, BK-07 | M | #38, #191, #39 | yes |
+| 11 | [#64](https://github.com/aritaberisha-maxasp/argus/issues/64) | Measure how many invoices go through without manual work | NF-07 | S | #62 done | yes |
+| 12 | [#189](https://github.com/aritaberisha-maxasp/argus/issues/189) | Note in the go live runbook that cases matched before the IBAN check never get it | PR-05 | S | #36 done | yes |
+| 13 | [#187](https://github.com/aritaberisha-maxasp/argus/issues/187) | Tell Benjamin what to do with a bank change letter that prints the old and the new IBAN | PR-05, VM-04 | S | #36 done | yes |
+
+Carry over: #37 (built in PR 190, waits for Arita's merge) and the DATEV spike #2, open until DATEV access is sorted. Out of this sprint: the payment run stories (#46, #47, #48, #50) come after booking (#41); #42 and #52 wait on #2; #116 stays in the backlog.
+
+Numbers for this sprint: migrations 0016 (#180), 0018 (#186), 0020 (#191), 0021 (#38), 0022 (#192), 0023 (#39), 0024 (#40) and 0025 (#41) are reserved; the next free one is 0026. ADR 0010 is reserved for #191; the next free ADR is 0011.
+
+## Sprint 4 (16 to 22 Nov 2026, done)
 
 **Sprint goal:** land the Sprint 3 PRs, then start the approval path on the assumed DATEV answers D1 to D9 (ADR 0002 provisional), so an invoice is matched to its vendor and its IBAN is checked.
 
