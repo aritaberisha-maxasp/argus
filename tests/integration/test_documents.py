@@ -42,6 +42,7 @@ from argus.documents.store import (
 )
 from argus.intake.graph import InboxMessage
 from argus.intake.records import mark_stored, see_email
+from tests.integration.approval_helpers import send_for_approval
 
 EMAILS = Path(__file__).resolve().parents[1] / "fixtures" / "emails"
 INTAKE = Actor.system("intake")
@@ -334,7 +335,7 @@ def test_a_closed_case_takes_no_new_files(app: Engine, documents: AzureDocumentS
             source_email_id=email_id,
             duplicate_key=f"vat:DE700000000|DOCTEST|{email_id}|EUR",
         )
-        move_case(db, case_id, expected=CaseStatus.RECEIVED, to=CaseStatus.AWAITING_APPROVAL)
+        assert send_for_approval(db, case_id)
         move_case(
             db,
             case_id,
