@@ -5,6 +5,7 @@ checks of docs/design/invoice-case/checks.sql into tests, so no later story can 
 unnoticed. The last group matches the acceptance criteria of #21, the exception queue.
 """
 
+import hashlib
 from collections.abc import Iterator
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -558,7 +559,9 @@ def test_an_exception_stops_the_case_and_it_goes_back_where_it_came_from(app: En
         pytest.raises(CaseRuleBroken, match="must go back to approved"),
         unit_of_work(app, BENJAMIN) as db,
     ):
-        resolve_exception(db, exception_id, Outcome.RETRIED, case_to=S.BOOKED)
+        resolve_exception(
+            db, exception_id, Outcome.RETRIED, resolution="period reopened", case_to=S.BOOKED
+        )
 
     with unit_of_work(app, BENJAMIN) as db:
         resolve_exception(db, exception_id, Outcome.RETRIED, resolution="period reopened")
@@ -678,7 +681,13 @@ def test_a_failed_payment_goes_back_to_the_pool(app: Engine) -> None:
         )
 
     with unit_of_work(app, BENJAMIN) as db:
-        resolve_exception(db, exception_id, Outcome.PUT_BACK_IN_POOL, case_to=S.BOOKED)
+        resolve_exception(
+            db,
+            exception_id,
+            Outcome.PUT_BACK_IN_POOL,
+            resolution="Wise returned it, pay again",
+            case_to=S.BOOKED,
+        )
 
     assert status_of(app, case_id) is S.BOOKED
 
@@ -1133,7 +1142,7 @@ def test_resolving_returns_the_case_and_both_steps_are_logged(app: Engine) -> No
             db, ExceptionReason.VENDOR_WITHOUT_APPROVER, "no approver for 70001", case_id=case_id
         )
     with unit_of_work(app, BENJAMIN) as db:
-        resolve_exception(db, exception_id, Outcome.DATA_CORRECTED)
+        resolve_exception(db, exception_id, Outcome.DATA_CORRECTED, resolution="approver added")
         case = get_case(db, case_id)
         events = [e for e in trace(db, case_id) if e.exception_id == exception_id or e.to_status]
 
@@ -1148,6 +1157,7 @@ def test_resolving_returns_the_case_and_both_steps_are_logged(app: Engine) -> No
         "outcome": "data_corrected",
         "name": "Benjamin Test",  # as they were at that moment (ADR 0008, migration 0016)
         "sign_in_address": "benjamin@max-asp-test.example",
+        "resolution_sha256": hashlib.sha256(b"approver added").hexdigest(),
     }
     assert (returned.from_status, returned.to_status, returned.actor) == (
         S.EXCEPTION,
@@ -1230,7 +1240,7 @@ def test_the_queue_lists_open_exceptions_with_case_reason_age_and_detail(app: En
             statement_id=statement_id,
         )
     with unit_of_work(app, BENJAMIN) as db:
-        resolve_exception(db, done, Outcome.CATEGORY_CHOSEN)
+        resolve_exception(db, done, Outcome.CATEGORY_CHOSEN, resolution="it is an invoice")
 
     with unit_of_work(app, BENJAMIN) as db:
         queue = {e.id: e for e in list_open_exceptions(db)}

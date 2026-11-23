@@ -5,21 +5,31 @@ resolve an exception from the invoices page (#62). The page only offers safe end
 now the database accepted some the page refuses. This migration moves those rules into the
 database, so no other code path can get round them:
 
-- **Carrying on needs a person and a reason.** ``accepted_with_comment`` ("Checked, carry on"),
-  ``answered`` and ``fixed_in_datev`` let a stopped case move on toward payment. They now come
-  only from a ``user:`` actor with a resolution that is not blank. Blank means only spaces of
-  any kind, tabs or line breaks (``correction_trim`` from 0013). This covers a failed
-  §14 UStG check and an unknown vendor. Migration 0010 already holds the same rule for "not a
-  duplicate". Three automatic endings stay allowed, because ARGUS ends them only after reading
-  DATEV again, which is a stronger check than a click:
+- **Carrying on needs a person and a reason.** Every ending that does not close the case lets
+  it move on toward payment: "Checked, carry on", "answered", "fixed in DATEV", but also
+  "retried", "put back in the pool", "data corrected" and the rest, because the case goes back
+  where it came from whatever the word (compliance review of PR 199). So every ending except
+  ``rejected`` and ``confirmed_duplicate`` now comes only from a ``user:`` actor with a
+  resolution that is not blank. Blank means only spaces of any kind, tabs or line breaks
+  (``correction_trim`` from 0013). This covers a failed §14 UStG check and an unknown vendor,
+  and the same rule holds for exceptions of an email or bank statement. Migration 0010 already
+  holds it for "not a duplicate". A short list of automatic endings stays allowed, each tied to
+  its reason, its outcome and the one job that ends it after checking again:
 
+  - ``unknown_vendor`` as ``fixed_in_datev`` from ``system:vendor-match``, once the case has a
+    vendor account (PR 182 matched it in DATEV).
+  - ``vendor_without_approver`` as ``retried`` from ``system:vendor-match``, once the vendor
+    has an approver (#34, #35).
+  - ``no_account_proposal`` as ``fixed_in_datev`` from ``system:account-proposal``. Migration
+    0019 already demands the proposal from the booking history for that.
+  - ``bank_balance_difference`` as ``data_corrected`` from ``system:bank-import``, once the
+    corrected statement of that balance and month is imported (#94).
   - ``iban_mismatch`` is left out of this rule. PR 185 ends it as ``fixed_in_datev`` from
-    ``system:vendor-match`` once DATEV holds every IBAN of the invoice. #186 turns that round
-    so only that job may pick ``fixed_in_datev`` there.
-  - ``unknown_vendor`` may end as ``fixed_in_datev`` from ``system:vendor-match`` once the case
-    has a vendor account (PR 182 matched it in DATEV).
-  - ``no_account_proposal`` may end as ``fixed_in_datev`` from ``system:account-proposal``.
-    Migration 0019 already demands the proposal from the booking history for that.
+    ``system:vendor-match`` once DATEV holds every IBAN of the invoice, and 0002 already allows
+    it only that ending or ``rejected``. #186 sets its own rule so only that job may pick
+    ``fixed_in_datev`` there.
+
+  A new automatic ending needs a new row in this list, in a migration, on purpose.
 
 - **Closing only where nothing has moved yet.** ``rejected`` and ``confirmed_duplicate`` close
   the case. The database now refuses them for an outgoing invoice or credit note (it needs a
@@ -81,14 +91,18 @@ begin
   end if;
   a := current_actor();
 
-  -- Endings that let the case carry on need a person and a reason. The automatic endings
-  -- below come from a job that read DATEV again (see the module text of 0016).
-  if new.outcome in ('accepted_with_comment', 'answered', 'fixed_in_datev')
+  -- Every ending that does not close the case lets it carry on, so it needs a person and a
+  -- reason, except the automatic endings listed in the module text of 0016.
+  if new.outcome not in ('rejected', 'confirmed_duplicate')
      and old.reason::text <> 'iban_mismatch' then  -- #186 sets its own rule
-    automatic := new.outcome = 'fixed_in_datev' and a[1] = 'system' and (
-      (old.reason::text = 'unknown_vendor' and a[2] = 'vendor-match'
-       and (select partner_account from invoice_case where id = old.case_id) is not null)
-      or (old.reason::text = 'no_account_proposal' and a[2] = 'account-proposal'));
+    automatic := a[1] = 'system' and (
+      (old.reason::text, new.outcome, a[2]) in (
+        ('vendor_without_approver', 'retried', 'vendor-match'),
+        ('no_account_proposal', 'fixed_in_datev', 'account-proposal'),
+        ('bank_balance_difference', 'data_corrected', 'bank-import'))
+      or ((old.reason::text, new.outcome, a[2]) = ('unknown_vendor', 'fixed_in_datev',
+                                                   'vendor-match')
+          and (select partner_account from invoice_case where id = old.case_id) is not null));
     if not automatic then
       if a[1] <> 'user' then
         raise exception 'only a person can end exception % as %', old.id, new.outcome;

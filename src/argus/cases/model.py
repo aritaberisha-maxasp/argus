@@ -88,8 +88,9 @@ class Actor:
 
     kind: str
     name: str
-    display_name: str | None = field(default=None, compare=False)
-    sign_in_address: str | None = field(default=None, compare=False)
+    # Not in repr either, so a log line or a traceback never shows them (NF-03).
+    display_name: str | None = field(default=None, compare=False, repr=False)
+    sign_in_address: str | None = field(default=None, compare=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.kind not in ("system", "user") or not self.name.strip():

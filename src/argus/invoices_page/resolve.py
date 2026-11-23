@@ -12,10 +12,12 @@ Who checks what:
   and lets values to check end as data corrected only after a correction. Since 0016 it also
   holds the rules this page used to hold alone:
 
-  - "Checked, carry on", "answered" and "fixed in DATEV" come only from a person, with a
-    comment that is not blank. Three automatic endings stay with the jobs that read DATEV
-    again: the IBAN recheck (#36, its own rule follows in #186), an unknown vendor that the
-    vendor match found, and a missing account found in the booking history.
+  - Every ending that lets the case carry on ("Checked, carry on", "answered", "fixed in
+    DATEV" and every other one that does not close it) comes only from a person, with a
+    comment that is not blank. A short list of automatic endings stays with the job that
+    checks again: the IBAN recheck (#36, its own rule follows in #186), an unknown vendor the
+    vendor match found, a vendor that now has an approver, a missing account found in the
+    booking history, and a bank balance difference after the corrected statement.
   - Rejecting or confirming a duplicate closes the case, so it is refused for an outgoing
     invoice or credit note, a bank transaction, and a case that was booked, in a payment run
     or paid before the exception.

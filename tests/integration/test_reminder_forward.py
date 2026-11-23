@@ -486,7 +486,9 @@ def test_after_a_person_resolves_a_changed_draft_argus_sends_it_once(app: Engine
 
     standin.patch(f"/_standin/drafts/{draft_id}", json={"cc": []})  # the person fixes it
     with unit_of_work(app, Actor.user("benjamin-entra-id", "Benjamin Test")) as db:
-        resolve_exception(db, waiting.exception_id, Outcome.DATA_CORRECTED)
+        resolve_exception(
+            db, waiting.exception_id, Outcome.DATA_CORRECTED, resolution="draft fixed"
+        )
     result = forward_reminder(app, mailbox, email, reminder, DECISION)
 
     assert result.sent_now and result.exception_id is None

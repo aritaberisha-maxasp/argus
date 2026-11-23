@@ -43,8 +43,10 @@ BENJAMIN = Actor.user(
 APPROVER = Actor.user("11111111-1111-4111-8111-111111111111", "Alice Test")
 NAMELESS = Actor.user("22222222-2222-4222-8222-222222222222")
 COMMENT = "Rang Erika Mustermann, the number is right"  # made up, stays out of the audit log
-# The endings that let a stopped case carry on toward payment.
-CARRY_ON = [Outcome.ACCEPTED_WITH_COMMENT, Outcome.ANSWERED, Outcome.FIXED_IN_DATEV]
+# Every ending that does not close the case lets it carry on toward payment (compliance review
+# of PR 199): the case goes back where it came from whatever the word.
+CLOSING = {Outcome.REJECTED, Outcome.CONFIRMED_DUPLICATE}
+CARRY_ON = [o for o in Outcome if o not in CLOSING and o is not Outcome.NOT_A_DUPLICATE]
 
 _counter = itertools.count(1)
 
@@ -188,7 +190,63 @@ def test_a_person_with_a_reason_lets_a_failed_check_carry_on(
     assert row_of(owner, exception_id)["outcome"] == outcome.value
 
 
-# --- Automatic endings after ARGUS read DATEV again stay possible ---
+@pytest.mark.req("EX-02")
+@pytest.mark.parametrize("outcome", CARRY_ON)
+def test_a_job_cannot_end_an_exception_without_a_case_either(app: Engine, outcome: Outcome) -> None:
+    with unit_of_work(app, INTAKE) as db:
+        exception_id = open_exception(db, ExceptionReason.AUDIT_COPY_FAILED, "Copy failed.")
+
+    with (
+        pytest.raises(CaseRuleBroken, match="only a person"),
+        unit_of_work(app, Actor.system("bank-import")) as db,
+    ):
+        resolve_exception(db, exception_id, outcome, resolution="the job says so")
+
+
+# --- Automatic endings after ARGUS checked again stay possible ---
+
+
+@pytest.mark.parametrize(
+    ("reason", "outcome", "job"),
+    [
+        (ExceptionReason.VENDOR_WITHOUT_APPROVER, Outcome.RETRIED, "vendor-match"),
+        (ExceptionReason.UNKNOWN_VENDOR, Outcome.FIXED_IN_DATEV, "vendor-match"),
+    ],
+)
+def test_the_listed_automatic_endings_need_no_person(
+    app: Engine, reason: ExceptionReason, outcome: Outcome, job: str
+) -> None:
+    case_id, exception_id = stopped(app, reason)
+
+    with unit_of_work(app, Actor.system(job)) as db:
+        resolve_exception(db, exception_id, outcome)
+
+    assert get_case(app.connect(), case_id).status is S.RECEIVED
+
+
+@pytest.mark.parametrize(
+    ("reason", "outcome", "job"),
+    [
+        # The right job, but another outcome or reason than listed.
+        (ExceptionReason.VENDOR_WITHOUT_APPROVER, Outcome.FIXED_IN_DATEV, "vendor-match"),
+        (ExceptionReason.UNKNOWN_VENDOR, Outcome.RETRIED, "vendor-match"),
+        (ExceptionReason.INVOICE_CHECK_FAILED, Outcome.RETRIED, "vendor-match"),
+        (ExceptionReason.INVOICE_CHECK_FAILED, Outcome.DATA_CORRECTED, "bank-import"),
+        (ExceptionReason.INVOICE_CHECK_FAILED, Outcome.FIXED_IN_DATEV, "account-proposal"),
+        # The listed reason and outcome, but another job.
+        (ExceptionReason.VENDOR_WITHOUT_APPROVER, Outcome.RETRIED, "intake"),
+    ],
+)
+def test_only_the_listed_job_reason_and_outcome_go_together(
+    app: Engine, reason: ExceptionReason, outcome: Outcome, job: str
+) -> None:
+    _, exception_id = stopped(app, reason)
+
+    with (
+        pytest.raises(CaseRuleBroken, match="only a person"),
+        unit_of_work(app, Actor.system(job)) as db,
+    ):
+        resolve_exception(db, exception_id, outcome, resolution="checked again")
 
 
 @pytest.mark.req("PR-05", "VM-04")
@@ -431,7 +489,7 @@ def test_the_audit_log_holds_a_hash_of_the_comment_but_not_the_comment(
 def test_a_resolution_without_a_comment_has_no_hash(app: Engine, owner: Engine) -> None:
     _, exception_id = stopped(app, ExceptionReason.VENDOR_WITHOUT_APPROVER)
 
-    with unit_of_work(app, BENJAMIN) as db:
+    with unit_of_work(app, VENDOR_MATCH) as db:  # an automatic ending, no comment needed
         resolve_exception(db, exception_id, Outcome.RETRIED)
 
     assert "resolution_sha256" not in resolved_event(owner, exception_id)
@@ -469,3 +527,11 @@ def test_rows_resolved_before_0016_stay_as_they_were(app: Engine, owner: Engine)
         "reason": "invoice_check_failed",
         "outcome": "accepted_with_comment",
     }
+
+
+def test_the_name_and_address_stay_out_of_the_actors_repr() -> None:
+    """A log line or a traceback with an actor in it never shows the person (NF-03)."""
+    shown = repr(BENJAMIN) + str(BENJAMIN)
+    assert "Benjamin Test" not in shown
+    assert "benjamin@max-asp-test.example" not in shown
+    assert Actor.user(BENJAMIN.name) == BENJAMIN  # the object ID alone says who it is
