@@ -6,7 +6,8 @@ vendor's approver, or the deputy while the approver is away (:mod:`argus.intake.
 
 This migration adds:
 
-- ``approval_request``: one row per request, never removed. ARGUS only names the case; the
+- ``approval_request``: one row per request, never removed, and only committed together with
+  the move of its case to Awaiting approval. ARGUS only names the case; the
   database picks the person from the approver table at that moment (the approver, or the
   deputy while the approver is marked away) and keeps their object ID, name and address as
   they were then, whether they are asked as approver or deputy, and for whom. Only a job may
@@ -18,8 +19,10 @@ This migration adds:
   has an open exception (for example an IBAN hold, PR-05). The duplicate key (IN-10) is already
   required by migration 0010.
 - A new exception reason ``approver_absent``: the approver is marked away and the vendor has no
-  deputy, so nobody can be asked. It always belongs to a case and ends only as ``retried``
-  (someone can be asked again) or ``rejected``.
+  deputy, or the deputy is away too, so nobody can be asked. It always belongs to a case and
+  ends only as ``retried`` (someone can be asked again) or ``rejected``.
+- A request is refused at commit unless its case went for approval in the same transaction, so
+  no request can wait to be emailed for a case that never went (code review of PR 200).
 - A rule on account proposals (compliance review of PR 190): once a person entered the account
   for a case and vendor account, a later proposal from the booking history for the same case and
   vendor account is refused, so a job never replaces a person's reasoned choice.
@@ -104,7 +107,8 @@ begin
     raise exception 'case % has no vendor account yet', new.case_id;
   end if;
   select ap.object_id, ap.name, ap.email, ap.absent,
-         dp.object_id as deputy_id, dp.name as deputy_name, dp.email as deputy_email
+         dp.object_id as deputy_id, dp.name as deputy_name, dp.email as deputy_email,
+         dp.absent as deputy_absent
     into v
   from vendor_approver va
   join approver ap on ap.object_id = va.approver_id
@@ -121,7 +125,7 @@ begin
     new.recipient_role := 'approver';
     new.on_behalf_of := null;
     new.on_behalf_of_name := null;
-  elsif v.deputy_id is not null then
+  elsif v.deputy_id is not null and not v.deputy_absent then
     new.recipient_id := v.deputy_id;
     new.recipient_name := v.deputy_name;
     new.recipient_address := v.deputy_email;
@@ -129,7 +133,7 @@ begin
     new.on_behalf_of := v.object_id;
     new.on_behalf_of_name := v.name;
   else
-    raise exception 'the approver of vendor account % is away and it has no deputy',
+    raise exception 'the approver of vendor account % is away and it has no deputy who is in',
       c.partner_account;
   end if;
   new.requested_by := a[1] || ':' || a[2];
@@ -140,6 +144,31 @@ begin
 end $$;
 create or replace trigger approval_request_guard before insert or update on approval_request
   for each row execute function approval_request_guard();
+
+-- Checked at commit: a request only exists together with the move it belongs to. A request
+-- committed on its own would be emailed later next to the real one (code review of PR 200).
+create or replace function approval_request_with_move() returns trigger language plpgsql
+set search_path = pg_catalog, public, pg_temp as $$
+begin
+  -- The move from Received to Awaiting approval must come after this request was written. A
+  -- later move needs a request of its own (case_ready_for_approval), so this finds only the
+  -- move of this transaction, even when the case went on to another status since.
+  if not exists (
+    select 1 from audit_event m
+    where m.case_id = new.case_id and m.event_type = 'status_changed'
+      and m.from_status = 'received' and m.to_status = 'awaiting_approval'
+      and m.chain_seq > (select r.chain_seq from audit_event r
+                         where r.case_id = new.case_id and r.event_type = 'approval_requested'
+                           and (r.details ->> 'request_id')::bigint = new.id)) then
+    raise exception
+      'approval request for case % needs the case to go for approval in the same transaction',
+      new.case_id;
+  end if;
+  return null;
+end $$;
+drop trigger if exists approval_request_with_move on approval_request;
+create constraint trigger approval_request_with_move after insert on approval_request
+  deferrable initially deferred for each row execute function approval_request_with_move();
 
 create or replace function approval_request_no_delete() returns trigger language plpgsql
 set search_path = pg_catalog, public, pg_temp as $$
@@ -250,8 +279,9 @@ begin
     select partner_account into account from invoice_case where id = old.case_id;
     if not exists (
          select 1 from vendor_approver va join approver ap on ap.object_id = va.approver_id
+         left join approver dp on dp.object_id = va.deputy_id
          where va.vendor_account = account
-           and (not ap.absent or va.deputy_id is not null)) then
+           and (not ap.absent or (dp.object_id is not null and not dp.absent))) then
       raise exception 'exception % ends as retried only once someone can approve again', old.id;
     end if;
   end if;
@@ -298,6 +328,7 @@ do $$ begin
   drop trigger case_ready_for_approval on invoice_case;
   drop function case_ready_for_approval();
   drop table approval_request;
+  drop function approval_request_with_move();
   drop function approval_request_audit();
   drop function approval_request_no_delete();
   drop function approval_request_guard();

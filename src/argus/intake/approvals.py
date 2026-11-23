@@ -14,13 +14,16 @@ picks who is asked: the approver, or the deputy while the approver is marked awa
 keeps that person on an approval request record that never changes, and writes
 ``approval_requested`` into the audit log. #38 decides who may approve from that record.
 
-When the approver is away and the vendor has no deputy, nobody is asked: the case goes to the
+When the approver is away and the vendor has no deputy, or the deputy is away too, nobody is
+asked: the case goes to the
 exception queue as ``approver_absent``. Every pass looks at those again and carries on by itself
 once the approver is back or the vendor has a deputy.
 
 The email goes out after the move, outside any unit of work (note from PR 79 on #41). It is sent
-with a Graph client that may send approval requests and nothing else (#168), and that refuses
-any other recipient or text than the stored request. A request is marked sent, with
+with a Graph client that may send approval requests and nothing else (#168). Right before it
+sends, that client reads the request again from the database (:func:`stored_requests`) and
+refuses unless it exists, is not sent yet, its case waits for approval, and the email goes to
+the person on it with exactly the text built from it. A request is marked sent, with
 ``approval_request_sent`` in the audit log, only after Graph accepted it. If sending fails, the
 next sweep tries again. A request marked sent is never sent again.
 
@@ -30,7 +33,7 @@ moves and sends nothing: it reads the mode at the start and again before each em
 """
 
 import logging
-from collections.abc import Collection
+from collections.abc import Callable, Collection
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -64,7 +67,12 @@ class Approvals:
     app_url: str
 
     def link(self, case_id: int) -> str:
-        return f"{self.app_url.rstrip('/')}{APPROVAL_PATH}/{case_id}"
+        return approval_link(self.app_url, case_id)
+
+
+def approval_link(app_url: str, case_id: int) -> str:
+    """Where the approval page of a case lives (#38)."""
+    return f"{app_url.rstrip('/')}{APPROVAL_PATH}/{case_id}"
 
 
 @dataclass
@@ -85,14 +93,16 @@ class _Asked:
     """Who the database would ask for a vendor right now."""
 
     approver_name: str
-    available: bool  # the approver is in, or a deputy stands in
+    available: bool  # the approver is in, or a deputy who is in stands in
 
 
 def _who(connection: Connection, vendor_account: str) -> _Asked | None:
     row = connection.execute(
         text(
-            "select a.name, (not a.absent or v.deputy_id is not null) as available"
+            "select a.name, (not a.absent or (d.object_id is not null and not d.absent))"
+            " as available"
             " from vendor_approver v join approver a on a.object_id = v.approver_id"
+            " left join approver d on d.object_id = v.deputy_id"
             " where v.vendor_account = :account"
         ),
         {"account": vendor_account},
@@ -209,9 +219,11 @@ def _move_one(db: Connection, case_id: int, result: ApprovalPass) -> None:
             ExceptionReason.APPROVER_ABSENT,
             (
                 f"The approver of vendor account {case.partner_account}, {asked.approver_name}, "
-                "is marked away and the vendor has no deputy, so ARGUS cannot ask anyone to "
-                "approve this invoice. Mark the approver back, or give the vendor a deputy, in "
-                "the approver table. ARGUS carries on by itself then."
+                "is marked away and the vendor has no deputy who is in, so ARGUS cannot ask "
+                "anyone to approve this invoice. Mark the approver or the deputy back, or give "
+                "the vendor another approver or deputy, in the approver table. ARGUS carries on "
+                "by itself then. If the vendor has no approver row any more, add one, or reject "
+                "the invoice."
             ),
             case_id=case_id,
             facts={"account": case.partner_account},
@@ -238,7 +250,7 @@ _UNSENT = """
 """
 
 
-def mail_for(row: Any, approvals: Approvals) -> ApprovalMail:
+def mail_for(row: Any, app_url: str) -> ApprovalMail:
     """The email of one stored request. The vendor name is the one read on the invoice, or the
     vendor account when none was read."""
     vendor = row["vendor_name"]
@@ -255,8 +267,35 @@ def mail_for(row: Any, approvals: Approvals) -> ApprovalMail:
         gross_cents=row["gross_minor"],
         currency=(row["currency"] or "").strip(),
         credit_note=CaseKind(row["kind"]) is CaseKind.INCOMING_CREDIT_NOTE,
-        link=approvals.link(row["case_id"]),
+        link=approval_link(app_url, row["case_id"]),
     )
+
+
+_STORED = """
+    select q.id as request_id, q.case_id, q.vendor_account, q.recipient_address,
+           q.recipient_name, q.on_behalf_of_name, c.kind, c.document_number, c.gross_minor,
+           c.currency, r.reading -> 'fields' -> 'issuer_name' ->> 'value' as vendor_name
+    from approval_request q
+    join invoice_case c on c.id = q.case_id
+    left join invoice_reading r on r.case_id = c.id and r.role = 'invoice'
+    where q.id = :id and q.sent_at is null and c.status = 'awaiting_approval'
+      and c.gross_minor is not null and c.currency is not null
+"""
+
+
+def stored_requests(engine: Engine, app_url: str) -> Callable[[int], ApprovalMail | None]:
+    """What the approval client checks each email against, right before it sends (code review
+    of PR 200): the email of the stored request with this ID, read fresh from the database, or
+    None when there is no such request, it was sent already, or its case no longer waits for
+    approval. So whatever the caller hands the client, only a stored, unsent request goes out,
+    and only to the person on it."""
+
+    def lookup(request_id: int) -> ApprovalMail | None:
+        with engine.connect() as connection:
+            row = connection.execute(text(_STORED), {"id": request_id}).mappings().first()
+        return mail_for(row, app_url) if row is not None else None
+
+    return lookup
 
 
 def _send_unsent(
@@ -277,7 +316,7 @@ def _send_unsent(
             result.not_sent += [r["request_id"] for r in rows if r["request_id"] >= request_id]
             return
         try:
-            approvals.mailbox.send_approval_request(mail_for(row, approvals))
+            approvals.mailbox.send_approval_request(mail_for(row, approvals.app_url))
         except (GraphApiError, GraphCallRefused, httpx.HTTPError):
             log.exception("Approval request %s not sent, next sweep retries", request_id)
             result.failed += 1

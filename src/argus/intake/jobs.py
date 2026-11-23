@@ -61,7 +61,7 @@ from argus.db.mode import DatabaseModeError
 from argus.db.mode import check_database_for_mode as _check_database_for_mode
 from argus.documents.store import AzureDocumentStore
 from argus.intake.accounts import chart_from_env
-from argus.intake.approvals import Approvals
+from argus.intake.approvals import Approvals, stored_requests
 from argus.intake.digest import (
     APP_URL_ENV,
     DigestSettingsError,
@@ -354,9 +354,11 @@ def services_from_env(
         datev = _datev_gateway(connections)
         if datev is not None:
             resources.callback(datev[1].close)
+        engine = engine_from_env(environ=environ)
+        resources.callback(engine.dispose)
         approvals = None
         if calls == SWEEP_JOB_CALLS:
-            approvals = _approvals(environ, connections, resources)
+            approvals = _approvals(environ, connections, engine, resources)
         sorting = Sorting(
             documents=documents,
             model=model,
@@ -374,8 +376,6 @@ def services_from_env(
         # A notice about a blocked statement goes out right away when the reminder address
         # is set; otherwise the daily statement job sends it (#166).
         statements = Statements(documents, bank, graph if graph.forward_to else None)
-        engine = engine_from_env(environ=environ)
-        resources.callback(engine.dispose)
     except BaseException:
         resources.close()
         raise
@@ -391,7 +391,7 @@ def removal_services_from_env(environ: Mapping[str, str]) -> Services:
 
 
 def _approvals(
-    environ: Mapping[str, str], connections: Connections, resources: ExitStack
+    environ: Mapping[str, str], connections: Connections, engine: Engine, resources: ExitStack
 ) -> Approvals | None:
     """The approval request client and the app's address for the link (#191), or None while
     ``ARGUS_APP_URL`` is not set: checked invoices then wait in Received."""
@@ -399,7 +399,9 @@ def _approvals(
         log.info("ARGUS_APP_URL is not set, so checked invoices wait in Received")
         return None
     app_url = app_url_from_environment(environ)
-    client = connections.graph_client(calls=APPROVAL_REQUEST_CALLS)
+    client = connections.graph_client(
+        calls=APPROVAL_REQUEST_CALLS, approval_lookup=stored_requests(engine, app_url)
+    )
     resources.callback(client.close)
     return Approvals(client, app_url)
 

@@ -38,8 +38,10 @@ def prepare_for_approval(db: Connection, case_id: int) -> None:
         change_case(db, case_id, partner_account=account)
     has_someone = db.execute(
         text(
-            "select not a.absent or v.deputy_id is not null from vendor_approver v"
-            " join approver a on a.object_id = v.approver_id where v.vendor_account = :account"
+            "select not a.absent or (d.object_id is not null and not d.absent)"
+            " from vendor_approver v join approver a on a.object_id = v.approver_id"
+            " left join approver d on d.object_id = v.deputy_id"
+            " where v.vendor_account = :account"
         ),
         {"account": account},
     ).scalar_one_or_none()

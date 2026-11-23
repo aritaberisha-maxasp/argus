@@ -512,7 +512,8 @@ class _GuardedTransport(httpx.BaseTransport):
         self._digest_to = digest_to
         # The approval client sends approval requests and nothing else on sendMail (#191).
         self._approvals = GraphCall.SEND_APPROVAL_REQUEST in calls
-        # The stored request being sent right now, set by GraphClient.send_approval_request.
+        # The stored request being sent right now, as read from the database by the client's
+        # lookup, set by GraphClient.send_approval_request.
         self.expected_approval: ApprovalMail | None = None
         self._folder_messages = re.compile(
             re.escape(f"{base_path.rstrip('/')}/users/{quote(mailbox, safe='@')}/mailFolders/")
@@ -593,6 +594,7 @@ class GraphClient:
         digest_to: str | None = None,
         statement_folder: str | None = None,
         calls: frozenset[GraphCall] = ALL_CALLS,
+        approval_lookup: Callable[[int], ApprovalMail | None] | None = None,
     ) -> None:
         """``standin=True`` allows plain http, for the fake Graph only, never for Graph.
 
@@ -604,7 +606,12 @@ class GraphClient:
         client cannot send anything.
 
         ``calls`` are the kinds of Graph call this client may make (#168). Every job passes its
-        own list (:mod:`argus.intake.jobs`); anything else is refused before it leaves ARGUS."""
+        own list (:mod:`argus.intake.jobs`); anything else is refused before it leaves ARGUS.
+
+        ``approval_lookup`` reads a stored approval request from the database by its ID
+        (:func:`argus.intake.approvals.stored_requests`), or None when it does not exist, was
+        sent already or its case no longer waits for approval. The approval client checks every
+        email against it, never against what the caller hands it (#191)."""
         if urlsplit(base_url).scheme != "https" and not standin:
             raise ValueError("the Graph base URL must use https unless it is the stand in")
         if GraphCall.SEND_APPROVAL_REQUEST in calls and (
@@ -623,6 +630,7 @@ class GraphClient:
         self.standin = standin
         self.statement_folder = statement_folder
         self.calls = frozenset(calls)
+        self._approval_lookup = approval_lookup
         self._transport = _GuardedTransport(
             transport or httpx.HTTPTransport(),
             url,
@@ -840,12 +848,22 @@ class GraphClient:
         self._post(f"{self._user}/sendMail", body)
 
     def send_approval_request(self, mail: ApprovalMail) -> None:
-        """Send one stored approval request to the person on it (#191). Sent once, without
+        """Send one stored approval request to the person on it (#191). The email is built
+        from ``mail``, but checked against the request as the database holds it now: another
+        recipient, other text, a made up or already sent request is refused. Sent once, without
         retries: the caller marks the request sent only after this returns, and the next sweep
         tries an unsent one again."""
-        if GraphCall.SEND_APPROVAL_REQUEST not in self.calls:
+        if GraphCall.SEND_APPROVAL_REQUEST not in self.calls or self._approval_lookup is None:
             raise GraphCallRefused("refused Graph approval request: not the approval client")
-        self._transport.expected_approval = mail
+        stored = self._approval_lookup(mail.request_id)
+        if stored is None:
+            log.warning("Refused Graph approval request %s: not stored or not due", mail.request_id)
+            raise GraphCallRefused(
+                "refused Graph approval request: no unsent stored request with that ID whose"
+                " case waits for approval"
+            )
+        # The transport compares what goes out with the stored request, not with ``mail``.
+        self._transport.expected_approval = stored
         try:
             self._post(f"{self._user}/sendMail", approval_body(mail))
         finally:

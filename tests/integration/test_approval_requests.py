@@ -10,6 +10,7 @@ the pass to its own cases, because the database is shared. Names and addresses a
 
 import itertools
 import uuid
+from dataclasses import replace
 from typing import Any
 
 import pytest
@@ -28,8 +29,14 @@ from argus.cases.store import (
     record_event,
     unit_of_work,
 )
-from argus.intake.approvals import Approvals, request_approvals
-from argus.intake.graph import ApprovalMail, GraphApiError, GraphCall, GraphClient
+from argus.intake.approvals import Approvals, request_approvals, stored_requests
+from argus.intake.graph import (
+    ApprovalMail,
+    GraphApiError,
+    GraphCall,
+    GraphCallRefused,
+    GraphClient,
+)
 from argus.invoices_page.trail import case_trail
 from argus.invoices_page.views import case_row
 from standins.graph.app import MAILBOX, create_app
@@ -52,13 +59,14 @@ def fake() -> FastAPI:
 
 
 @pytest.fixture
-def approvals(fake: FastAPI) -> Approvals:
+def approvals(app: Engine, fake: FastAPI) -> Approvals:
     client = GraphClient(
         StaticTokens(),
         MAILBOX,
         BASE_URL,
         transport=standin_transport(fake),
         calls=frozenset({GraphCall.SEND_APPROVAL_REQUEST}),
+        approval_lookup=stored_requests(app, APP_URL),
     )
     return Approvals(client, APP_URL)
 
@@ -269,6 +277,35 @@ def test_while_the_approver_is_away_the_deputy_gets_it(
 
 @pytest.mark.req("AP-06")
 @pytest.mark.usefixtures("live")
+def test_a_deputy_who_is_away_too_counts_as_no_deputy(
+    app: Engine, approvals: Approvals, fake: FastAPI
+) -> None:
+    account, approver, deputy = vendor(app, deputy=True)
+    assert deputy is not None
+    set_absent(app, ADMIN, approver, True)
+    set_absent(app, ADMIN, deputy, True)
+    case_id = checked_case(app, account)
+
+    first = request_approvals(app, approvals, cases=[case_id])
+
+    assert (first.absent, first.requested, first.sent) == (1, 0, 0)
+    assert open_reasons(app, case_id) == ["approver_absent"]
+    assert requests_of(app, case_id) == [] and sent(fake) == []
+    # The database refuses a request for another case of the vendor while both are away.
+    other = checked_case(app, account)
+    with pytest.raises(CaseRuleBroken, match="no deputy who is in"), unit_of_work(app, JOB) as db:
+        db.execute(text("insert into approval_request (case_id) values (:id)"), {"id": other})
+
+    set_absent(app, ADMIN, deputy, False)
+    back = request_approvals(app, approvals, cases=[case_id])
+
+    assert (back.resumed, back.requested, back.sent) == (1, 1, 1)
+    (request,) = requests_of(app, case_id)
+    assert (request["recipient_id"], request["recipient_role"]) == (deputy, "deputy")
+
+
+@pytest.mark.req("AP-06")
+@pytest.mark.usefixtures("live")
 def test_an_absent_approver_without_a_deputy_gets_nothing_until_back(
     app: Engine, approvals: Approvals, fake: FastAPI
 ) -> None:
@@ -398,6 +435,55 @@ def test_a_failed_send_is_tried_again_and_a_sent_request_never_again(
 # The database rules
 
 
+@pytest.mark.req("NF-03")
+@pytest.mark.usefixtures("live")
+def test_the_client_sends_only_what_the_database_holds_for_an_unsent_request(
+    app: Engine, approvals: Approvals, fake: FastAPI
+) -> None:
+    account, _, _ = vendor(app)
+    case_id = checked_case(app, account)
+    failing = Failing(approvals, times=1)
+    request_approvals(app, Approvals(failing, APP_URL), cases=[case_id])
+    (mail,) = failing.mails
+    client = approvals.mailbox
+
+    # A made up request, or a real one with another recipient or another link, never goes out.
+    for wrong, words in (
+        (replace(mail, request_id=mail.request_id + 10_000_000), "no unsent stored request"),
+        (replace(mail, recipient_address="mallory@evil.example"), "not the person"),
+        (replace(mail, recipient_name="Mallory"), "more or other text"),
+        (replace(mail, link="https://evil.example/approvals/1"), "more or other text"),
+    ):
+        with pytest.raises(GraphCallRefused, match=words):
+            client.send_approval_request(wrong)
+    assert sent(fake) == []
+
+    request_approvals(app, approvals, cases=[case_id])
+    assert len(sent(fake)) == 1
+    # Once it is marked sent, the same request cannot go out again.
+    with pytest.raises(GraphCallRefused, match="no unsent stored request"):
+        client.send_approval_request(mail)
+    assert len(sent(fake)) == 1
+
+
+@pytest.mark.req("NF-03")
+@pytest.mark.usefixtures("live")
+def test_the_client_sends_nothing_for_a_case_that_no_longer_waits_for_approval(
+    app: Engine, approvals: Approvals, fake: FastAPI
+) -> None:
+    account, _, _ = vendor(app)
+    case_id = checked_case(app, account)
+    failing = Failing(approvals, times=1)
+    request_approvals(app, Approvals(failing, APP_URL), cases=[case_id])
+    (mail,) = failing.mails
+    with unit_of_work(app, INTAKE) as db:
+        open_exception(db, ExceptionReason.IBAN_MISMATCH, "Held.", case_id=case_id)
+
+    with pytest.raises(GraphCallRefused, match="no unsent stored request"):
+        approvals.mailbox.send_approval_request(mail)
+    assert sent(fake) == []
+
+
 @pytest.mark.req("PR-04")
 def test_the_database_refuses_approval_without_a_proposal(app: Engine) -> None:
     account, _, _ = vendor(app)
@@ -440,14 +526,15 @@ def test_the_database_refuses_approval_without_a_request(app: Engine) -> None:
         unit_of_work(app, JOB) as db,
     ):
         move_case(db, case_id, expected=CaseStatus.RECEIVED, to=CaseStatus.AWAITING_APPROVAL)
-    # A request from an earlier transaction does not count either.
-    with unit_of_work(app, JOB) as db:
-        db.execute(text("insert into approval_request (case_id) values (:id)"), {"id": case_id})
+    # A request saved without the move is refused when the transaction commits, so no request
+    # can wait to be emailed for a case that never went for approval.
     with (
-        pytest.raises(CaseRuleBroken, match="without an approval request"),
+        pytest.raises(CaseRuleBroken, match="go for approval in the same transaction"),
         unit_of_work(app, JOB) as db,
     ):
-        move_case(db, case_id, expected=CaseStatus.RECEIVED, to=CaseStatus.AWAITING_APPROVAL)
+        db.execute(text("insert into approval_request (case_id) values (:id)"), {"id": case_id})
+    assert requests_of(app, case_id) == []
+    assert status_of(app, case_id) is CaseStatus.RECEIVED
 
 
 @pytest.mark.req("PR-05", "VM-04")
@@ -492,6 +579,7 @@ def test_only_argus_writes_a_request_and_the_database_picks_the_person(app: Engi
         )
     with unit_of_work(app, JOB) as db:
         db.execute(text("insert into approval_request (case_id) values (:id)"), {"id": case_id})
+        move_case(db, case_id, expected=CaseStatus.RECEIVED, to=CaseStatus.AWAITING_APPROVAL)
     (request,) = requests_of(app, case_id)
     assert request["recipient_id"] == approver
     with pytest.raises(NotAllowed), unit_of_work(app, JOB) as db:

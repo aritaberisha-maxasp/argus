@@ -139,7 +139,12 @@ def test_a_repeated_key_is_refused() -> None:
 def test_the_client_sends_the_stored_request_to_the_fake_graph() -> None:
     standin = create_app(token=TOKEN)
     graph = GraphClient(
-        StaticTokens(), MAILBOX, BASE_URL, transport=standin_transport(standin), calls=APPROVALS
+        StaticTokens(),
+        MAILBOX,
+        BASE_URL,
+        transport=standin_transport(standin),
+        calls=APPROVALS,
+        approval_lookup=lambda _: MAIL,
     )
     graph.send_approval_request(MAIL)
     (sent,) = standin.state.mailbox.notices
@@ -155,7 +160,12 @@ def test_the_client_refuses_a_body_that_is_not_the_request_being_sent() -> None:
         return httpx.Response(202)
 
     graph = GraphClient(
-        StaticTokens(), MAILBOX, BASE_URL, transport=httpx.MockTransport(record), calls=APPROVALS
+        StaticTokens(),
+        MAILBOX,
+        BASE_URL,
+        transport=httpx.MockTransport(record),
+        calls=APPROVALS,
+        approval_lookup=lambda _: MAIL,
     )
     other = approval_body(replace(MAIL, recipient_address="mallory@evil.example"))
     # Outside send_approval_request no request is being sent, so nothing may go out.
@@ -171,3 +181,30 @@ def test_another_client_cannot_send_an_approval_request() -> None:
     graph = GraphClient(StaticTokens(), MAILBOX, BASE_URL, forward_to="reminders@maxasp.example")
     with pytest.raises(GraphCallRefused):
         graph.send_approval_request(MAIL)
+
+
+def test_the_client_checks_against_the_stored_request_not_what_it_is_handed() -> None:
+    standin = create_app(token=TOKEN)
+
+    def client(lookup: object) -> GraphClient:
+        return GraphClient(
+            StaticTokens(),
+            MAILBOX,
+            BASE_URL,
+            transport=standin_transport(standin),
+            calls=APPROVALS,
+            approval_lookup=lookup,  # type: ignore[arg-type]
+        )
+
+    # No stored, unsent request with that ID: nothing goes out.
+    with pytest.raises(GraphCallRefused, match="no unsent stored request"):
+        client(lambda _: None).send_approval_request(MAIL)
+    # The caller changes the address, but the database holds Alice: refused.
+    with pytest.raises(GraphCallRefused, match="not the person on the request"):
+        client(lambda _: MAIL).send_approval_request(
+            replace(MAIL, recipient_address="mallory@evil.example")
+        )
+    # Without a lookup the client cannot send at all.
+    with pytest.raises(GraphCallRefused, match="not the approval client"):
+        client(None).send_approval_request(MAIL)
+    assert standin.state.mailbox.notices == []
