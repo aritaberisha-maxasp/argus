@@ -215,8 +215,8 @@ def test_a_job_cannot_end_an_exception_without_a_case_either(app: Engine, outcom
     [
         (ExceptionReason.VENDOR_WITHOUT_APPROVER, Outcome.RETRIED, "vendor-match"),
         (ExceptionReason.UNKNOWN_VENDOR, Outcome.FIXED_IN_DATEV, "vendor-match"),
-        (ExceptionReason.APPROVER_ABSENT, Outcome.RETRIED, "approval-request"),
-        (ExceptionReason.APPROVER_ADDRESS_OUTSIDE, Outcome.RETRIED, "approval-request"),
+        # The two approval-request endings are shown end to end in test_approval_requests,
+        # which needs an approver who can approve again (migration 0020).
     ],
 )
 def test_the_listed_automatic_endings_need_no_person(
