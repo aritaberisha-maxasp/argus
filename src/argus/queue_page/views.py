@@ -25,6 +25,7 @@ from argus.cases.model import CaseKind, CaseStatus, ExceptionReason
 from argus.cases.store import list_open_exceptions
 from argus.intake.corrections import FIELDS
 from argus.intake.email_text import body_of
+from argus.queue_page.facts import fact_lines
 from argus.working_days import working_days_between
 
 # Plain words for each reason, for Benjamin. A test checks every reason has one.
@@ -110,6 +111,8 @@ class ExceptionDetail:
     read_values: dict[str, dict[str, Any]] = field(default_factory=dict)
     # The person can enter the G/L account and tax key here (#37).
     account_enterable: bool = False
+    # The facts in plain words, label and value, for the box "Why ARGUS stopped" (#188).
+    fact_lines: list[tuple[str, str]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -242,6 +245,7 @@ def open_exception_detail(connection: Connection, exception_id: int) -> Exceptio
         correctable=reason is ExceptionReason.VALUES_TO_CHECK and case is not None,
         read_values=read_values(connection, case.id) if case is not None else {},
         account_enterable=reason is ExceptionReason.NO_ACCOUNT_PROPOSAL and case is not None,
+        fact_lines=fact_lines(row["facts"]),
     )
 
 

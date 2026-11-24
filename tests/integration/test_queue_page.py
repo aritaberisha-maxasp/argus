@@ -265,6 +265,7 @@ def test_one_exception_shows_why_argus_stopped_the_case_and_the_original_email(
     assert body["reason"] == "invoice_check_failed"
     assert body["detail"] == "The invoice has no delivery date (§14 UStG)."
     assert body["facts"] == {"missing": ["delivery_date"]}
+    assert body["fact_lines"] == [["Missing", "delivery_date"]]
     assert body["case"]["id"] == case_id
     assert body["case"]["status"] == "exception"
     assert body["case"]["resume_status"] == "received"

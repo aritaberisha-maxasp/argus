@@ -634,8 +634,8 @@
     parts.push(facts);
 
     const why = [el("p", x.detail)];
-    const extra = Object.entries(x.facts || {}).map(([k, v]) =>
-      [capital(words(k)), typeof v === "string" ? v : JSON.stringify(v)]);
+    // The server puts the facts into words (#188): labels, yes and no, lists without brackets.
+    const extra = x.fact_lines || [];
     if (extra.length) why.push(pairs(extra));
     parts.push(block("Why ARGUS stopped", ...why));
 
