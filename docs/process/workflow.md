@@ -61,7 +61,7 @@ If something blocks the issue, add the `blocked` label and say on the issue what
 
 Backlog, Ready, In progress, In review, QA passed, Ready for Arita, Done.
 
-The board is driven by labels, because agents can update labels but cannot move cards on a GitHub Projects board. An open issue with no status label is in the Backlog. The labels `status:ready`, `status:in-progress`, `status:in-review`, `status:qa-passed` and `ready-for-arita` are the columns in between, and a closed issue is Done. An issue carries exactly one status label at a time: whoever moves it removes the old one, and when an issue closes its status label comes off.
+The board is driven by labels, because agents can update labels but cannot move cards on a GitHub Projects board. An open issue with no status label is in the Backlog. The labels `status:ready`, `status:in-progress`, `status:in-review`, `status:qa-passed` and `ready-for-arita` are the columns in between, and a closed issue is Done. An issue carries exactly one status label at a time: whoever moves it removes the old one, and when an issue closes its status label comes off. The workflow "Issue labels" (`.github/workflows/issue-labels.yml`) takes the status labels and `ready-for-arita` off an issue the moment it closes. If `needs-arita` is still on, it leaves it and posts a comment, and the PO moves that question to the numbered question list.
 
 Quick views for Arita:
 - [Ready for Arita](https://github.com/aritaberisha-maxasp/argus/issues?q=is%3Aopen+label%3Aready-for-arita)
