@@ -5,15 +5,29 @@ offers endings that are safe for the case as it stands.
 
 Who checks what:
 
-- **The database** (migrations 0002, 0010 and 0013) records who resolved it and when, refuses
-  any change to a resolved exception, lets an IBAN mismatch end only as fixed in DATEV or
-  rejected, lets "not a duplicate" come only from a person with a reason, lets values to check
-  end as data corrected only after a correction, and lets a rejected or confirmed duplicate case
-  only close. It refuses closing a case that was in a payment run or paid.
-- **This page only** (the rules below): which endings fit which reason, that only an incoming
-  invoice or credit note is closed, that a booked case is not closed, that a comment is given
-  for every ending, and that a person (not a job) resolves. The database does not check these
-  yet; a follow up story moves them there.
+- **The database** (migrations 0002, 0010, 0013, 0016 and 0019) records who resolved it and
+  when, and for a person also their name and sign in address as they were at that moment
+  (ADR 0008). It refuses any change to a resolved exception. It lets an IBAN mismatch end only
+  as fixed in DATEV or rejected, lets "not a duplicate" come only from a person with a reason,
+  and lets values to check end as data corrected only after a correction. Since 0016 it also
+  holds the rules this page used to hold alone:
+
+  - Every ending that lets the case carry on ("Checked, carry on", "answered", "fixed in
+    DATEV" and every other one that does not close it) comes only from a person, with a
+    comment that is not blank. A short list of automatic endings stays with the job that
+    checks again: the IBAN recheck (#36, its own rule follows in #186), an unknown vendor the
+    vendor match found, a vendor that now has an approver, an approver who is back or has a
+    Max ASP address again, a missing account found in the booking history, and a bank balance
+    difference after the corrected statement.
+  - Rejecting or confirming a duplicate closes the case, so it is refused for an outgoing
+    invoice or credit note, a bank transaction, and a case that was booked, in a payment run
+    or paid before the exception.
+  - A person who resolves must be named.
+
+- **This page only**: which endings fit which reason, that a comment of at least three
+  visible characters is given for every ending (also closing ones), and that the case has no
+  other open exception before it closes. The database stays the last word: if it refuses,
+  the page shows its sentence.
 
 What each exception can end as here:
 
@@ -37,8 +51,9 @@ Rejecting or confirming a duplicate closes the case, so it is offered only when:
   has already moved), and
 - this is the case's only open exception (a closed case cannot carry on with the next one).
 
-The comment stays on the exception, never in the audit log, which records who, when, the reason
-and the outcome (NF-03). Nothing here logs.
+The comment stays on the exception, never in the audit log, which records who, when, the reason,
+the outcome and a SHA 256 of the comment, so a later change to it shows (NF-03). Nothing here
+logs.
 """
 
 import unicodedata

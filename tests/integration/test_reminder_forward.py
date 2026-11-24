@@ -58,7 +58,7 @@ pytestmark = pytest.mark.usefixtures("live")
 FORWARD_TO = "benjamin@maxasp.example"
 REMINDERS = ["E25", "E26", "E27", "E28", "E29", "E30", "E31"]
 INTAKE = Actor.system("intake")
-APPROVER = Actor.user("approver-entra-id")
+APPROVER = Actor.user("approver-entra-id", "Approver Test")
 DECISION = SortingDecision(
     route=Route.FORWARD_REMINDER,
     category=Category.PAYMENT_REMINDER,
@@ -444,8 +444,8 @@ def test_after_a_person_resolves_a_gone_draft_the_email_is_routed_without_sendin
     waiting = forward_reminder(app, mailbox, email, reminder, DECISION)
     assert waiting.exception_id is not None
     # The person forwards the reminder by hand and resolves the exception.
-    with unit_of_work(app, Actor.user("benjamin-entra-id")) as db:
-        resolve_exception(db, waiting.exception_id, Outcome.ANSWERED)
+    with unit_of_work(app, Actor.user("benjamin-entra-id", "Benjamin Test")) as db:
+        resolve_exception(db, waiting.exception_id, Outcome.ANSWERED, resolution="forwarded")
 
     result = forward_reminder(app, mailbox, email, reminder, DECISION)
     again = forward_reminder(app, mailbox, email, reminder, DECISION)
@@ -486,8 +486,10 @@ def test_after_a_person_resolves_a_changed_draft_argus_sends_it_once(app: Engine
     assert waiting.exception_id is not None
 
     standin.patch(f"/_standin/drafts/{draft_id}", json={"cc": []})  # the person fixes it
-    with unit_of_work(app, Actor.user("benjamin-entra-id")) as db:
-        resolve_exception(db, waiting.exception_id, Outcome.DATA_CORRECTED)
+    with unit_of_work(app, Actor.user("benjamin-entra-id", "Benjamin Test")) as db:
+        resolve_exception(
+            db, waiting.exception_id, Outcome.DATA_CORRECTED, resolution="draft fixed"
+        )
     result = forward_reminder(app, mailbox, email, reminder, DECISION)
 
     assert result.sent_now and result.exception_id is None

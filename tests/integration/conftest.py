@@ -127,7 +127,7 @@ def clean(owner: Engine) -> None:
 
 
 # A made up Entra object ID for the admin who switches modes in the tests (#72).
-TEST_ADMIN = Actor.user("44444444-4444-4444-8444-444444444444")
+TEST_ADMIN = Actor.user("44444444-4444-4444-8444-444444444444", "Admin Test")
 TEST_SWITCH = SwitchedBy(TEST_ADMIN, name="Test Admin", reason="switched by the test run")
 
 

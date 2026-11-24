@@ -78,10 +78,12 @@ def no_open_audit_exceptions(app: Engine) -> Iterator[None]:
     resolved it."""
 
     def resolve_all() -> None:
-        with unit_of_work(app, Actor.user("auditor-test")) as db:
+        with unit_of_work(app, Actor.user("auditor-test", "Auditor Test")) as db:
             for item in list_open_exceptions(db):
                 if item.reason in AUDIT_REASONS:
-                    resolve_exception(db, item.id, Outcome.RETRIED)
+                    resolve_exception(
+                        db, item.id, Outcome.RETRIED, resolution="checked by the test run"
+                    )
 
     resolve_all()
     yield

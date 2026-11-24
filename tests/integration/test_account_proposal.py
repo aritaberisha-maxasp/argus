@@ -55,7 +55,11 @@ pytestmark = pytest.mark.req("PR-04")
 
 INTAKE = Actor.system("intake")
 BENJAMIN_ID = "33333333-3333-4333-8333-333333333333"  # finance, made up
-BENJAMIN = EnteredBy(Actor.user(BENJAMIN_ID), "Benjamin Test", "benjamin@max-asp-test.example")
+BENJAMIN = EnteredBy(
+    Actor.user(BENJAMIN_ID, "Benjamin Test", "benjamin@max-asp-test.example"),
+    "Benjamin Test",
+    "benjamin@max-asp-test.example",
+)
 ALICE = "11111111-1111-4111-8111-111111111111"  # approver, made up
 TODAY = date(2026, 11, 20)
 

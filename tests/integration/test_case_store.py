@@ -5,6 +5,7 @@ checks of docs/design/invoice-case/checks.sql into tests, so no later story can 
 unnoticed. The last group matches the acceptance criteria of #21, the exception queue.
 """
 
+import hashlib
 from collections.abc import Iterator
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -45,8 +46,8 @@ from tests.integration.conftest import head, migrate
 
 S = CaseStatus
 INTAKE = Actor.system("intake")
-APPROVER = Actor.user("approver-entra-id")
-BENJAMIN = Actor.user("benjamin-entra-id")
+APPROVER = Actor.user("approver-entra-id", "Approver Test")
+BENJAMIN = Actor.user("benjamin-entra-id", "Benjamin Test", "benjamin@max-asp-test.example")
 
 # The vendor accounts, numbers and amounts below are made up (CLAUDE.md: synthetic data only).
 _counter = iter(range(1, 1_000_000))
@@ -354,7 +355,7 @@ def test_a_correction_before_approval_is_logged_with_old_and_new_value(app: Engi
     case_id = new_case(app, gross_cents=10000)
     walk(app, case_id, S.AWAITING_APPROVAL)
 
-    with unit_of_work(app, Actor.user("arita-entra-id")) as db:
+    with unit_of_work(app, Actor.user("arita-entra-id", "Arita Test")) as db:
         case = get_case(db, case_id)
         correct_case(
             db,
@@ -524,7 +525,7 @@ def test_an_approval_decision_is_logged_under_the_approver(app: Engine) -> None:
     case_id = new_case(app)
     walk(app, case_id, S.AWAITING_APPROVAL)
 
-    with unit_of_work(app, Actor.user("approver-entra-id")) as db:
+    with unit_of_work(app, APPROVER) as db:
         record_event(
             db,
             "approval_decision",
@@ -566,7 +567,9 @@ def test_an_exception_stops_the_case_and_it_goes_back_where_it_came_from(app: En
         pytest.raises(CaseRuleBroken, match="must go back to approved"),
         unit_of_work(app, BENJAMIN) as db,
     ):
-        resolve_exception(db, exception_id, Outcome.RETRIED, case_to=S.BOOKED)
+        resolve_exception(
+            db, exception_id, Outcome.RETRIED, resolution="period reopened", case_to=S.BOOKED
+        )
 
     with unit_of_work(app, BENJAMIN) as db:
         resolve_exception(db, exception_id, Outcome.RETRIED, resolution="period reopened")
@@ -616,7 +619,9 @@ def test_skipping_approval_through_the_exception_queue_is_refused(app: Engine) -
         pytest.raises(CaseRuleBroken, match="must go back to received"),
         unit_of_work(app, BENJAMIN) as db,
     ):
-        resolve_exception(db, exception_id, Outcome.FIXED_IN_DATEV, case_to=S.APPROVED)
+        resolve_exception(
+            db, exception_id, Outcome.FIXED_IN_DATEV, resolution="added", case_to=S.APPROVED
+        )
 
 
 @pytest.mark.req("PR-05")
@@ -644,11 +649,13 @@ def test_an_iban_mismatch_ends_only_fixed_in_datev_or_rejected(app: Engine) -> N
 
 @pytest.mark.req("PR-05")
 def test_a_rejected_iban_mismatch_can_only_be_closed_as_rejected(app: Engine) -> None:
-    case_id = booked_invoice(app)
+    # Waiting for approval: a booked case is not closed through the queue (migration 0016).
+    case_id = new_case(app)
+    walk(app, case_id, S.AWAITING_APPROVAL)
     with unit_of_work(app, Actor.system("iban-check")) as db:
         exception_id = open_exception(db, ExceptionReason.IBAN_MISMATCH, "x", case_id=case_id)
 
-    for to, reason in [(S.BOOKED, None), (S.CLOSED, ClosedReason.WITHDRAWN)]:
+    for to, reason in [(S.AWAITING_APPROVAL, None), (S.CLOSED, ClosedReason.WITHDRAWN)]:
         with (
             pytest.raises(CaseRuleBroken, match="can only be closed as rejected"),
             unit_of_work(app, BENJAMIN) as db,
@@ -682,7 +689,13 @@ def test_a_failed_payment_goes_back_to_the_pool(app: Engine) -> None:
         )
 
     with unit_of_work(app, BENJAMIN) as db:
-        resolve_exception(db, exception_id, Outcome.PUT_BACK_IN_POOL, case_to=S.BOOKED)
+        resolve_exception(
+            db,
+            exception_id,
+            Outcome.PUT_BACK_IN_POOL,
+            resolution="Wise returned it, pay again",
+            case_to=S.BOOKED,
+        )
 
     assert status_of(app, case_id) is S.BOOKED
 
@@ -977,6 +990,7 @@ def test_a_case_in_a_run_or_paid_cannot_be_closed(app: Engine, last: CaseStatus)
             db,
             exception_id,
             Outcome.ACCEPTED_WITH_COMMENT,
+            resolution="checked",
             case_to=S.CLOSED,
             closed_reason=ClosedReason.WITHDRAWN,
         )
@@ -1139,7 +1153,7 @@ def test_resolving_returns_the_case_and_both_steps_are_logged(app: Engine) -> No
             db, ExceptionReason.VENDOR_WITHOUT_APPROVER, "no approver for 70001", case_id=case_id
         )
     with unit_of_work(app, BENJAMIN) as db:
-        resolve_exception(db, exception_id, Outcome.DATA_CORRECTED)
+        resolve_exception(db, exception_id, Outcome.DATA_CORRECTED, resolution="approver added")
         case = get_case(db, case_id)
         events = [e for e in trace(db, case_id) if e.exception_id == exception_id or e.to_status]
 
@@ -1149,7 +1163,13 @@ def test_resolving_returns_the_case_and_both_steps_are_logged(app: Engine) -> No
     assert opened.details["reason"] == "vendor_without_approver"
     assert (stopped.from_status, stopped.to_status) == (S.AWAITING_APPROVAL, S.EXCEPTION)
     assert (resolved.event_type, resolved.actor) == ("exception_resolved", str(BENJAMIN))
-    assert resolved.details == {"reason": "vendor_without_approver", "outcome": "data_corrected"}
+    assert resolved.details == {
+        "reason": "vendor_without_approver",
+        "outcome": "data_corrected",
+        "name": "Benjamin Test",  # as they were at that moment (ADR 0008, migration 0016)
+        "sign_in_address": "benjamin@max-asp-test.example",
+        "resolution_sha256": hashlib.sha256(b"approver added").hexdigest(),
+    }
     assert (returned.from_status, returned.to_status, returned.actor) == (
         S.EXCEPTION,
         S.AWAITING_APPROVAL,
@@ -1231,7 +1251,7 @@ def test_the_queue_lists_open_exceptions_with_case_reason_age_and_detail(app: En
             statement_id=statement_id,
         )
     with unit_of_work(app, BENJAMIN) as db:
-        resolve_exception(db, done, Outcome.CATEGORY_CHOSEN)
+        resolve_exception(db, done, Outcome.CATEGORY_CHOSEN, resolution="it is an invoice")
 
     with unit_of_work(app, BENJAMIN) as db:
         queue = {e.id: e for e in list_open_exceptions(db)}
