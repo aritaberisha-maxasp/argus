@@ -3,8 +3,9 @@
 It signs in as the ARGUS app and needs only two application permissions, Mail.ReadWrite and
 Mail.Send, limited by Exchange to the one mailbox. Mail.Send is used for three things only:
 forwarding payment reminders to the one address set for them (IN-05, #27), short notices about
-Wise statements to that same address (BA-01, BA-08, #56), and sending the daily digest of open
-exceptions to the one address set for it (EX-03, #61). Every token is
+Wise statements to that same address (BA-01, BA-08, #56), sending the daily digest of open
+exceptions to the one address set for it (EX-03, #61), and asking the approver of a checked
+invoice to decide on it, by a short email with a link (AP-02, #191, ADR 0010). Every token is
 checked before use: if it carries any other Graph permission, the client refuses to send
 anything, so a too wide grant is noticed at once instead of going unused and unseen.
 
@@ -170,11 +171,15 @@ class GraphCall(StrEnum):
     SEND_NOTICE = "send a notice about a Wise statement"
     CREATE_DIGEST = "save the daily digest"
     SEND_DRAFT = "send a saved draft"
+    # An approval request to the one person stored on it (#191); checked by
+    # approval_body_problem. Only the client built for approval requests has it.
+    SEND_APPROVAL_REQUEST = "send an approval request"
 
 
-# Every call ARGUS makes. A client built without its own list gets this one; every job passes
-# its own (#168).
-ALL_CALLS: frozenset[GraphCall] = frozenset(GraphCall)
+# Every call ARGUS makes, except the approval request: a client built without its own list gets
+# this one; every job passes its own (#168). The approval request goes out only through a client
+# built for it alone, so no other job can send one (#191).
+ALL_CALLS: frozenset[GraphCall] = frozenset(GraphCall) - {GraphCall.SEND_APPROVAL_REQUEST}
 
 
 def allowed_paths(
@@ -237,6 +242,8 @@ def allowed_paths(
         ),
         # A notice about a Wise statement (#56); checked by notice_body_problem.
         (GraphCall.SEND_NOTICE, "POST", f"{user}/sendMail", bool(forward_to)),
+        # An approval request (#191); checked by approval_body_problem.
+        (GraphCall.SEND_APPROVAL_REQUEST, "POST", f"{user}/sendMail", True),
         (GraphCall.CREATE_DIGEST, "POST", f"{user}/messages", bool(digest_to)),
         (
             GraphCall.SEND_DRAFT,
@@ -293,6 +300,110 @@ def notice_body_problem(content: bytes, forward_to: str) -> str | None:
         or address["address"].lower() != forward_to.lower()
     ):
         return "the notice goes to an address that is not the one set for reminders"
+    return None
+
+
+@dataclass(frozen=True)
+class ApprovalMail:
+    """One approval request as the email shows it (#191, ADR 0010). Built from the stored
+    request, so the email can only go to the person the database picked. It holds the vendor
+    name, invoice number, gross amount and currency, and the link: nothing else from the invoice,
+    no IBAN and no attachment (NF-03)."""
+
+    request_id: int
+    case_id: int
+    recipient_address: str
+    recipient_name: str
+    on_behalf_of_name: str | None  # the approver who is away, when a deputy is asked
+    vendor_name: str
+    document_number: str
+    gross_cents: int
+    currency: str
+    credit_note: bool
+    link: str
+
+
+MAX_APPROVAL_FIELD = 120
+
+
+def _one_line(value: str) -> str:
+    """A value read from an invoice on one short line, so it cannot add lines to the email."""
+    flat = " ".join(value.split())
+    return flat if len(flat) <= MAX_APPROVAL_FIELD else flat[: MAX_APPROVAL_FIELD - 3] + "..."
+
+
+def approval_amount(cents: int, currency: str) -> str:
+    """1234567 and EUR as ``12,345.67 EUR``."""
+    sign = "-" if cents < 0 else ""
+    whole, part = divmod(abs(cents), 100)
+    return f"{sign}{whole:,}.{part:02d} {currency}"
+
+
+def render_approval(mail: ApprovalMail) -> tuple[str, str]:
+    """The subject and plain text of an approval request. Only these words, the fields of
+    :class:`ApprovalMail` and the link. The Graph client refuses anything else."""
+    what = "credit note" if mail.credit_note else "invoice"
+    vendor = _one_line(mail.vendor_name)
+    number = _one_line(mail.document_number)
+    subject = f"ARGUS: please approve {what} {number} from {vendor}"
+    deputy = (
+        f"You get this as the deputy of {_one_line(mail.on_behalf_of_name)}, who is away.\n\n"
+        if mail.on_behalf_of_name
+        else ""
+    )
+    text_body = (
+        f"Hello {_one_line(mail.recipient_name)},\n\n"
+        f"A checked {what} is waiting for your approval in ARGUS.\n\n"
+        f"{deputy}"
+        f"Vendor: {vendor}\n"
+        f"{what.capitalize()} number: {number}\n"
+        f"Gross amount: {approval_amount(mail.gross_cents, mail.currency)}\n\n"
+        f"Open it here to approve or reject it: {mail.link}\n\n"
+        "The link asks you to sign in with your Microsoft account. You decide on that page only."
+        " ARGUS does not read replies to this email.\n"
+    )
+    return subject, text_body
+
+
+def approval_body(mail: ApprovalMail) -> dict[str, Any]:
+    """The sendMail body of an approval request."""
+    subject, text_body = render_approval(mail)
+    return {
+        "message": {
+            "subject": subject,
+            "body": {"contentType": "Text", "content": text_body},
+            "toRecipients": [{"emailAddress": {"address": mail.recipient_address}}],
+        },
+        "saveToSentItems": True,
+    }
+
+
+def approval_body_problem(content: bytes, expected: ApprovalMail | None) -> str | None:
+    """Why a sendMail body of the approval client is refused, or None when it is fine. It must
+    be exactly the email of the stored request: the one person on the request, the subject and
+    text built from its fields, and nothing else (#191)."""
+    if expected is None:
+        return "no stored approval request is being sent"
+    try:
+        body = _strict_json(content)
+    except ValueError:
+        return "the approval request body is not JSON with each key once"
+    if not isinstance(body, dict) or set(body) - {"message", "saveToSentItems"}:
+        return "the approval request may only carry a message"
+    message = body.get("message")
+    if not isinstance(message, dict) or set(message) != {"subject", "body", "toRecipients"}:
+        return "the approval request may only carry a subject, a text and its recipient"
+    to = _addresses(message["toRecipients"])
+    if (
+        len(to) != 1
+        or len(message["toRecipients"]) != 1
+        or not isinstance(to[0], str)
+        or to[0].lower() != expected.recipient_address.lower()
+    ):
+        return "the approval request goes to someone who is not the person on the request"
+    wanted = approval_body(expected)["message"]
+    if message["subject"] != wanted["subject"] or message["body"] != wanted["body"]:
+        return "the approval request holds more or other text than the stored request"
     return None
 
 
@@ -399,6 +510,11 @@ class _GuardedTransport(httpx.BaseTransport):
         )
         self._forward_to = forward_to
         self._digest_to = digest_to
+        # The approval client sends approval requests and nothing else on sendMail (#191).
+        self._approvals = GraphCall.SEND_APPROVAL_REQUEST in calls
+        # The stored request being sent right now, as read from the database by the client's
+        # lookup, set by GraphClient.send_approval_request.
+        self.expected_approval: ApprovalMail | None = None
         self._folder_messages = re.compile(
             re.escape(f"{base_path.rstrip('/')}/users/{quote(mailbox, safe='@')}/mailFolders/")
             + f"(?P<folder>{_MESSAGE_ID})/messages"
@@ -434,7 +550,12 @@ class _GuardedTransport(httpx.BaseTransport):
             if problem:
                 log.warning("Refused Graph forward: %s", problem)
                 raise GraphCallRefused(f"refused Graph forward: {problem}")
-        if path.endswith("/sendMail"):
+        if path.endswith("/sendMail") and self._approvals:
+            problem = approval_body_problem(request.read(), self.expected_approval)
+            if problem:
+                log.warning("Refused Graph approval request: %s", problem)
+                raise GraphCallRefused(f"refused Graph approval request: {problem}")
+        elif path.endswith("/sendMail"):
             problem = notice_body_problem(request.read(), self._forward_to or "")
             if problem:
                 log.warning("Refused Graph notice: %s", problem)
@@ -473,6 +594,8 @@ class GraphClient:
         digest_to: str | None = None,
         statement_folder: str | None = None,
         calls: frozenset[GraphCall] = ALL_CALLS,
+        approval_lookup: Callable[[int], ApprovalMail | None] | None = None,
+        approval_domain: str | None = None,
     ) -> None:
         """``standin=True`` allows plain http, for the fake Graph only, never for Graph.
 
@@ -484,9 +607,21 @@ class GraphClient:
         client cannot send anything.
 
         ``calls`` are the kinds of Graph call this client may make (#168). Every job passes its
-        own list (:mod:`argus.intake.jobs`); anything else is refused before it leaves ARGUS."""
+        own list (:mod:`argus.intake.jobs`); anything else is refused before it leaves ARGUS.
+
+        ``approval_lookup`` reads a stored approval request from the database by its ID
+        (:func:`argus.intake.approvals.stored_requests`), or None when it does not exist, was
+        sent already or its case no longer waits for approval. The approval client checks every
+        email against it, never against what the caller hands it (#191). ``approval_domain`` is
+        Max ASP's own email domain (``ARGUS_OWN_DOMAIN``): an approval request goes only to an
+        address there, whatever the approver table holds (compliance review of PR 200)."""
         if urlsplit(base_url).scheme != "https" and not standin:
             raise ValueError("the Graph base URL must use https unless it is the stand in")
+        if GraphCall.SEND_APPROVAL_REQUEST in calls and (
+            set(calls) - {GraphCall.SEND_APPROVAL_REQUEST} or forward_to or digest_to
+        ):
+            # Both go out through sendMail; one client can only be checked for one of them.
+            raise ValueError("the approval request client may send approval requests only")
         self.mailbox = mailbox
         self.forward_to = forward_to
         self.digest_to = digest_to
@@ -498,6 +633,8 @@ class GraphClient:
         self.standin = standin
         self.statement_folder = statement_folder
         self.calls = frozenset(calls)
+        self._approval_lookup = approval_lookup
+        self._approval_domain = approval_domain.strip().lower() if approval_domain else None
         self._transport = _GuardedTransport(
             transport or httpx.HTTPTransport(),
             url,
@@ -713,6 +850,39 @@ class GraphClient:
             "saveToSentItems": True,
         }
         self._post(f"{self._user}/sendMail", body)
+
+    def send_approval_request(self, mail: ApprovalMail) -> None:
+        """Send one stored approval request to the person on it (#191). The email is built
+        from ``mail``, but checked against the request as the database holds it now: another
+        recipient, other text, a made up or already sent request is refused. Sent once, without
+        retries: the caller marks the request sent only after this returns, and the next sweep
+        tries an unsent one again."""
+        if (
+            GraphCall.SEND_APPROVAL_REQUEST not in self.calls
+            or self._approval_lookup is None
+            or self._approval_domain is None
+        ):
+            raise GraphCallRefused("refused Graph approval request: not the approval client")
+        stored = self._approval_lookup(mail.request_id)
+        if stored is None:
+            log.warning("Refused Graph approval request %s: not stored or not due", mail.request_id)
+            raise GraphCallRefused(
+                "refused Graph approval request: no unsent stored request with that ID whose"
+                " case waits for approval"
+            )
+        if stored.recipient_address.rpartition("@")[2].lower() != self._approval_domain:
+            # A typo or a wrong entry in the approver table must not send invoice details
+            # from the accounts mailbox to an outside address.
+            log.warning("Refused Graph approval request %s: address outside", mail.request_id)
+            raise GraphCallRefused(
+                f"refused Graph approval request: the address is not at {self._approval_domain}"
+            )
+        # The transport compares what goes out with the stored request, not with ``mail``.
+        self._transport.expected_approval = stored
+        try:
+            self._post(f"{self._user}/sendMail", approval_body(mail))
+        finally:
+            self._transport.expected_approval = None
 
     def is_draft(self, message_id: str) -> bool:
         """Whether this message is still an unsent draft."""

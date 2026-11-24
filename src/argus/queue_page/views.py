@@ -48,6 +48,8 @@ REASON_TEXT: dict[ExceptionReason, str] = {
     ExceptionReason.AUDIT_CHECK_FAILED: "The audit log did not match its copies",
     ExceptionReason.VALUES_TO_CHECK: "The invoice number, amount or currency needs checking",
     ExceptionReason.NO_ACCOUNT_PROPOSAL: "ARGUS cannot propose a G/L account and tax key",
+    ExceptionReason.APPROVER_ABSENT: "The approver is away and the vendor has no deputy",
+    ExceptionReason.APPROVER_ADDRESS_OUTSIDE: "The approver has an email address outside Max ASP",
 }
 
 

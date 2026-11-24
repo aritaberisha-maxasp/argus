@@ -24,7 +24,7 @@ A real address is https to a full host name. Error messages name settings, never
 """
 
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Final
 from urllib.parse import urlsplit
@@ -33,7 +33,7 @@ import httpx
 from pydantic import SecretStr
 
 from argus.datev.datevconnect import DatevConnectGateway
-from argus.intake.graph import ALL_CALLS, GraphCall, GraphClient, TokenProvider
+from argus.intake.graph import ALL_CALLS, ApprovalMail, GraphCall, GraphClient, TokenProvider
 from argus.wise.client import TOKEN_SECRET as WISE_TOKEN_SECRET
 from argus.wise.client import WiseClient
 
@@ -132,6 +132,8 @@ class Connections:
         digest: bool = False,
         statement_folder: str | None = None,
         calls: frozenset[GraphCall] = ALL_CALLS,
+        approval_lookup: Callable[[int], ApprovalMail | None] | None = None,
+        approval_domain: str | None = None,
     ) -> GraphClient:
         """The Graph client for the accounts mailbox. In demo mode it signs in to the fake
         Graph with the stand in token. Live, ``tokens`` signs in to Microsoft 365.
@@ -149,16 +151,20 @@ class Connections:
             tokens = _StaticToken(self.graph_standin_token)
         elif tokens is None:
             raise NotConnected("the Microsoft 365 sign in for the real mailbox is not set up")
+        # The approval request client sends approval requests and nothing else (#191).
+        approvals = GraphCall.SEND_APPROVAL_REQUEST in calls
         return GraphClient(
             tokens,
             self.mailbox,
             base_url=self.graph_url,
             transport=transport,
             standin=self.demo,
-            forward_to=None if digest else self.reminder_forward_to,
-            digest_to=self.digest_to if digest else None,
-            statement_folder=None if digest else statement_folder,
+            forward_to=None if digest or approvals else self.reminder_forward_to,
+            digest_to=self.digest_to if digest and not approvals else None,
+            statement_folder=None if digest or approvals else statement_folder,
             calls=calls,
+            approval_lookup=approval_lookup if approvals else None,
+            approval_domain=approval_domain if approvals else None,
         )
 
     def datev_gateway(self) -> DatevConnectGateway:

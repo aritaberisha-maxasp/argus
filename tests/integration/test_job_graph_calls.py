@@ -7,6 +7,8 @@ PostgreSQL with the client the job builds in production, from the lists in
 """
 
 import logging
+from collections.abc import Callable
+from dataclasses import replace
 from datetime import date, timedelta
 
 import pytest
@@ -16,12 +18,14 @@ from sqlalchemy import Engine, text
 from argus.bank.importer import import_statement
 from argus.bank.notices import NoticeKind, remind_missing_statements
 from argus.documents.store import MemoryDocumentStore
+from argus.intake.approvals import Approvals, stored_requests
 from argus.intake.digest import send_daily_digest
 from argus.intake.email_text import EmailReader
 from argus.intake.filing import REMOVED_FOLDER, Folders, remove_due
-from argus.intake.graph import GraphCall, GraphCallRefused, GraphClient
+from argus.intake.graph import ApprovalMail, GraphCall, GraphCallRefused, GraphClient
 from argus.intake.invoices import Invoicing
 from argus.intake.jobs import (
+    APPROVAL_REQUEST_CALLS,
     DIGEST_CALLS,
     OK_MARK,
     REMOVAL_CALLS,
@@ -36,6 +40,8 @@ from argus.intake.sweep import DocumentArchive, Sorting, sweep
 from argus.sorting import RecordedModel
 from standins.graph.app import DELETED_ITEMS_ID, MAILBOX, create_app
 from tests.acceptance.intake import FixtureDocumentReader
+from tests.integration.test_approval_requests import checked_case
+from tests.integration.test_approval_requests import vendor as approval_vendor
 from tests.integration.test_bank_import import FROM_BENJAMIN, NOVEMBER, OCTOBER
 from tests.integration.test_bank_import import SETTINGS as BANK_SETTINGS
 from tests.integration.test_email_filing import filed_other, fixed, move_filing_back
@@ -58,7 +64,13 @@ from tests.integration.test_statement_handover import (
 )
 from tests.integration.test_statement_handover import SETTINGS as HANDOVER_SETTINGS
 from tests.unit.intake.graph_helpers import BASE_URL, TOKEN, StaticTokens, standin_transport
+from tests.unit.intake.test_approval_mail import MAIL
 from tests.unit.sorting_helpers import MODEL_ANSWERS, OWN_VAT_IDS, fixture_config
+
+
+def approval_mail(case_id: int) -> ApprovalMail:
+    return replace(MAIL, case_id=case_id)
+
 
 INVOICE, REMINDER, OTHER = "E01", "E25", "E32"
 
@@ -70,6 +82,8 @@ def job_client(
     forward_to: str | None = None,
     digest_to: str | None = None,
     statement_folder: str | None = None,
+    approval_lookup: Callable[[int], ApprovalMail | None] | None = None,
+    approval_domain: str | None = None,
 ) -> GraphClient:
     """A client like the one the job builds: its own calls and its own addresses."""
     return GraphClient(
@@ -82,6 +96,8 @@ def job_client(
         digest_to=digest_to,
         statement_folder=statement_folder,
         calls=calls,
+        approval_lookup=approval_lookup,
+        approval_domain=approval_domain,
     )
 
 
@@ -147,6 +163,57 @@ def test_the_sweep_job_runs_shadow_mode_with_its_own_calls(
     assert second.sorted_by_person == 2
     assert box.moves == []  # shadow mode: ARGUS moved nothing
     assert "Refused Graph call" not in caplog.text
+
+
+@pytest.mark.req("NF-03", "AP-02")
+@pytest.mark.usefixtures("live")
+def test_the_sweep_sends_a_checked_invoice_for_approval_with_the_approval_client(
+    app: Engine, caplog: pytest.LogCaptureFixture
+) -> None:
+    fake = create_app(token=TOKEN, emails=[])
+    graph = job_client(fake, SWEEP_JOB_CALLS, forward_to=FORWARD_TO)
+    documents = MemoryDocumentStore()
+    approvals = Approvals(
+        job_client(
+            fake,
+            APPROVAL_REQUEST_CALLS,
+            approval_lookup=stored_requests(app, APP_URL),
+            approval_domain="maxasp-test.example",
+        ),
+        APP_URL,
+        "maxasp-test.example",
+    )
+    sorting = Sorting(
+        documents=documents,
+        model=RecordedModel.from_file(MODEL_ANSWERS),
+        config=fixture_config(),
+        read=EmailReader(FixtureDocumentReader()),
+        invoicing=Invoicing(FixtureDocumentReader(), OWN_VAT_IDS),
+        approvals=approvals,
+    )
+    account, _, _ = approval_vendor(app)
+    case_id = checked_case(app, account)
+
+    result = sweep(app, graph, DocumentArchive(documents), sorting)
+
+    assert result.approvals is not None
+    with app.connect() as connection:
+        request_id, sent_at = connection.execute(
+            text("select id, sent_at from approval_request where case_id = :id"), {"id": case_id}
+        ).one()
+    assert sent_at is not None
+    assert any(
+        f"/approvals/{case_id}" in mail["body"]["content"] for mail in fake.state.mailbox.notices
+    )
+    # The sweep sends every unsent request in the shared database, so other tests' requests
+    # may be refused on purpose (an address outside Max ASP). Nothing of this case's is, and
+    # the sweep's own client makes no call outside its list.
+    assert f"Refused Graph approval request {request_id}:" not in caplog.text
+    assert "Refused Graph approval request:" not in caplog.text  # a body that is not the stored one
+    assert "Refused Graph call" not in caplog.text
+    # The sweep's own client cannot send an approval request.
+    with pytest.raises(GraphCallRefused):
+        graph.send_approval_request(approval_mail(case_id))
 
 
 @pytest.mark.req("NF-03", "BA-01")

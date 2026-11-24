@@ -44,6 +44,8 @@
     audit_copy_failed: { label: "Audit copy failed", one: "Failed audit copy", many: "Failed audit copies" },
     audit_check_failed: { label: "Audit check failed", one: "Failed audit check", many: "Failed audit checks" },
     no_account_proposal: { label: "No G/L account", one: "No G/L account", many: "No G/L accounts" },
+    approver_absent: { label: "Approver away", one: "Approver away", many: "Approvers away" },
+    approver_address_outside: { label: "Approver address", one: "Outside approver address", many: "Outside approver addresses" },
   };
 
   function reasonInfo(reason, text) {

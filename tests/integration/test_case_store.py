@@ -40,6 +40,7 @@ from argus.cases.store import (
     unit_of_work,
     verify_chain,
 )
+from tests.integration.approval_helpers import prepare_for_approval
 from tests.integration.conftest import head, migrate
 
 S = CaseStatus
@@ -100,6 +101,9 @@ def walk(app: Engine, case_id: int, *statuses: CaseStatus, actor: Actor = INTAKE
     for to in statuses:
         with unit_of_work(app, APPROVER if to is S.APPROVED else actor) as db:
             case = get_case(db, case_id)
+            if to is S.AWAITING_APPROVAL and case.status is S.RECEIVED:
+                # Proposal, duplicate key and approval request first, as the sweep does (#191).
+                prepare_for_approval(db, case_id)
             ref = f"DATEV-TEST-{case_id}" if to is S.BOOKED and not case.datev_booking_ref else None
             assert move_case(db, case_id, expected=case.status, to=to, datev_booking_ref=ref)
 
@@ -280,6 +284,9 @@ def test_every_status_change_is_logged_with_actor_and_statuses(app: Engine) -> N
 
     assert [(e.event_type, e.actor, e.from_status, e.to_status) for e in events] == [
         ("case_created", "system:intake", None, S.RECEIVED),
+        # Since #191 a case goes for approval only with a proposal and an approval request.
+        ("account_proposed", "system:approval-request", None, None),
+        ("approval_requested", "system:approval-request", None, None),
         ("status_changed", "system:approval", S.RECEIVED, S.AWAITING_APPROVAL),
     ]
 
@@ -335,6 +342,7 @@ def test_when_the_audit_write_fails_the_status_change_is_undone(app: Engine) -> 
         pytest.raises(CaseRuleBroken, match="audit write failed"),
         unit_of_work(app, INTAKE) as db,
     ):
+        prepare_for_approval(db, case_id)
         move_case(db, case_id, expected=S.RECEIVED, to=S.AWAITING_APPROVAL)
 
     assert status_of(app, case_id) is S.RECEIVED
@@ -830,6 +838,9 @@ def test_the_trace_shows_the_email_and_every_step(app: Engine) -> None:
         "email_stored",
         "document_stored",
         "case_created",
+        # A case goes for approval with its proposal and approval request (#191).
+        "account_proposed",
+        "approval_requested",
     ] + ["status_changed"] * 5
     assert events[-1].to_status is S.PAID
     assert all(e.actor and e.occurred_at for e in events)

@@ -37,6 +37,7 @@ from argus.intake.duplicates import duplicate_key, flag_if_duplicate
 from argus.intake.invoices import EmailInvoices, FoundInvoice, Source, open_cases
 from argus.reading.fields import Flag, InvoiceReading, ReadField
 from argus.reading.fields import Source as FieldSource
+from tests.integration.approval_helpers import send_for_approval
 
 pytestmark = pytest.mark.req("EX-01", "IN-10", "PR-01")
 
@@ -143,7 +144,7 @@ def cannot_reach_approval(app: Engine, case_id: int) -> None:
 
 def to_approval(app: Engine, case_id: int) -> None:
     with unit_of_work(app, INTAKE) as db:
-        assert move_case(db, case_id, expected=CaseStatus.RECEIVED, to=CaseStatus.AWAITING_APPROVAL)
+        assert send_for_approval(db, case_id)
 
 
 # The case waits in the exception queue instead of unseen

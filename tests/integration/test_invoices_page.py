@@ -27,6 +27,7 @@ from argus.intake.sweep import SWEEP_ACTOR
 from argus.invoices_page.views import MAX_ROWS
 from argus.invoices_page.web import DATA_PATH as SEARCH
 from standins.entra.app import FakeEntra
+from tests.integration.approval_helpers import send_for_approval
 from tests.integration.test_queue_page import received_email
 
 # Exceptions open only once ARGUS runs live (#72), like in the queue page tests.
@@ -196,7 +197,7 @@ def test_every_status_shows_and_an_outgoing_invoice_names_the_customer(
     )
     read_on_body(app, outgoing, issuer_name="Max ASP Test GmbH", recipient_name=CUSTOMER)
     with unit_of_work(app, INTAKE) as db:
-        assert move_case(db, waiting, expected=CaseStatus.RECEIVED, to=CaseStatus.AWAITING_APPROVAL)
+        assert send_for_approval(db, waiting)
         assert move_case(
             db,
             outgoing,
@@ -204,7 +205,7 @@ def test_every_status_shows_and_an_outgoing_invoice_names_the_customer(
             to=CaseStatus.BOOKED,
             datev_booking_ref=f"DATEV-{tag}",
         )
-        assert move_case(db, closed, expected=CaseStatus.RECEIVED, to=CaseStatus.AWAITING_APPROVAL)
+        assert send_for_approval(db, closed)
         assert move_case(
             db,
             closed,
@@ -361,7 +362,7 @@ def test_the_filters_narrow_the_list_and_combine(
         duplicate_key=f"dup-O-{tag}",
     )
     with unit_of_work(app, INTAKE) as db:
-        move_case(db, waiting, expected=CaseStatus.RECEIVED, to=CaseStatus.AWAITING_APPROVAL)
+        assert send_for_approval(db, waiting)
 
     def ids(**query: str) -> set[int]:
         return set(by_id(listed(client, entra, q=tag, **query)))
@@ -386,7 +387,7 @@ def test_the_status_counts_follow_the_other_filters_but_not_the_status(
         app, CaseKind.INCOMING_INVOICE, f"Q-{tag}", 100, duplicate_key=f"dup-Q-{tag}"
     )
     with unit_of_work(app, INTAKE) as db:
-        move_case(db, waiting, expected=CaseStatus.RECEIVED, to=CaseStatus.AWAITING_APPROVAL)
+        assert send_for_approval(db, waiting)
 
     body = listed(client, entra, q=tag, status="awaiting_approval")
     counts = {s["status"]: s["count"] for s in body["statuses"]}

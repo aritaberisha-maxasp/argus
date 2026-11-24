@@ -9,7 +9,9 @@ routes it (step ``routed``): a payment reminder by forwarding it (#27), every ot
 recording its route. After the pass over the Inbox it files every routed email into its ARGUS
 folder (#26, :mod:`argus.intake.filing`). When :class:`Sorting` has DATEV, it then matches each
 new case to its vendor account (#35, :mod:`argus.intake.vendors`) and proposes the G/L account
-and tax key from the vendor's booking history (#37, :mod:`argus.intake.accounts`).
+and tax key from the vendor's booking history (#37, :mod:`argus.intake.accounts`). When
+:class:`Sorting` has approvals, it last sends every fully checked invoice to its approver
+(#191, :mod:`argus.intake.approvals`), with a Graph client of its own.
 
 Shadow mode (#72, :mod:`argus.intake.mode`), the default: the sweep still stores every email
 and sorts it, but records the result only as a proposal (:mod:`argus.intake.shadow`). It does
@@ -58,6 +60,7 @@ from argus.documents.email import StoredEmail, store_email
 from argus.documents.records import record_email_documents
 from argus.documents.store import DocumentStore
 from argus.intake.accounts import Chart, ProposalPass, propose_accounts
+from argus.intake.approvals import ApprovalPass, Approvals, request_approvals
 from argus.intake.filing import Folders, file_routed
 from argus.intake.graph import GraphClient, InboxMessage
 from argus.intake.invoices import (
@@ -150,6 +153,9 @@ class Sorting:
     # The chart of accounts, to tell an invoice posting from a payment when ARGUS proposes the
     # G/L account and tax key from the vendor's booking history (#37).
     chart: Chart = Chart.SKR03
+    # Sends each fully checked invoice to its approver at the end of a live sweep (#191).
+    # Without it, checked cases wait in Received.
+    approvals: Approvals | None = None
 
     def __post_init__(self) -> None:
         # Sorting and reading must skip the same VAT IDs as Max ASP's own. Otherwise sorting
@@ -183,6 +189,8 @@ class SweepResult:
     vendors: VendorPass | None = None
     # Cases that got a G/L account and tax key proposed, and the rest of that pass (#37).
     accounts: ProposalPass | None = None
+    # Cases sent for approval and approval emails sent, and the rest of that pass (#191).
+    approvals: ApprovalPass | None = None
 
 
 @contextmanager
@@ -494,6 +502,9 @@ def sweep(
                 result.failed += result.vendors.failed
                 result.accounts = propose_accounts(engine, sorting.vendors, sorting.chart)
                 result.failed += result.accounts.failed
+            if sorting is not None and sorting.approvals is not None:
+                result.approvals = request_approvals(engine, sorting.approvals)
+                result.failed += result.approvals.failed
         elif sorting is not None:
             seen = observe_person(engine, graph, sorting.person_folders, in_inbox)
             result.sorted_by_person = seen.sorted_by_person + seen.mapped_later
@@ -501,7 +512,8 @@ def sweep(
         log.info(
             "Mailbox sweep: %d in Inbox, %d new, %d stored, %d classified, %d routed, %d filed,"
             " %d proposed, %d sorted by a person, %d statement files, %d matched to a vendor,"
-            " %d with an account proposed, %d failed",
+            " %d with an account proposed, %d sent for approval, %d approval emails sent,"
+            " %d failed",
             result.listed,
             result.new,
             result.stored,
@@ -513,6 +525,8 @@ def sweep(
             result.statement_files,
             result.vendors.matched if result.vendors else 0,
             result.accounts.proposed if result.accounts else 0,
+            result.approvals.requested if result.approvals else 0,
+            result.approvals.sent if result.approvals else 0,
             result.failed,
         )
         return result
