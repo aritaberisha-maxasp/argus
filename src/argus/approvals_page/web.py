@@ -41,6 +41,8 @@ from argus.approvals_page.decide import (
     BadComment,
     Choice,
     NotWaiting,
+    ProposalChanged,
+    VendorChanged,
     change_account,
     decide,
 )
@@ -76,6 +78,13 @@ PAGE_PATHS = frozenset({PAGE_PATH, CASE_PAGE_PATH} | set(_ASSETS))
 DATA_PATH = "/approval-requests"
 CaseId = Annotated[int, Path(ge=1, le=2**63 - 1)]
 NOT_YOURS = "this invoice does not wait for your decision"
+PROPOSAL_CHANGED = (
+    "The G/L account or tax key changed since you opened the invoice. Check it, then decide again."
+)
+VENDOR_CHANGED = (
+    "This invoice now belongs to another vendor, so that vendor's approver has to decide. "
+    "Nothing was saved. Ask Benjamin to send it to the right approver."
+)
 
 
 class DecisionForm(BaseModel):
@@ -84,6 +93,8 @@ class DecisionForm(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     request_id: int = Field(ge=1, le=2**63 - 1)  # the request the page showed
+    # The account proposal the page showed. Required to approve (AP-08).
+    proposal_id: int | None = Field(default=None, ge=1, le=2**63 - 1)
     choice: Choice
     # Longer than the stored limit, so a long comment gets the plain sentence, not a 422 list.
     comment: Annotated[str | None, Field(max_length=COMMENT_MAX * 4)] = None
@@ -213,6 +224,14 @@ def install_approvals_page(
             status.HTTP_409_CONFLICT,
         )
 
+    def changed_now(user: SignedInUser, case_id: int, problem: str) -> Response:
+        """The invoice still waits, but not as the page showed it. The page shows it again."""
+        log.info("user %s: case %s changed since the page showed it", user.object_id, case_id)
+        return _json(
+            {"problem": problem, "approval": view_json(readable(user, case_id), user)},
+            status.HTTP_409_CONFLICT,
+        )
+
     @app.get(DATA_PATH)
     def list_waiting(user: CurrentUser) -> Response:
         """The invoices that wait for a decision: an approver's own, or all of them for finance
@@ -278,11 +297,17 @@ def install_approvals_page(
         only_the_one_asked(user, case_id)
         try:
             with unit_of_work(engine(), user.actor) as db:
-                done = decide(db, case_id, form.request_id, form.choice, form.comment)
+                done = decide(
+                    db, case_id, form.request_id, form.choice, form.comment, form.proposal_id
+                )
         except BadComment as problem:
             return _json({"problem": str(problem)}, status.HTTP_422_UNPROCESSABLE_ENTITY)
         except NotWaiting:
             return stands_now(user, case_id)
+        except ProposalChanged:
+            return changed_now(user, case_id, PROPOSAL_CHANGED)
+        except VendorChanged:
+            return changed_now(user, case_id, VENDOR_CHANGED)
         except CaseRuleBroken as refusal:
             log.warning(
                 "user %s: decision on case %s refused (%s)",
@@ -322,6 +347,8 @@ def install_approvals_page(
                 proposal_id = change_account(db, case_id, form.request_id, entered, by, chart)
         except NotWaiting:
             return stands_now(user, case_id)
+        except VendorChanged:
+            return changed_now(user, case_id, VENDOR_CHANGED)
         except CaseRuleBroken as refusal:
             log.warning(
                 "user %s: account change on case %s refused (%s)",

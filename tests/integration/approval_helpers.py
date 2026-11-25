@@ -99,7 +99,8 @@ def decide(
     """Decide on a case in Awaiting approval as the person its newest request went to, and move
     it to Approved or close it as rejected, the way the approval page does (#38). Since
     migration 0021 only that person can, and only with a decision row in the same transaction.
-    Leaves the actor as it was. Returns False when the case no longer waits, like move_case."""
+    The decision names the case's current account proposal, as the page sends it. Leaves the
+    actor as it was. Returns False when the case no longer waits, like move_case."""
     before = db.execute(
         text(
             "select current_setting('argus.actor', true) as actor,"
@@ -124,8 +125,12 @@ def decide(
         comment = comment or "Not ordered by us"
     db.execute(
         text(
-            "insert into approval_decision (case_id, request_id, decision, comment)"
-            " values (:case_id, :request_id, :decision, :comment)"
+            "insert into approval_decision (case_id, request_id, proposal_id, decision, comment)"
+            " values (:case_id, :request_id,"
+            " (select p.id from account_proposal p join invoice_case c on c.id = p.case_id"
+            "  where p.case_id = :case_id and p.vendor_account = c.partner_account"
+            "  order by p.id desc limit 1),"
+            " :decision, :comment)"
         ),
         {
             "case_id": case_id,

@@ -21,13 +21,22 @@ from sqlalchemy.exc import DBAPIError
 from argus.app import create_app
 from argus.approvers.table import ChangedBy, save_approver, set_absent, set_vendor_approver
 from argus.auth import Role
-from argus.cases.model import Actor, CaseKind, CaseStatus, ClosedReason
+from argus.cases.model import (
+    Actor,
+    CaseKind,
+    CaseStatus,
+    ClosedReason,
+    ExceptionReason,
+    Outcome,
+)
 from argus.cases.store import (
     CaseRuleBroken,
     change_case,
     create_case,
     get_case,
     move_case,
+    open_exception,
+    resolve_exception,
     set_actor,
     unit_of_work,
 )
@@ -172,14 +181,32 @@ def decide(
     comment: str | None = None,
     headers: dict[str, str] | None = None,
     request_id: int | None = None,
+    proposal_id: int | None = None,
 ) -> Any:
+    """Decide as the page does: with the request and the account proposal it shows now, unless
+    the test names others."""
     if request_id is None:
         request_id = request_of(client, entra, case_id)
+    if proposal_id is None:
+        proposal_id = proposal_of(client, entra, case_id, headers)
     return client.post(
         f"/approval-requests/{case_id}/decision",
-        json={"request_id": request_id, "choice": choice, "comment": comment},
+        json={
+            "request_id": request_id,
+            "proposal_id": proposal_id,
+            "choice": choice,
+            "comment": comment,
+        },
         headers=headers or alice(entra),
     )
+
+
+def proposal_of(
+    client: TestClient, entra: FakeEntra, case_id: int, headers: dict[str, str] | None = None
+) -> int | None:
+    shown = client.get(f"/approval-requests/{case_id}", headers=headers or alice(entra)).json()
+    proposal = shown.get("proposal")
+    return int(proposal["proposal_id"]) if proposal else None
 
 
 def request_of(client: TestClient, entra: FakeEntra, case_id: int) -> int:
@@ -401,16 +428,23 @@ def test_the_database_refuses_a_rejection_without_a_real_comment(app: Engine, ve
             insert_decision(db, case_id, "rejected", blank)
 
 
-def insert_decision(db: Connection, case_id: int, decision: str, comment: str | None) -> int:
+def insert_decision(
+    db: Connection, case_id: int, decision: str, comment: str | None, proposal_id: int | None = -1
+) -> int:
+    """Insert a decision on the newest request, naming the case's current proposal unless the
+    test names another one (or None for none)."""
     request_id: int = db.execute(
         text("select max(id) from approval_request where case_id = :id"), {"id": case_id}
     ).scalar_one()
+    if proposal_id == -1:
+        current = current_proposal(db, case_id)
+        proposal_id = current.id if current else None
     decision_id: int = db.execute(
         text(
-            "insert into approval_decision (case_id, request_id, decision, comment)"
-            " values (:c, :r, :d, :m) returning id"
+            "insert into approval_decision (case_id, request_id, proposal_id, decision, comment)"
+            " values (:c, :r, :p, :d, :m) returning id"
         ),
-        {"c": case_id, "r": request_id, "d": decision, "m": comment},
+        {"c": case_id, "r": request_id, "p": proposal_id, "d": decision, "m": comment},
     ).scalar_one()
     return decision_id
 
@@ -518,22 +552,186 @@ def test_a_decision_needs_the_persons_name(app: Engine, vendor: str) -> None:
         insert_decision(db, case_id, "approved", None)
 
 
-@pytest.mark.req("PR-04")
-def test_the_database_refuses_approval_without_a_current_proposal(app: Engine, vendor: str) -> None:
+@pytest.mark.req("PR-04", "AP-08")
+def test_the_database_refuses_approval_without_the_proposal_the_person_saw(
+    app: Engine, vendor: str
+) -> None:
     """Arita on PR 190: a second check at the move to Approved, so no other path can skip it.
-    Here the case got another vendor account while it waited, so it has no current proposal."""
+    Review of PR 205: the decision names the proposal it approves, and it must still be the
+    current one, also when the account changes between the decision and the move."""
     case_id = waiting_case(app, vendor)
+    alice_actor = Actor.user(ALICE, "Alice Approver", ALICE_ADDRESS)
+    with (
+        pytest.raises(CaseRuleBroken, match="needs the G/L account and tax key proposal"),
+        unit_of_work(app, alice_actor) as db,
+    ):
+        insert_decision(db, case_id, "approved", None, proposal_id=None)
+    with unit_of_work(app, INTAKE) as db:
+        shown = current_proposal(db, case_id)
+    assert shown is not None
+    with (
+        pytest.raises(CaseRuleBroken, match="tax key proposal the person saw"),
+        unit_of_work(app, alice_actor) as db,
+    ):
+        insert_decision(db, case_id, "approved", None, proposal_id=shown.id)
+        db.execute(
+            text(
+                "insert into account_proposal (case_id, vendor_account, gl_account, tax_key,"
+                " chart, source, proposed_by_name, reason)"
+                " values (:c, :v, '4980', '', 'SKR03', 'person', 'Alice Approver', 'Tools')"
+            ),
+            {"c": case_id, "v": vendor},
+        )
+        move_case(db, case_id, expected=CaseStatus.AWAITING_APPROVAL, to=CaseStatus.APPROVED)
+    with app.connect() as db:
+        assert get_case(db, case_id).status is CaseStatus.AWAITING_APPROVAL
+
+
+@pytest.mark.req("AP-02", "AP-08")
+def test_a_proposal_changed_since_the_page_showed_it_is_not_approved(
+    app: Engine, client: TestClient, entra: FakeEntra, vendor: str
+) -> None:
+    """Compliance review of PR 205: the page is open, the account changes (a second tab, or a
+    person in the exception queue), and the click on the old page must not approve the new
+    account unseen. The database refuses it too."""
+    case_id = waiting_case(app, vendor)
+    request_id = request_of(client, entra, case_id)
+    shown = proposal_of(client, entra, case_id)
+    assert shown is not None
+    changed = client.post(
+        f"/approval-requests/{case_id}/account",
+        json={
+            "request_id": request_id,
+            "gl_account": "4980",
+            "tax_key": "",
+            "reason": "Changed in a second tab",
+        },
+        headers=alice(entra),
+    )
+    assert changed.status_code == 200, changed.text
+
+    response = decide(client, entra, case_id, "approve", request_id=request_id, proposal_id=shown)
+
+    assert response.status_code == 409
+    assert "changed since you opened the invoice" in response.json()["problem"]
+    now = response.json()["approval"]
+    assert now["waiting"] is True
+    assert now["proposal"]["gl_account"] == "4980"
+    with app.connect() as db:
+        assert get_case(db, case_id).status is CaseStatus.AWAITING_APPROVAL
+    with (
+        pytest.raises(CaseRuleBroken, match="changed since the page showed it"),
+        unit_of_work(app, Actor.user(ALICE, "Alice Approver")) as db,
+    ):
+        insert_decision(db, case_id, "approved", None, proposal_id=shown)
+    # With the page showing the new account, the approval goes through and names it.
+    assert decide(client, entra, case_id, "approve").status_code == 200
+    with app.connect() as db:
+        approved: int = db.execute(
+            text("select proposal_id from approval_decision where case_id = :id"),
+            {"id": case_id},
+        ).scalar_one()
+        current = current_proposal(db, case_id)
+    assert current is not None and approved == current.id != shown
+    assert events(app, case_id, "approval_decided")[0]["proposal_id"] == approved
+
+
+@pytest.mark.req("AP-02", "AP-09")
+def test_an_invoice_that_moved_to_another_vendor_is_not_decided_on_the_old_request(
+    app: Engine, client: TestClient, entra: FakeEntra, vendor: str
+) -> None:
+    """Review of PR 205 (must fix): a job changes the vendor account while the case waits. The
+    approver of the old vendor may neither change the account nor approve, on the page or in
+    the database. Otto, the new vendor's approver, was never asked."""
+    case_id = waiting_case(app, vendor)
+    request_id = request_of(client, entra, case_id)
     other = str(int(vendor) + 1)
+    set_vendor_approver(app, ADMIN, other, OTTO, None, False)
     with unit_of_work(app, INTAKE) as db:
         change_case(db, case_id, partner_account=other)
-        assert current_proposal(db, case_id) is None
 
+    changed = client.post(
+        f"/approval-requests/{case_id}/account",
+        json={
+            "request_id": request_id,
+            "gl_account": "4980",
+            "tax_key": "9",
+            "reason": "Belongs to the new vendor",
+        },
+        headers=alice(entra),
+    )
+    assert changed.status_code == 409
+    assert "another vendor" in changed.json()["problem"]
+    for choice, comment in (("approve", None), ("reject", "Not ours any more")):
+        response = decide(client, entra, case_id, choice, comment, request_id=request_id)
+        assert response.status_code == 409
+        assert "another vendor" in response.json()["problem"]
+
+    alice_actor = Actor.user(ALICE, "Alice Approver", ALICE_ADDRESS)
     with (
-        pytest.raises(CaseRuleBroken, match="without a G/L account and tax key proposal"),
-        unit_of_work(app, Actor.user(ALICE, "Alice")) as db,
+        pytest.raises(CaseRuleBroken, match="moved to another vendor account"),
+        unit_of_work(app, alice_actor) as db,
     ):
-        insert_decision(db, case_id, "approved", None)
-        move_case(db, case_id, expected=CaseStatus.AWAITING_APPROVAL, to=CaseStatus.APPROVED)
+        db.execute(
+            text(
+                "insert into account_proposal (case_id, vendor_account, gl_account, tax_key,"
+                " chart, source, proposed_by_name, reason)"
+                " values (:c, :v, '4980', '9', 'SKR03', 'person', 'Alice Approver', 'New one')"
+            ),
+            {"c": case_id, "v": other},
+        )
+    with (
+        pytest.raises(CaseRuleBroken, match="moved to another vendor account"),
+        unit_of_work(app, alice_actor) as db,
+    ):
+        insert_decision(db, case_id, "approved", None, proposal_id=None)
+    with app.connect() as db:
+        assert get_case(db, case_id).status is CaseStatus.AWAITING_APPROVAL
+        assert (
+            db.execute(
+                text("select count(*) from approval_decision where case_id = :id"),
+                {"id": case_id},
+            ).scalar_one()
+            == 0
+        )
+
+
+@pytest.mark.req("AP-07", "AP-10")
+def test_a_job_cannot_close_a_waiting_invoice_through_the_exception_queue(
+    app: Engine, vendor: str
+) -> None:
+    """Compliance review of PR 205: the detour Awaiting approval, Exception, Closed. A job may
+    stop a waiting invoice, but only a person closes it from there."""
+    case_id = waiting_case(app, vendor)
+    with unit_of_work(app, INTAKE) as db:
+        exception_id = open_exception(
+            db, ExceptionReason.INVOICE_CHECK_FAILED, "Check it.", case_id=case_id
+        )
+    with (
+        pytest.raises(CaseRuleBroken, match="waited for approval and only a person can close"),
+        unit_of_work(app, INTAKE) as db,
+    ):
+        resolve_exception(
+            db,
+            exception_id,
+            Outcome.REJECTED,
+            case_to=CaseStatus.CLOSED,
+            closed_reason=ClosedReason.REJECTED,
+        )
+    with app.connect() as db:
+        assert get_case(db, case_id).status is CaseStatus.EXCEPTION
+    # A person in the exception queue still can, as before (E44, disputes).
+    with unit_of_work(app, Actor.user(BENJAMIN, "Benjamin Test")) as db:
+        resolve_exception(
+            db,
+            exception_id,
+            Outcome.REJECTED,
+            resolution="Disputed with the vendor",
+            case_to=CaseStatus.CLOSED,
+            closed_reason=ClosedReason.REJECTED,
+        )
+    with app.connect() as db:
+        assert get_case(db, case_id).status is CaseStatus.CLOSED
 
 
 @pytest.mark.req("NF-01")

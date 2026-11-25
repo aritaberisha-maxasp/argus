@@ -31,6 +31,16 @@ class BadComment(ValueError):
     """A comment the person can fix, with a sentence that says how."""
 
 
+class ProposalChanged(Exception):
+    """The G/L account or tax key changed since the page showed it (another tab, or a person
+    in the exception queue). The page shows the new one, and the person decides again."""
+
+
+class VendorChanged(Exception):
+    """The case has another vendor account than when the request went out (AP-02). Its
+    approver was never asked, so it needs a new request."""
+
+
 class NotWaiting(Exception):
     """The case no longer waits for this request: someone decided already, or a newer request
     went out. The page shows what stands now."""
@@ -56,16 +66,25 @@ class Decided:
     status: CaseStatus
 
 
-def _still_waits(db: Connection, case_id: int, request_id: int) -> None:
-    """Lock the case and check it still waits for this request, so a second click or tab gets
-    a plain answer instead of a database refusal."""
+def _still_waits(
+    db: Connection, case_id: int, request_id: int, proposal_id: int | None = None
+) -> None:
+    """Lock the case and check it still waits for this request, with the vendor account of the
+    request and, when given, the proposal the page showed. So a second click or tab gets a plain
+    answer instead of a database refusal. The database checks the same again."""
     row = db.execute(
         text(
             """
             select c.status,
                    (select max(id) from approval_request where case_id = c.id) as newest,
                    exists (select 1 from approval_decision where request_id = :request)
-                     as decided
+                     as decided,
+                   c.partner_account is not distinct from
+                     (select vendor_account from approval_request where id = :request)
+                     as same_vendor,
+                   (select p.id from account_proposal p
+                    where p.case_id = c.id and p.vendor_account = c.partner_account
+                    order by p.id desc limit 1) as proposal
             from invoice_case c where c.id = :id for update
             """
         ),
@@ -78,26 +97,39 @@ def _still_waits(db: Connection, case_id: int, request_id: int) -> None:
         or row.decided
     ):
         raise NotWaiting(case_id)
+    if not row.same_vendor:
+        raise VendorChanged(case_id)
+    if proposal_id is not None and row.proposal != proposal_id:
+        raise ProposalChanged(case_id)
 
 
 def decide(
-    db: Connection, case_id: int, request_id: int, choice: Choice, comment: str | None
+    db: Connection,
+    case_id: int,
+    request_id: int,
+    choice: Choice,
+    comment: str | None,
+    proposal_id: int | None,
 ) -> Decided:
     """Record the decision and move the case, in the caller's unit of work (whose actor is the
-    person). Approve moves it to Approved, reject closes it as rejected (AP-07)."""
+    person). Approve moves it to Approved, reject closes it as rejected (AP-07). The decision
+    names the proposal the page showed; an approval needs it, and it must still be current."""
     stored = checked_comment(choice, comment)
-    _still_waits(db, case_id, request_id)
+    _still_waits(db, case_id, request_id, proposal_id)
+    if choice is Choice.APPROVE and proposal_id is None:
+        raise ProposalChanged(case_id)
     decision_id: int = db.execute(
         text(
             """
-            insert into approval_decision (case_id, request_id, decision, comment)
-            values (:case_id, :request_id, :decision, :comment)
+            insert into approval_decision (case_id, request_id, proposal_id, decision, comment)
+            values (:case_id, :request_id, :proposal_id, :decision, :comment)
             returning id
             """
         ),
         {
             "case_id": case_id,
             "request_id": request_id,
+            "proposal_id": proposal_id,
             "decision": "approved" if choice is Choice.APPROVE else "rejected",
             "comment": stored,
         },

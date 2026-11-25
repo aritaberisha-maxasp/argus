@@ -66,6 +66,7 @@ class Decision:
 
 @dataclass(frozen=True)
 class Proposal:
+    proposal_id: int  # sent back with the decision, so only what the page showed is approved
     gl_account: str
     tax_key: str  # blank means no tax key: no input VAT is booked
     chart: str
@@ -225,6 +226,7 @@ def _proposal(connection: Connection, case_id: int, request: Request) -> Proposa
         day = found.from_posting_date.strftime("%d.%m.%Y") if found.from_posting_date else "?"
         origin = f"from the booking of {found.from_document_number} on {day}"
     return Proposal(
+        proposal_id=found.id,
         gl_account=found.gl_account,
         tax_key=found.tax_key,
         chart=found.chart.value,

@@ -424,6 +424,7 @@
       try {
         state.view = await call("/approval-requests/" + v.case_id + "/decision", {
           request_id: v.request.request_id, choice, comment: comment.value || null,
+          proposal_id: v.proposal ? v.proposal.proposal_id : null,
         });
         state.done = choice === "approve" ? "Thank you. The invoice is approved." : "The invoice is rejected and closed.";
         await refreshList();
