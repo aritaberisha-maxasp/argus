@@ -18,8 +18,8 @@ What each step shows:
   details.
 - **Why**: the comment a person gave. The audit log keeps no free text (ADR 0005), so the
   comment of a resolved exception comes from the exception. A correction carries its reason in
-  the audit log itself (migration 0013). An approval comment (AP-08) will show the same way
-  once approvals are built.
+  the audit log itself (migration 0013). An approval comment (AP-08) comes from the decision
+  (``approval_decision``, #38); the audit log holds its hash.
 - **Chain number and hash**: so an auditor can match each step with the nightly copy of the
   audit log (#83). The file also says whether the whole hash chain was intact when it was made,
   and that the comment of a resolved exception and the name are not covered by the hash.
@@ -78,6 +78,7 @@ EVENT_TEXT: dict[str, str] = {
     "bank_import_from_folder": "ARGUS imported a bank statement from the folder",
     "approval_requested": "ARGUS sent the case for approval",
     "approval_request_sent": "ARGUS emailed the approval request",
+    "approval_decided": "A person decided on the invoice",
 }
 
 OUTCOME_TEXT: dict[Outcome, str] = {
@@ -98,9 +99,10 @@ OUTCOME_TEXT: dict[Outcome, str] = {
 # and corrections as they are today; ARGUS does not yet keep the name at the time of the step
 # (#38, #180).
 NOT_HASHED = (
-    "The comment of a resolved exception and the column Name known to ARGUS now are read from"
-    " other ARGUS tables, not from the audit log, so the hash does not cover them. Names are"
-    " as ARGUS knows them today, not as they were at the time of the step."
+    "The comment of a resolved exception or of an approval decision and the column Name known"
+    " to ARGUS now are read from other ARGUS tables, not from the audit log, so the hash does"
+    " not cover them; the audit log holds a hash of each comment. Names are as ARGUS knows them"
+    " today, not as they were at the time of the step, unless the step recorded the name."
 )
 
 # The columns of the exported file, in order.
@@ -181,9 +183,23 @@ def _plain(value: Any) -> str:
 def describe(event_type: str, from_status: Any, to_status: Any, details: dict[str, Any]) -> str:
     """One plain sentence for an event of the trail."""
     if event_type == "account_proposed" and details.get("gl_account"):
-        who = "A person entered" if details.get("source") == "person" else "ARGUS proposed"
         key = f"tax key {details['tax_key']}" if details.get("tax_key") else "no tax key"
+        if details.get("at_approval") and details.get("name"):
+            # The approver changed it on the approval page (#38); the reason is the comment.
+            return (
+                f"Changed by {details['name']} at approval: G/L account "
+                f"{details['gl_account']} with {key}"
+            )
+        who = "A person entered" if details.get("source") == "person" else "ARGUS proposed"
         return f"{who} G/L account {details['gl_account']} with {key}"
+    if event_type == "approval_decided" and details.get("name") and details.get("decision"):
+        verb = "approved" if details["decision"] == "approved" else "rejected"
+        deputy = (
+            f", as deputy of {details['on_behalf_of_name']}"
+            if details.get("on_behalf_of_name")
+            else ""
+        )
+        return f"{details['name']} {verb} the invoice{deputy}"
     if event_type == "approval_requested" and details.get("name"):
         deputy = (
             f", as deputy of {details['on_behalf_of_name']}"
@@ -235,7 +251,10 @@ _STEPS = """
            encode(t.hash, 'hex') as hash_hex,
            case when t.event_type = 'exception_resolved' then x.resolution
                 when t.event_type in ('case_corrected', 'account_proposed')
-                  then t.details ->> 'reason' end as comment
+                  then t.details ->> 'reason'
+                when t.event_type = 'approval_decided'
+                  then (select d.comment from approval_decision d
+                        where d.id = (t.details ->> 'decision_id')::bigint) end as comment
     from audit_event t
     left join exception_item x on x.id = t.exception_id
     where t.id in (
@@ -250,7 +269,7 @@ _STEPS = """
 """
 
 # The names ARGUS knows for the people in the trail: the approver table, and the name a person
-# gave with a correction (the newest one wins).
+# had with a correction or an approval decision (the newest one wins).
 _NAMES = """
     select 1 as rank, object_id as who, name from approver where object_id = any(:ids)
     union all
@@ -259,6 +278,12 @@ _NAMES = """
       from case_correction where corrected_by = any(:users)
       order by corrected_by, id desc
     ) newest
+    union all
+    select * from (
+      select distinct on (decided_by) 3, substr(decided_by, 6), decided_by_name
+      from approval_decision where decided_by = any(:users)
+      order by decided_by, id desc
+    ) decided
     order by rank
 """
 
@@ -271,7 +296,7 @@ def _name_of(
     a step without one falls back to the name ARGUS knows today (code review of PR 181)."""
     if actor_type != "user":
         return None
-    if event_type in ("case_corrected", "account_proposed") and isinstance(
+    if event_type in ("case_corrected", "account_proposed", "approval_decided") and isinstance(
         details.get("name"), str
     ):
         return str(details["name"])

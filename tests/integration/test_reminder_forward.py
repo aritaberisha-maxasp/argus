@@ -47,7 +47,7 @@ from argus.intake.reminders import (
 from argus.intake.sweep import SWEEP_ACTOR, DocumentArchive, see, store
 from argus.sorting import Attachment, Category, EmailToSort, Route, SortingDecision
 from standins.graph.app import MAILBOX, Mailbox, create_app
-from tests.integration.approval_helpers import prepare_for_approval
+from tests.integration.approval_helpers import decide, prepare_for_approval
 from tests.unit.intake.graph_helpers import BASE_URL, TOKEN, StaticTokens, standin_transport
 from tests.unit.sorting_helpers import EMAILS, decision_for, read_fixture_email
 
@@ -58,7 +58,6 @@ pytestmark = pytest.mark.usefixtures("live")
 FORWARD_TO = "benjamin@maxasp.example"
 REMINDERS = ["E25", "E26", "E27", "E28", "E29", "E30", "E31"]
 INTAKE = Actor.system("intake")
-APPROVER = Actor.user("approver-entra-id", "Approver Test")
 DECISION = SortingDecision(
     route=Route.FORWARD_REMINDER,
     category=Category.PAYMENT_REMINDER,
@@ -659,10 +658,13 @@ def test_paid_invoices_and_our_own_invoices_are_not_marked(app: Engine) -> None:
         CaseStatus.IN_PAYMENT_RUN,
         CaseStatus.PAID,
     ):
-        with unit_of_work(app, APPROVER if to is CaseStatus.APPROVED else INTAKE) as db:
+        with unit_of_work(app, INTAKE) as db:
             case = get_case(db, paid)
             if to is CaseStatus.AWAITING_APPROVAL:
                 prepare_for_approval(db, paid)
+            if to is CaseStatus.APPROVED:
+                assert decide(db, paid)
+                continue
             ref = f"DATEV-27-{paid}" if to is CaseStatus.BOOKED else None
             assert move_case(db, paid, expected=case.status, to=to, datev_booking_ref=ref)
     outgoing = new_invoice(app, number, CaseKind.OUTGOING_INVOICE)

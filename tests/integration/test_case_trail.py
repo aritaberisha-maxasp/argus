@@ -33,7 +33,7 @@ from argus.cases.store import (
 from argus.documents.store import MemoryDocumentStore
 from argus.invoices_page.trail import FILE_COLUMNS
 from standins.entra.app import FakeEntra
-from tests.integration.approval_helpers import prepare_for_approval
+from tests.integration.approval_helpers import HELPER_APPROVER, decide, prepare_for_approval
 from tests.integration.test_queue_page import received_email
 
 # Exceptions open only once ARGUS runs live (#72), like in the other page tests.
@@ -95,10 +95,14 @@ def booked_case_from_email(app: Engine, store: MemoryDocumentStore, number: str)
         )
     current = CaseStatus.RECEIVED
     for step in (CaseStatus.AWAITING_APPROVAL, CaseStatus.APPROVED, CaseStatus.BOOKED):
-        actor = Actor.user(ALICE) if step is CaseStatus.APPROVED else INTAKE
-        with unit_of_work(app, actor) as db:
+        with unit_of_work(app, INTAKE) as db:
             if step is CaseStatus.AWAITING_APPROVAL:
                 prepare_for_approval(db, case_id)
+            if step is CaseStatus.APPROVED:
+                # Only the person asked approves, on the approval page (#38).
+                assert decide(db, case_id)
+                current = step
+                continue
             move_case(
                 db,
                 case_id,
@@ -201,17 +205,14 @@ def test_each_step_says_who_did_it(
     store: MemoryDocumentStore,
     tag: str,
 ) -> None:
-    save_approver(
-        app, ChangedBy(Actor.user(ARITA), "Arita Test"), ALICE, "Alice Beispiel", "alice@x.example"
-    )
     case_id = booked_case_from_email(app, store, tag)
     stop_and_resolve(app, client, entra, case_id)
 
     steps = trail(client, entra, case_id)["steps"]
     approved = next(s for s in steps if s["to_status"] == "approved")
-    assert (approved["actor_kind"], approved["actor"]) == ("user", ALICE)
-    # The approver table knows her name.
-    assert approved["actor_name"] == "Alice Beispiel"
+    # The person the approval request went to approved it (#38), with their name then.
+    assert (approved["actor_kind"], approved["actor"]) == ("user", HELPER_APPROVER)
+    assert approved["actor_name"] == "Helper Approver"
     booked = next(s for s in steps if s["to_status"] == "booked")
     assert (booked["actor_kind"], booked["actor"]) == ("system", "intake")
     resolved = next(s for s in steps if s["event_type"] == "exception_resolved")

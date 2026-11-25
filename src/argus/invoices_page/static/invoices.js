@@ -7,6 +7,8 @@
 // button: the person picks how the exception ends, from the endings ARGUS offers for it, and
 // says why in a short comment (EX-01). ARGUS and its database check the choice again.
 //
+// A case the approver decided on says who approved or rejected it and when (#38).
+//
 // Every case has a Trail button (#63, NF-01): it shows each step ARGUS recorded for the case,
 // from its email to its last status, with time and actor, and downloads the same as a file.
 // The trail panel only reads: it has no field and no button that changes anything.
@@ -528,8 +530,16 @@
       status.append(el("span", c.approval_sent_at
         ? "Sent to " + c.approval_to + " for approval, " + berlinTime(new Date(c.approval_sent_at))
         : "Waiting to email " + c.approval_to, "sub"));
+      const page = el("a", "Approval page", "sub");
+      page.href = "/approvals/" + encodeURIComponent(c.case_id);
+      status.append(page);
     } else if (c.status === "closed" && c.closed_reason) {
       status.append(el("span", CLOSED_REASONS[c.closed_reason] || words(c.closed_reason), "sub"));
+    }
+    // The approver's decision (#38): approved or rejected, by whom and when.
+    if (c.decision && c.decided_by_name) {
+      status.append(el("span", (c.decision === "approved" ? "Approved by " : "Rejected by ") +
+        c.decided_by_name + (c.decided_at ? ", " + berlinTime(new Date(c.decided_at)) : ""), "sub"));
     }
 
     const received = el("time", berlinDay(new Date(c.received_at)), "mono");

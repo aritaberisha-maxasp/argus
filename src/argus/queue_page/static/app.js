@@ -196,9 +196,11 @@
     const back = sessionStorage.getItem(RETURN_KEY);
     if (back !== null) {
       sessionStorage.removeItem(RETURN_KEY);
-      // The demo mailbox page (#135) and the invoice status page (#62) sign in through this
-      // page and come back here. Only these fixed addresses, so nothing can send people away.
-      if (back === "/mailbox" || /^\/invoices(\?[A-Za-z0-9_=&%.+-]*)?$/.test(back)) {
+      // The demo mailbox page (#135), the invoice status page (#62) and the approval page
+      // (#38) sign in through this page and come back here. Only these fixed addresses, so
+      // nothing can send people away.
+      if (back === "/mailbox" || /^\/invoices(\?[A-Za-z0-9_=&%.+-]*)?$/.test(back) ||
+          /^\/approvals(\/\d{1,19})?$/.test(back)) {
         window.location.replace(back);
         return null;
       }

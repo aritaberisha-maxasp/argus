@@ -30,7 +30,7 @@ from argus.cases.store import (
     resolve_exception,
     unit_of_work,
 )
-from tests.integration.approval_helpers import prepare_for_approval
+from tests.integration.approval_helpers import decide, prepare_for_approval
 from tests.integration.conftest import migrate
 
 pytestmark = pytest.mark.req("EX-01", "NF-01")
@@ -73,11 +73,15 @@ def new_case(
 
 def walk(app: Engine, case_id: int, *statuses: CaseStatus) -> None:
     for to in statuses:
-        with unit_of_work(app, APPROVER if to is S.APPROVED else INTAKE) as db:
+        with unit_of_work(app, INTAKE) as db:
             case = get_case(db, case_id)
             if to is S.AWAITING_APPROVAL:
                 # Proposal, duplicate key and approval request first, as the sweep does (#191).
                 prepare_for_approval(db, case_id)
+            if to is S.APPROVED:
+                # Only the person asked approves, on the approval page (#38).
+                assert decide(db, case_id)
+                continue
             ref = f"DATEV-ENDINGS-{case_id}" if to is S.BOOKED else None
             move_case(db, case_id, expected=case.status, to=to, datev_booking_ref=ref)
 

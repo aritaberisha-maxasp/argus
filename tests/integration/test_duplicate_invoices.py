@@ -32,7 +32,7 @@ from argus.cases.store import (
 )
 from argus.intake.duplicates import duplicate_key, flag_if_duplicate, resolve_duplicate
 from argus.intake.sweep import DocumentArchive, sweep
-from tests.integration.approval_helpers import send_for_approval
+from tests.integration.approval_helpers import decide, send_for_approval
 from tests.integration.test_invoice_split import model as recorded_model
 from tests.integration.test_invoice_split import record_for, setup
 from tests.integration.test_reminder_forward import (
@@ -518,9 +518,9 @@ def test_an_approved_case_whose_key_is_cleared_cannot_be_approved_again_unchecke
 
     with (
         pytest.raises(CaseRuleBroken, match="no duplicate key"),
-        unit_of_work(app, Actor.user("approver-entra-id")) as db,
+        unit_of_work(app, INTAKE) as db,
     ):
-        move_case(db, case_id, expected=CaseStatus.AWAITING_APPROVAL, to=CaseStatus.APPROVED)
+        decide(db, case_id)
 
 
 @pytest.mark.req("IN-10")

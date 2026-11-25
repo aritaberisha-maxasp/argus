@@ -37,7 +37,7 @@ from argus.intake.duplicates import duplicate_key, flag_if_duplicate
 from argus.intake.invoices import EmailInvoices, FoundInvoice, Source, open_cases
 from argus.reading.fields import Flag, InvoiceReading, ReadField
 from argus.reading.fields import Source as FieldSource
-from tests.integration.approval_helpers import send_for_approval
+from tests.integration.approval_helpers import decide, send_for_approval
 
 pytestmark = pytest.mark.req("EX-01", "IN-10", "PR-01")
 
@@ -48,7 +48,6 @@ BENJAMIN = CorrectedBy(
     "Benjamin Test",
     "benjamin@max-asp-test.example",
 )
-APPROVER = Actor.user("approver-entra-id")
 
 _counter = iter(range(1, 1_000_000))
 
@@ -420,8 +419,8 @@ def test_a_correction_that_changes_nothing_is_refused(app: Engine) -> None:
 def test_the_values_are_frozen_after_approval(app: Engine) -> None:
     case_id = intake(app, f"RC-{next(_counter)}", gross="119.00")
     to_approval(app, case_id)
-    with unit_of_work(app, APPROVER) as db:
-        move_case(db, case_id, expected=CaseStatus.AWAITING_APPROVAL, to=CaseStatus.APPROVED)
+    with unit_of_work(app, INTAKE) as db:
+        assert decide(db, case_id)
 
     with pytest.raises(CaseRuleBroken, match="frozen"), unit_of_work(app, BENJAMIN.actor) as db:
         insert_correction(db, case_id, gross_cents=12000)

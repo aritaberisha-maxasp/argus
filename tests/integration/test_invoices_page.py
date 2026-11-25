@@ -18,7 +18,7 @@ from sqlalchemy import Engine, text
 
 from argus.app import create_app
 from argus.auth import Role
-from argus.cases.model import Actor, CaseKind, CaseStatus, ClosedReason, ExceptionReason
+from argus.cases.model import Actor, CaseKind, CaseStatus, ExceptionReason
 from argus.cases.store import create_case, move_case, open_exception, unit_of_work
 from argus.documents.store import MemoryDocumentStore
 from argus.intake.graph import InboxMessage
@@ -27,7 +27,7 @@ from argus.intake.sweep import SWEEP_ACTOR
 from argus.invoices_page.views import MAX_ROWS
 from argus.invoices_page.web import DATA_PATH as SEARCH
 from standins.entra.app import FakeEntra
-from tests.integration.approval_helpers import send_for_approval
+from tests.integration.approval_helpers import decide, send_for_approval
 from tests.integration.test_queue_page import received_email
 
 # Exceptions open only once ARGUS runs live (#72), like in the queue page tests.
@@ -206,13 +206,7 @@ def test_every_status_shows_and_an_outgoing_invoice_names_the_customer(
             datev_booking_ref=f"DATEV-{tag}",
         )
         assert send_for_approval(db, closed)
-        assert move_case(
-            db,
-            closed,
-            expected=CaseStatus.AWAITING_APPROVAL,
-            to=CaseStatus.CLOSED,
-            closed_reason=ClosedReason.REJECTED,
-        )
+        assert decide(db, closed, approve=False)
 
     rows = by_id(listed(client, entra, q=tag))
 

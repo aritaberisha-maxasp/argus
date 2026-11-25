@@ -93,7 +93,7 @@ def test_every_case_intake_opens_is_traced_from_its_email_to_its_status(
 
 
 @pytest.mark.req("AC-8", "NF-05")
-@pytest.mark.waits_on(35, 36, 38, 39, 41, 42, 46, 47, 48, 50, 52, 57, 58)
+@pytest.mark.waits_on(35, 36, 39, 41, 42, 46, 47, 48, 50, 52, 57, 58)
 def test_every_case_of_ac2_to_ac7_is_traced_from_receipt_to_its_last_status() -> None:
     """Read the trail of every case the other scenarios create (``case_trail``, #63): each
     status from received to its last one (paid, closed or exception), each with time and actor,
