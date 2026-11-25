@@ -15,9 +15,10 @@ from sqlalchemy import Engine
 from argus.app import PUBLIC_PATHS, create_app
 from argus.auth import Role
 from argus.cases.model import CaseKind, CaseStatus, ClosedReason, ExceptionReason, Outcome
+from argus.invoices_page.rate import MonthRate
 from argus.invoices_page.resolve import BadResolution, choices_for, clean_comment
 from argus.invoices_page.views import STATUS_TEXT, _like
-from argus.invoices_page.web import DATA_PATH, PAGE_PATHS, STATIC, CaseQuery
+from argus.invoices_page.web import DATA_PATH, PAGE_PATHS, RATE_PATH, STATIC, CaseQuery
 from standins.entra.app import FakeEntra
 
 pytestmark = pytest.mark.req("NF-05", "NF-03")
@@ -293,3 +294,43 @@ def test_the_resolve_panel_puts_server_text_on_the_page_only_as_text() -> None:
 
     assert "innerHTML" not in part and "insertAdjacentHTML" not in part
     assert "x.detail" in part and "textContent" in page
+
+
+# The straight through rate (#64, NF-07)
+
+
+@pytest.mark.req("NF-07")
+@pytest.mark.parametrize(
+    ("straight", "total", "percent", "below"),
+    [
+        (42, 45, 93, False),  # the example in the story
+        (9, 10, 90, False),  # exactly the target
+        (179, 199, 89, True),  # 89.9 %: rounded down, so it never shows 90 % below the target
+        (0, 1, 0, True),
+        (0, 0, None, False),  # no invoice yet: no share and no warning
+    ],
+)
+def test_the_share_is_rounded_down_and_below_90_is_flagged(
+    straight: int, total: int, percent: int | None, below: bool
+) -> None:
+    found = MonthRate(month="2026-11", label="November 2026", straight=straight, total=total)
+
+    assert (found.percent, found.below_target) == (percent, below)
+
+
+@pytest.mark.req("NF-07")
+def test_the_rate_needs_finance_or_admin(entra: FakeEntra, client: TestClient) -> None:
+    assert client.get(RATE_PATH).status_code == 401
+    approver = bearer(entra.token(ALICE, roles=[Role.APPROVER]))
+    assert client.get(RATE_PATH, headers=approver).status_code == 403
+
+
+@pytest.mark.req("NF-07")
+def test_the_page_shows_the_rate_as_text_with_the_warning_color_below_the_target() -> None:
+    page = script()
+    style = (STATIC / "invoices.css").read_text(encoding="utf-8")
+
+    assert f'"{RATE_PATH}"' in page
+    assert "m.below_target" in page
+    assert ".rate-month.below .rate-value" in style
+    assert "var(--flag)" in style.split("/* --- invoices without manual work", 1)[1]

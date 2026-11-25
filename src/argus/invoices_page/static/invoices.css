@@ -3,6 +3,35 @@
 
 .cases { overflow: hidden; }
 
+/* --- invoices without manual work (#64) ---------------------------------------------------- */
+
+.rate {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 18px 20px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+}
+.rate:empty { display: none; }
+.rate-title { margin: 0; font-size: 15px; font-weight: 600; color: var(--text); }
+.rate-note { margin: 0; font-size: 13px; color: var(--muted); }
+.rate-months { display: flex; flex-wrap: wrap; gap: 12px 28px; margin: 8px 0 0; }
+.rate-month { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.rate-month + .rate-month { border-left: 1px solid var(--line); padding-left: 28px; }
+.rate-label { font-size: 13px; color: var(--muted); }
+.rate-value { margin: 0; font-family: var(--mono); font-size: 18px; font-weight: 500; color: var(--text); }
+.rate-value.muted { font-family: var(--sans); font-size: 14px; color: var(--muted); }
+.rate-month.below .rate-value,
+.rate-flag { color: var(--flag); }
+.rate-flag { margin: 0; font-size: 12px; }
+
+@media (max-width: 760px) {
+  .rate-months { flex-direction: column; }
+  .rate-month + .rate-month { border-left: 0; padding-left: 0; }
+}
+
 /* --- filters ------------------------------------------------------------------------------ */
 
 .filters {
