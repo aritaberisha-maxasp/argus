@@ -163,7 +163,7 @@ The ten reasons from EX-02, plus four that other requirements need:
 | Unknown customer | AR-03 | Case | **By itself** once the Debitor exists in DATEV |
 | Vendor without approver | VM-02 | Case | **By itself** once Arita adds the approver to the approver table |
 | Duplicate | IN-10 | Case | A person confirms (case closed as duplicate) or says it is not one (section 5) |
-| IBAN mismatch | PR-05 | Case | **Only** by changing the IBAN in DATEV (VM-04), after which ARGUS checks again, or by rejecting the invoice. Nobody can accept the IBAN from the invoice |
+| IBAN mismatch | PR-05 | Case | **Only** by changing the IBAN in DATEV (VM-04), after which ARGUS checks again, or by rejecting the invoice. Nobody can accept the IBAN from the invoice. Only the vendor match pass may end it as `fixed_in_datev`; a person can only reject (#186, migration 0018) |
 | Invoice check failed (§14 UStG) | PR-03 | Case | A person asks the vendor for a corrected invoice, or accepts it with a comment |
 | Booking error | BK-06 | Case | ARGUS retries a few times by itself, then a person fixes the cause in DATEV and retries |
 | Unmatched bank transaction | BA-06 | Case | Benjamin's reply names the account. ARGUS books it and may save a rule |

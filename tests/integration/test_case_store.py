@@ -48,6 +48,7 @@ S = CaseStatus
 INTAKE = Actor.system("intake")
 APPROVER = Actor.user("approver-entra-id", "Approver Test")
 BENJAMIN = Actor.user("benjamin-entra-id", "Benjamin Test", "benjamin@max-asp-test.example")
+VENDOR_MATCH = Actor.system("vendor-match")
 
 # The vendor accounts, numbers and amounts below are made up (CLAUDE.md: synthetic data only).
 _counter = iter(range(1, 1_000_000))
@@ -642,7 +643,14 @@ def test_an_iban_mismatch_ends_only_fixed_in_datev_or_rejected(app: Engine) -> N
     ):
         resolve_exception(db, exception_id, Outcome.ACCEPTED_WITH_COMMENT)
 
-    with unit_of_work(app, BENJAMIN) as db:
+    # Only ARGUS's own DATEV check picks "fixed in DATEV", never a person (#186, migration 0018).
+    with (
+        pytest.raises(CaseRuleBroken, match="only ARGUS's own DATEV check"),
+        unit_of_work(app, BENJAMIN) as db,
+    ):
+        resolve_exception(db, exception_id, Outcome.FIXED_IN_DATEV, resolution="changed it")
+
+    with unit_of_work(app, VENDOR_MATCH) as db:
         resolve_exception(db, exception_id, Outcome.FIXED_IN_DATEV)
     assert status_of(app, case_id) is S.BOOKED
 
@@ -1223,7 +1231,7 @@ def test_a_case_with_a_second_open_exception_stays_in_exception(app: Engine) -> 
             )
     assert status_of(app, case_id) is S.EXCEPTION
 
-    with unit_of_work(app, BENJAMIN) as db:
+    with unit_of_work(app, VENDOR_MATCH) as db:  # only the recheck ends an IBAN hold (#186)
         resolve_exception(db, second, Outcome.FIXED_IN_DATEV)
     assert status_of(app, case_id) is S.BOOKED
 

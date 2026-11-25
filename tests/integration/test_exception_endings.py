@@ -258,8 +258,9 @@ def test_only_the_listed_job_reason_and_outcome_go_together(
 
 @pytest.mark.req("PR-05", "VM-04")
 def test_the_iban_recheck_still_ends_a_hold_by_itself(app: Engine, owner: Engine) -> None:
-    """Until #186, an IBAN mismatch stays out of the person only rule: PR 185's recheck ends it
-    as fixed in DATEV once DATEV holds every IBAN of the invoice."""
+    """An IBAN mismatch stays out of the person only rule: PR 185's recheck ends it as fixed in
+    DATEV once DATEV holds every IBAN of the invoice. #186 (migration 0018) lets only that job
+    do it, see test_iban_hold_ending.py."""
     case_id, exception_id = stopped(app, ExceptionReason.IBAN_MISMATCH)
 
     with unit_of_work(app, VENDOR_MATCH) as db:
