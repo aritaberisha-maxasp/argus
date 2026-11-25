@@ -262,6 +262,7 @@ def install_invoices_page(app: FastAPI, engine: Callable[[], Engine]) -> None:
         """The share of invoices from known vendors with no manual step, for the current and
         the last Berlin month (NF-07). Not narrowed by the list's filters."""
         with engine().connect() as connection:
+            _read_only(connection)
             months = straight_through(connection)
         log.info("user %s read the straight through rate", user.object_id)
         return _json({"months": [rate_json(m) for m in months], "target": TARGET_PERCENT})

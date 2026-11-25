@@ -36,10 +36,19 @@ INTAKE = Actor.system("intake")
 BENJAMIN = "33333333-3333-4333-8333-333333333333"  # finance, made up
 
 
+_USED_YEARS: set[int] = set()
+
+
 @pytest.fixture
 def year() -> int:
-    """A year no other test or run uses, so the counts are this test's alone."""
-    return 2200 + secrets.randbelow(6800)
+    """A year no other test or run uses, so the counts are this test's alone. Each year is
+    handed out once per run (the previous year too, since one test also uses it), and the
+    random start keeps runs on the same database apart."""
+    while True:
+        picked = 2200 + secrets.randbelow(6800)
+        if not {picked - 1, picked, picked + 1} & _USED_YEARS:
+            _USED_YEARS.add(picked)
+            return picked
 
 
 def email_at(app: Engine, received_at: datetime) -> int:

@@ -398,6 +398,12 @@
         headers: { Authorization: "Bearer " + (await state.token()) },
         cache: "no-store",
       });
+      // Only finance and admin may see the figure. Anyone else sees no box at all, so a missing
+      // role does not read like a fault (QA on PR 202).
+      if (response.status === 401 || response.status === 403) {
+        view.rate.remove();
+        return;
+      }
       if (!response.ok) throw new Error(String(response.status));
       renderRate(await response.json());
     } catch (e) {
