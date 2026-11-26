@@ -21,6 +21,7 @@ from typing import Any
 
 from sqlalchemy import Connection, text
 
+from argus.approvals_page.query import query_of_exception
 from argus.cases.model import CaseKind, CaseStatus, ExceptionReason
 from argus.cases.store import list_open_exceptions
 from argus.intake.corrections import FIELDS
@@ -51,6 +52,7 @@ REASON_TEXT: dict[ExceptionReason, str] = {
     ExceptionReason.NO_ACCOUNT_PROPOSAL: "ARGUS cannot propose a G/L account and tax key",
     ExceptionReason.APPROVER_ABSENT: "The approver is away and the vendor has no deputy",
     ExceptionReason.APPROVER_ADDRESS_OUTSIDE: "The approver has an email address outside Max ASP",
+    ExceptionReason.APPROVER_QUERY: "The approver sent the invoice back with a question",
 }
 
 
@@ -113,6 +115,9 @@ class ExceptionDetail:
     account_enterable: bool = False
     # The facts in plain words, label and value, for the box "Why ARGUS stopped" (#188).
     fact_lines: list[tuple[str, str]] = field(default_factory=list)
+    # The approver's question, who asked and when, for an approver question (#192). The person
+    # answers it here, or rejects the invoice.
+    approver_query: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -228,6 +233,25 @@ def open_exception_detail(connection: Connection, exception_id: int) -> Exceptio
         if found is not None:
             received_at, sender = found["received_at"], found["sender"]
     reason = ExceptionReason(row["reason"])
+    asked = None
+    if reason is ExceptionReason.APPROVER_QUERY:
+        found_query = query_of_exception(connection, row["id"])
+        if found_query is not None:
+            others: int = connection.execute(
+                text(
+                    "select count(*) from exception_item"
+                    " where case_id = :case and resolved_at is null and id <> :id"
+                ),
+                {"case": row["case_id"], "id": row["id"]},
+            ).scalar_one()
+            asked = {
+                "question": found_query.question,
+                "asked_by_name": found_query.asked_by_name,
+                "asked_as": found_query.asked_as,
+                "on_behalf_of_name": found_query.on_behalf_of_name,
+                "asked_at": found_query.asked_at.isoformat(),
+                "others_open": others,
+            }
     return ExceptionDetail(
         exception_id=row["id"],
         reason=reason,
@@ -246,6 +270,7 @@ def open_exception_detail(connection: Connection, exception_id: int) -> Exceptio
         read_values=read_values(connection, case.id) if case is not None else {},
         account_enterable=reason is ExceptionReason.NO_ACCOUNT_PROPOSAL and case is not None,
         fact_lines=fact_lines(row["facts"]),
+        approver_query=asked,
     )
 
 

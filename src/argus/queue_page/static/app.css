@@ -460,3 +460,20 @@ textarea {
 .correction .button { align-self: flex-start; }
 .correction [role="status"] { margin: 0; font-size: 14px; }
 .correction [role="status"]:empty { display: none; }
+
+/* --- the approver's question (#192) ---------------------------------------------------------- */
+
+.block blockquote.comment {
+  margin: 0;
+  padding: 12px 16px;
+  border-left: 3px solid var(--flag);
+  background: var(--page);
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.correction .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.correction .actions .button { align-self: auto; }
+@media (max-width: 640px) {
+  .correction .actions .button { flex: 1 1 auto; }
+}

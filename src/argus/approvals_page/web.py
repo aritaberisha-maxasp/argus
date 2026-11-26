@@ -12,8 +12,9 @@ are two kinds of routes:
     or deputy. Another approver's invoice answers 403, and so does one that does not exist, so
     an approver cannot probe for case numbers.
   - Finance and admin see every waiting invoice, read only.
-  - Only the person the newest request went to decides or changes the account. Anyone else,
-    finance and admin too, gets 403 (ADR 0010). The database checks it again (migration 0021).
+  - Only the person the newest request went to decides, changes the account or sends the
+    invoice back with a question (#192). Anyone else, finance and admin too, gets 403
+    (ADR 0010). The database checks it again (migrations 0021 and 0022).
   - The invoice file is served only for a case the person may see, and only the case's own
     invoice file. A PDF or image is shown on the page in a sandbox; anything else downloads.
 
@@ -46,6 +47,8 @@ from argus.approvals_page.decide import (
     change_account,
     decide,
 )
+from argus.approvals_page.query import TEXT_MAX as QUESTION_MAX
+from argus.approvals_page.query import BadText, ask
 from argus.approvals_page.views import (
     ApprovalView,
     approval_view,
@@ -98,6 +101,16 @@ class DecisionForm(BaseModel):
     choice: Choice
     # Longer than the stored limit, so a long comment gets the plain sentence, not a 422 list.
     comment: Annotated[str | None, Field(max_length=COMMENT_MAX * 4)] = None
+
+
+class QuestionForm(BaseModel):
+    """The question the approver sends back (#192). Checked again by the database."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    request_id: int = Field(ge=1, le=2**63 - 1)  # the request the page showed
+    # Longer than the stored limit, so a long question gets the plain sentence, not a 422 list.
+    question: Annotated[str, Field(max_length=QUESTION_MAX * 4)]
 
 
 class AccountForm(BaseModel):
@@ -154,10 +167,13 @@ def view_json(view: ApprovalView, user: SignedInUser) -> dict[str, Any]:
     out = asdict(view)
     asked = is_asked(view.request, user.object_id)
     out["waiting"] = view.waiting
+    out["waiting_for_answer"] = view.waiting_for_answer
     out["may_decide"] = asked and view.waiting
     out["you_were_asked"] = asked
     # Object IDs are not for the page; the name says who.
     out["request"].pop("recipient_id")
+    for query in out["queries"]:
+        query.pop("asked_by")
     if out["decision"] is not None:
         out["decision"].pop("decided_by")
     return out
@@ -329,6 +345,43 @@ def install_approvals_page(
             case_id,
             form.choice.value,
             done.decision_id,
+        )
+        return _json(view_json(readable(user, case_id), user))
+
+    @app.post(DATA_PATH + "/{case_id}/question")
+    def send_back(case_id: CaseId, form: QuestionForm, user: CurrentUser) -> Response:
+        """Send the invoice back with a question instead of deciding (#192, AP-03). Only the
+        person asked. The case goes to the exception queue, where Benjamin answers it."""
+        only_the_one_asked(user, case_id)
+        try:
+            with unit_of_work(engine(), user.actor) as db:
+                done = ask(db, case_id, form.request_id, form.question)
+        except BadText as problem:
+            return _json({"problem": str(problem)}, status.HTTP_422_UNPROCESSABLE_ENTITY)
+        except NotWaiting:
+            return stands_now(user, case_id)
+        except VendorChanged:
+            return changed_now(user, case_id, VENDOR_CHANGED)
+        except CaseRuleBroken as refusal:
+            log.warning(
+                "user %s: question on case %s refused (%s)",
+                user.object_id,
+                case_id,
+                type(refusal).__name__,
+            )
+            with engine().connect() as connection:
+                found = approval_view(connection, case_id)
+            if found is not None and not found.waiting:
+                return stands_now(user, case_id)
+            return _json(
+                {"problem": f"ARGUS refused the question: {refusal}."}, status.HTTP_409_CONFLICT
+            )
+        log.info(
+            "user %s sent case %s back with a question (query %s, exception %s)",
+            user.object_id,
+            case_id,
+            done.query_id,
+            done.exception_id,
         )
         return _json(view_json(readable(user, case_id), user))
 

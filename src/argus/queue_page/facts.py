@@ -22,6 +22,7 @@ HIDDEN: frozenset[str] = frozenset(
         "draft_message_id",  # the Microsoft ID of a saved forward
         "sha256",  # the hash of a refused statement file
         "bank_statement",  # a marker that the exception is about a statement; the text says so
+        "request_id",  # the approval request an approver question was asked on (#192)
     }
 )
 

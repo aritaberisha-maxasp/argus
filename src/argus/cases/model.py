@@ -66,6 +66,9 @@ class ExceptionReason(StrEnum):
     # The person ARGUS would ask has an email address outside Max ASP's own domain, so no
     # approval request goes out. ARGUS carries on once the approver table is fixed (#191).
     APPROVER_ADDRESS_OUTSIDE = "approver_address_outside"
+    # The approver sent the invoice back with a question instead of deciding. Benjamin answers
+    # it on the queue page, and the invoice goes back to the same approver (#192).
+    APPROVER_QUERY = "approver_query"
 
 
 class Outcome(StrEnum):

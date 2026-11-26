@@ -4,8 +4,10 @@
 // The approval request email links to /approvals/<case ID>. After Microsoft sign in the
 // approver sees the invoices that wait for them on the left and the chosen one on the right:
 // the invoice image, the key data and the G/L account and tax key ARGUS proposes, with where
-// that came from. They approve, or reject with a comment. Before that they may change the
-// account or tax key, with a reason. Finance and admin see every waiting invoice, read only.
+// that came from. They approve, or reject with a comment, or send the invoice back with a
+// question (#192). Benjamin answers it in the exception queue and the invoice comes back with
+// the answer shown above it. Before deciding they may change the account or tax key, with a
+// reason. Finance and admin see every waiting invoice, read only.
 //
 // ARGUS and its database check every step again: only the person asked may decide, once.
 // A second click, a second tab or an old link shows what was decided, by whom and when.
@@ -383,6 +385,32 @@
     return block;
   }
 
+  // Spaces of any kind, tabs and line breaks at either end do not count, as on the server.
+  function trimmed(text) {
+    return String(text || "").replace(/^[\s\u180e\u200b\ufeff]+|[\s\u180e\u200b\ufeff]+$/g, "");
+  }
+
+  // Questions the approver sent back and the answers from the exception queue (#192).
+  function queriesBlock(v) {
+    const block = el("section", null, "block queries");
+    block.append(el("h3", v.queries.length === 1 ? "Question and answer" : "Questions and answers"));
+    for (const q of v.queries) {
+      const who = q.asked_by_name + (q.asked_as === "deputy" ? ", as deputy of " + q.on_behalf_of_name : "");
+      block.append(el("p", "Question from " + who + " on " + berlinTime(q.asked_at) + ":", "sub"));
+      block.append(el("blockquote", q.question, "comment"));
+      if (q.outcome === "answered") {
+        block.append(el("p", "Answer from " + q.answered_by_name + " on " + berlinTime(q.answered_at) + ":", "sub"));
+        block.append(el("blockquote", q.answer, "comment answer"));
+      } else if (q.outcome === "rejected") {
+        block.append(el("p", "Rejected by " + q.answered_by_name + " on " + berlinTime(q.answered_at) + " instead of answering:", "sub"));
+        block.append(el("blockquote", q.answer, "comment"));
+      } else {
+        block.append(el("p", "Waiting for an answer from Benjamin.", "note"));
+      }
+    }
+    return block;
+  }
+
   function decidedBlock(v) {
     const d = v.decision;
     const block = el("section", null, "block decided " + d.decision);
@@ -402,31 +430,44 @@
     block.append(el("h3", "Your decision"));
     const comment = el("textarea", null, "reason");
     comment.maxLength = 500;
-    comment.placeholder = "Comment (required to reject, optional to approve)";
+    comment.placeholder = "Comment (required to reject or to ask a question, optional to approve)";
     const result = el("p", "", "problem");
     result.setAttribute("role", "status");
     const approve = el("button", "Approve", "button primary");
     approve.type = "button";
     const reject = el("button", "Reject", "button");
     reject.type = "button";
+    const ask = el("button", "Send back with a question", "button");
+    ask.type = "button";
     if (!v.proposal) approve.disabled = true;
     const actions = el("div", null, "actions");
-    actions.append(approve, reject);
+    actions.append(approve, reject, ask);
     async function send(choice) {
-      if (choice === "reject" && comment.value.trim().length < 3) {
-        result.textContent = "Say briefly why you reject the invoice (at least 3 characters).";
+      if (choice !== "approve" && trimmed(comment.value).length < 3) {
+        result.textContent = choice === "reject"
+          ? "Say briefly why you reject the invoice (at least 3 characters)."
+          : "Write your question in the comment box (at least 3 characters).";
         comment.focus();
         return;
       }
       approve.disabled = true;
       reject.disabled = true;
+      ask.disabled = true;
       result.textContent = "";
       try {
-        state.view = await call("/approval-requests/" + v.case_id + "/decision", {
-          request_id: v.request.request_id, choice, comment: comment.value || null,
-          proposal_id: v.proposal ? v.proposal.proposal_id : null,
-        });
-        state.done = choice === "approve" ? "Thank you. The invoice is approved." : "The invoice is rejected and closed.";
+        if (choice === "question") {
+          state.view = await call("/approval-requests/" + v.case_id + "/question", {
+            request_id: v.request.request_id, question: comment.value,
+          });
+        } else {
+          state.view = await call("/approval-requests/" + v.case_id + "/decision", {
+            request_id: v.request.request_id, choice, comment: comment.value || null,
+            proposal_id: v.proposal ? v.proposal.proposal_id : null,
+          });
+        }
+        state.done = choice === "approve" ? "Thank you. The invoice is approved."
+          : choice === "reject" ? "The invoice is rejected and closed."
+            : "Your question is sent to Benjamin. You get a new approval email once he has answered it.";
         await refreshList();
         drawDetail();
       } catch (e) {
@@ -434,10 +475,12 @@
         result.textContent = e.message;
         approve.disabled = !v.proposal;
         reject.disabled = false;
+        ask.disabled = false;
       }
     }
     approve.addEventListener("click", () => send("approve"));
     reject.addEventListener("click", () => send("reject"));
+    ask.addEventListener("click", () => send("question"));
     block.append(field("Comment", comment), result, actions);
     return block;
   }
@@ -466,9 +509,11 @@
     if (!v.may_decide && !v.decision && v.waiting) {
       panel.append(el("p", "You can look at this invoice, but only " + v.request.recipient_name + " can decide on it.", "note"));
     }
+    if (v.queries && v.queries.length) panel.append(queriesBlock(v));
     panel.append(keyData(v), proposalBlock(v));
     if (v.decision) panel.append(decidedBlock(v));
     else if (v.may_decide) panel.append(decisionBlock(v));
+    else if (v.waiting_for_answer) panel.append(el("p", "This invoice was sent back with a question. It comes back here once Benjamin has answered it.", "note"));
     else if (!v.waiting) panel.append(el("p", "This invoice is " + v.status_text.toLowerCase() + ".", "note"));
     panel.append(fileBlock(v));
     return panel;

@@ -14,6 +14,10 @@ Two kinds of routes:
 - **The account** (``POST /exceptions/{id}/account``, #37). The same two roles enter the G/L
   account and tax key of a case for which ARGUS had no booking history to propose from. The
   database keeps who, when and why and refuses a job or a blank reason (migration 0019).
+- **The answer** (``POST /exceptions/{id}/answer``, #192). The same two roles answer the
+  question an approver sent back, and the invoice goes back to that approver with a new
+  approval request, or they reject the invoice. The database keeps who, when and the text,
+  and refuses a job or a text shorter than three characters (migration 0022).
 
 Logs name only IDs, never a sender, subject or file name (NF-03).
 """
@@ -27,14 +31,22 @@ from dataclasses import asdict
 from datetime import datetime
 from decimal import Decimal
 from importlib.resources import files
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from urllib.parse import quote
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import Engine
 
+from argus.approvals_page.query import TEXT_MAX as ANSWER_MAX
+from argus.approvals_page.query import (
+    BadText,
+    NotAnswerable,
+    OtherExceptionOpen,
+)
+from argus.approvals_page.query import answer as answer_query
+from argus.approvals_page.query import reject as reject_query
 from argus.auth import Role, SignedInUser, require_role
 from argus.auth.tokens import LOCAL_HOSTS, TokenVerifier
 from argus.cases.money import to_cents
@@ -112,6 +124,19 @@ class AccountForm(BaseModel):
     gl_account: str
     tax_key: str
     reason: str
+
+
+class AnswerForm(BaseModel):
+    """The answer to an approver's question, or the reason to reject the invoice (#192)."""
+
+    choice: Literal["answer", "reject"]
+    # Longer than the stored limit, so a long text gets the plain sentence, not a 422 list.
+    text: Annotated[str, Field(max_length=ANSWER_MAX * 4)]
+
+
+OTHER_OPEN = (
+    "This case has another open exception. Resolve that one first, then answer the question."
+)
 
 
 def parse_correction(form: CorrectionForm) -> Correction:
@@ -344,6 +369,53 @@ def install_queue_page(
             done.proposal_id,
         )
         return _json({"case_id": done.case_id, "proposal_id": done.proposal_id})
+
+    @app.post("/exceptions/{exception_id}/answer")
+    def answer_approver(exception_id: int, form: AnswerForm, user: QueueReader) -> Response:
+        """Answer the question an approver sent back, so the invoice goes back to them with a
+        new approval request, or reject the invoice (#192, AP-03, AP-05, EX-01)."""
+        try:
+            with unit_of_work(engine(), user.actor) as db:
+                if form.choice == "answer":
+                    done = answer_query(db, exception_id, form.text)
+                else:
+                    done = reject_query(db, exception_id, form.text)
+        except BadText as problem:
+            return _json({"problem": str(problem)}, status.HTTP_422_UNPROCESSABLE_ENTITY)
+        except NotAnswerable:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND, "no open question from an approver"
+            ) from None
+        except OtherExceptionOpen:
+            return _json({"problem": OTHER_OPEN}, status.HTTP_409_CONFLICT)
+        except CaseRuleBroken as refusal:
+            # The database's sentence names IDs only, never the question or the answer.
+            log.warning(
+                "user %s: answer to exception %s refused (%s)",
+                user.object_id,
+                exception_id,
+                type(refusal).__name__,
+            )
+            return _json(
+                {"problem": f"ARGUS refused the answer: {refusal}."},
+                status.HTTP_409_CONFLICT,
+            )
+        log.info(
+            "user %s ended approver question %s of case %s as %s (new request %s)",
+            user.object_id,
+            exception_id,
+            done.case_id,
+            done.outcome.value,
+            done.request_id,
+        )
+        return _json(
+            {
+                "case_id": done.case_id,
+                "outcome": done.outcome.value,
+                "request_id": done.request_id,
+                "sent_to": done.recipient_name,
+            }
+        )
 
     @app.get("/exceptions/{exception_id}/files/{document_id}")
     def download_file(exception_id: int, document_id: int, user: QueueReader) -> Response:
