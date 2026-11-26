@@ -197,8 +197,9 @@ def open_exception_detail(connection: Connection, exception_id: int) -> Exceptio
                        (select n.sent_at from approval_nudge n
                         where n.case_id = c.id and n.kind = 'escalation'
                           and n.sent_at is not null
-                          and n.request_id = (select max(q.id) from approval_request q
-                                              where q.case_id = c.id)) as escalated_at
+                          and n.clock_from = (select coalesce(q.clock_from, q.sent_at)
+                                              from approval_request q where q.case_id = c.id
+                                              order by q.id desc limit 1)) as escalated_at
                 from exception_item e left join invoice_case c on c.id = e.case_id
                 where e.id = :id and e.resolved_at is null
                 """

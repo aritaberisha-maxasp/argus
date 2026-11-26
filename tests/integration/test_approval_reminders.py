@@ -23,6 +23,7 @@ import pytest
 from fastapi import FastAPI
 from sqlalchemy import Engine, text
 
+from argus.approvals_page.query import answer, ask
 from argus.approvers.table import ChangedBy, save_approver, set_absent, set_vendor_approver
 from argus.cases.model import Actor, CaseKind, CaseStatus
 from argus.cases.store import CaseRuleBroken, change_case, create_case, get_case, unit_of_work
@@ -613,6 +614,7 @@ def test_an_approver_away_without_a_deputy_sends_the_waiting_invoice_to_the_queu
     assert status_of(app, case_id) is CaseStatus.AWAITING_APPROVAL
     first, again = requests_of(app, case_id)
     assert again["renews_id"] == first["id"] and again["recipient_id"] == approver
+    assert again["renew_reason"] == "back_from_exception"
     assert [to(m) for m in mails(fake)] == [again["recipient_address"]]
 
 
@@ -632,6 +634,7 @@ def test_a_new_approver_in_the_approver_table_gets_the_waiting_invoice(
 
     assert (result.renewed, result.sent, again.renewed) == (1, 1, 0)
     assert requests_of(app, case_id)[-1]["recipient_id"] == newcomer
+    assert requests_of(app, case_id)[-1]["renew_reason"] == "person_replaced"
     assert [to(m) for m in mails(fake)] == [address]
 
 
@@ -652,6 +655,7 @@ def test_a_vendor_change_sends_the_waiting_invoice_to_the_new_vendors_approver(
     assert (result.renewed, result.sent) == (1, 1)
     old, new = requests_of(app, case_id)
     assert (new["vendor_account"], new["recipient_id"]) == (other, new_approver)
+    assert new["renew_reason"] == "vendor_changed"
     assert old["recipient_id"] == old_approver
     # The new approver enters the account for the new vendor on the approval page, then decides.
     approver = Actor.user(new_approver, "Alice Approver", new["recipient_address"])
@@ -722,3 +726,114 @@ def test_the_queue_shows_an_escalated_case_that_went_to_the_queue(
         detail = open_exception_detail(db, exception_id)
     assert detail is not None and detail.case is not None
     assert detail.case.escalated_at is not None
+
+
+# One reminder and one escalation per wait (code review of PR 212)
+
+
+def _ask_and_answer(app: Engine, case_id: int, answered_by: Actor) -> None:
+    """The approver sends the invoice back with a question, and ``answered_by`` answers it,
+    the way the approval page and the queue page do (#192)."""
+    request = requests_of(app, case_id)[-1]
+    asker = Actor.user(
+        request["recipient_id"], request["recipient_name"], request["recipient_address"]
+    )
+    with unit_of_work(app, asker) as db:
+        asked = ask(db, case_id, request["id"], "Which project is this for?")
+    with unit_of_work(app, answered_by) as db:
+        answer(db, asked.exception_id, "Project Nord, please approve.")
+
+
+@pytest.mark.req("NF-01")
+@pytest.mark.usefixtures("live")
+def test_a_kept_clock_gets_no_second_reminder_or_escalation(
+    app: Engine, owner: Engine, approvals: Approvals, fake: FastAPI
+) -> None:
+    account, approver, _ = vendor(app)
+    case_id = waiting_case(app, approvals, account)
+    first = requests_of(app, case_id)[0]
+    move_clock(owner, first["id"], MONDAY)
+    sent = run(app, approvals, case_id, date(2026, 11, 24))
+    assert (sent.reminded, sent.escalated) == (1, 1)
+    # Alice also has the finance role and answers her own question: 0022 keeps the old clock.
+    _ask_and_answer(
+        app, case_id, Actor.user(approver, "Alice Approver", first["recipient_address"])
+    )
+    mails(fake).clear()
+
+    after = run(app, approvals, case_id, date(2026, 11, 25))
+
+    new = requests_of(app, case_id)[-1]
+    assert new["answered_by_asker"] is True
+    assert new["clock_from"] == MONDAY
+    assert (after.sent, after.reminded, after.escalated) == (1, 0, 0)
+    assert [to(m) for m in mails(fake)] == [new["recipient_address"]]  # the request only
+    with app.connect() as db:
+        row = case_row(db, case_id)
+    assert row is not None and row.escalated_at is not None  # still escalated, same wait
+
+
+@pytest.mark.usefixtures("live")
+def test_an_answer_by_finance_starts_a_new_clock_with_a_new_reminder(
+    app: Engine, owner: Engine, approvals: Approvals, fake: FastAPI
+) -> None:
+    account, _, _ = vendor(app)
+    case_id = waiting_case(app, approvals, account)
+    move_clock(owner, requests_of(app, case_id)[0]["id"], MONDAY)
+    run(app, approvals, case_id, date(2026, 11, 24))
+    _ask_and_answer(app, case_id, Actor.user(str(uuid.uuid4()), "Ben Finance", FINANCE))
+    run(app, approvals, case_id, date(2026, 11, 24))  # emails the new request
+    new = requests_of(app, case_id)[-1]
+    assert new["clock_from"] is None
+    move_clock(owner, new["id"], datetime(2026, 11, 17, 10, 0, tzinfo=BERLIN))
+    mails(fake).clear()
+
+    result = run(app, approvals, case_id, date(2026, 11, 20))
+
+    assert (result.reminded, result.escalated) == (1, 0)
+    assert [to(m) for m in mails(fake)] == [new["recipient_address"]]
+
+
+@pytest.mark.usefixtures("live")
+def test_the_escalation_mentions_the_reminder_only_when_it_went_out(
+    app: Engine, owner: Engine, approvals: Approvals, fake: FastAPI
+) -> None:
+    account, _, _ = vendor(app)
+    case_id = waiting_case(app, approvals, account)
+    move_clock(owner, requests_of(app, case_id)[0]["id"], MONDAY)
+    refused = Approvals(
+        approvals.mailbox,
+        APP_URL,
+        DOMAIN,
+        nudges=Flaky(approvals, refuse=1),
+        escalate_to=FINANCE,
+    )
+    mails(fake).clear()
+
+    # The reminder is refused, the escalation goes out in the same pass.
+    result = run(app, refused, case_id, date(2026, 11, 23))
+
+    assert (result.reminded, result.escalated) == (0, 1)
+    (escalation,) = mails(fake)
+    assert to(escalation) == FINANCE
+    assert "ARGUS reminded them" not in escalation["body"]["content"]
+
+
+@pytest.mark.req("NF-01")
+@pytest.mark.usefixtures("live")
+def test_the_trail_names_the_request_a_new_one_replaced_and_why(
+    app: Engine, approvals: Approvals
+) -> None:
+    account, approver, _ = vendor(app, deputy=True)
+    case_id = waiting_case(app, approvals, account)
+    set_absent(app, ADMIN, approver, True)
+
+    run(app, approvals, case_id, date(2026, 11, 17))
+
+    old, new = requests_of(app, case_id)
+    assert new["renew_reason"] == "person_away"
+    (renewed,) = events_of(app, case_id, "approval_request_renewed")
+    assert renewed["details"]["renews"] == old["id"]
+    assert renewed["details"]["request_id"] == new["id"]
+    assert renewed["details"]["reason"] == "person_away"
+    assert renewed["details"]["as"] == "deputy"

@@ -399,6 +399,7 @@ class NudgeMail:
     currency: str
     credit_note: bool
     link: str
+    reminded: bool = False  # for an escalation: a reminder for this wait went out for sure
 
 
 REMINDER_DAYS = 3
@@ -440,6 +441,7 @@ def render_nudge(mail: NudgeMail) -> tuple[str, str]:
         if mail.on_behalf_of_name
         else ""
     )
+    reminded = f" ARGUS reminded them after {REMINDER_DAYS} working days." if mail.reminded else ""
     subject = (
         f"ARGUS: {what} {number} from {vendor} has waited {ESCALATION_DAYS} working days"
         " for approval"
@@ -447,13 +449,13 @@ def render_nudge(mail: NudgeMail) -> tuple[str, str]:
     text_body = (
         "Hello,\n\n"
         f"{asked} was asked on {since} to approve this {what} and has not decided after"
-        f" {ESCALATION_DAYS} working days. ARGUS reminded them after {REMINDER_DAYS} working"
-        f" days.{deputy}\n\n"
+        f" {ESCALATION_DAYS} working days.{reminded}{deputy}\n\n"
         f"{facts}"
         f"See it here: {mail.link}\n\n"
-        f"Only {asked} can approve or reject it. To move it on, ask them, or give this vendor"
-        " another approver or deputy in the approver table. ARGUS then sends the invoice to the"
-        " new person. ARGUS does not read replies to this email.\n"
+        f"Only {asked} can approve or reject it. To move it on, ask them. Or, in the approver"
+        " table, give this vendor another approver, or mark the approver away so the deputy"
+        " gets it. ARGUS then sends the invoice to the new person. ARGUS does not read replies"
+        " to this email.\n"
     )
     return subject, text_body
 

@@ -148,13 +148,15 @@ _OPEN_EXCEPTION = """
       order by p.id desc limit 1
     ) a on true
     left join lateral (
-      select q.id, q.recipient_name, q.sent_at from approval_request q
+      select q.id, q.recipient_name, q.sent_at,
+             coalesce(q.clock_from, q.sent_at) as clock from approval_request q
       where q.case_id = c.id
       order by q.id desc limit 1
     ) q on true
     left join approval_decision k on k.request_id = q.id
     left join approval_nudge n
-      on n.request_id = q.id and n.kind = 'escalation' and n.sent_at is not null
+      on n.case_id = c.id and n.clock_from = q.clock and n.kind = 'escalation'
+      and n.sent_at is not null
     """
 _LIST_TAIL = " order by d.received_at desc, c.id desc limit :limit"
 _COUNT_HEAD = "select c.status, count(*) as n "

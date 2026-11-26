@@ -16,8 +16,10 @@ This migration adds:
   of the clock, and for a reminder the person and address of the request. It refuses a row
   from anyone but a job, for a request that is not the newest of its case, not emailed yet or
   decided already, for a case that does not wait for approval, and one due earlier than 3 (or
-  5) calendar days after the clock started or later than today. At most one row per request
-  and kind, unless an earlier one failed for certain.
+  5) calendar days after the clock started or later than today. At most one row per case,
+  kind and clock, unless an earlier one failed for certain: a new request that keeps the old
+  clock (0022, the asker answered their own question) gets no second reminder or escalation
+  for the same wait (code review of PR 212).
 - A row is written before the email goes out. After that only one thing may change, once:
   the sent time, after Graph accepted the email, or the failed time, when Graph refused it for
   certain. A row with neither is an email whose fate is unknown (a crash or a timeout), and
@@ -29,7 +31,11 @@ This migration adds:
   came back from an absent approver or approver address exception, so the clock starts again
   for whoever is asked now. The database picks who is asked, exactly as for a first request
   (the approver, or the deputy while the approver is away). The old request can no longer be
-  decided, because only the newest one can (0021). The clock starts again from the new
+  decided, because only the newest one can (0021). The database also keeps why
+  (``renew_reason``: back from the exception queue, vendor changed, person away, person
+  replaced) and writes ``approval_request_renewed`` with the old request and the reason, so
+  the trail shows which request was replaced (compliance review of PR 212). The clock starts
+  again from the new
   request. The guard of 0022 gets one line, marked #40, that hands such a request to
   ``approval_request_renewal``; everything else in it stays as it was.
 - The audit events ``approval_reminder_sent``, ``approval_escalation_sent`` and
@@ -97,7 +103,9 @@ UPGRADE = r"""
 -- ------------------------------------------------- a new request for a waiting case (AP-06)
 
 alter table approval_request
-  add column if not exists renews_id bigint references approval_request(id);
+  add column if not exists renews_id bigint references approval_request(id),
+  add column if not exists renew_reason text check (renew_reason in
+    ('back_from_exception', 'vendor_changed', 'person_away', 'person_replaced'));
 create unique index if not exists approval_request_renewed_once
   on approval_request (renews_id) where renews_id is not null;
 
@@ -159,6 +167,12 @@ begin
     raise exception 'the person asked on approval request % can still decide on case %',
       o.id, r.case_id;
   end if;
+  r.renew_reason := case
+    when back then 'back_from_exception'
+    when c.partner_account is distinct from o.vendor_account then 'vendor_changed'
+    when coalesce(lower(o.recipient_id) in (lower(v.object_id), lower(v.deputy_id)), false)
+      then 'person_away'
+    else 'person_replaced' end;
   r.vendor_account := c.partner_account;
   if not v.absent then
     r.recipient_id := v.object_id;
@@ -189,6 +203,24 @@ begin
   return r;
 end $$;
 
+-- The trail names the request a new one replaced, and why (compliance review of PR 212). Runs
+-- as the owner, like the other audit triggers, after 0020's approval_requested (name order).
+create or replace function approval_request_renewal_audit() returns trigger
+  language plpgsql security definer
+set search_path = pg_catalog, public, pg_temp as $$
+begin
+  if new.renews_id is not null then
+    insert into audit_event (case_id, event_type, details)
+    values (new.case_id, 'approval_request_renewed',
+            jsonb_build_object('request_id', new.id, 'renews', new.renews_id,
+                               'reason', new.renew_reason, 'name', new.recipient_name,
+                               'as', new.recipient_role));
+  end if;
+  return null;
+end $$;
+create or replace trigger approval_request_renewal_audit after insert on approval_request
+  for each row execute function approval_request_renewal_audit();
+
 -- A new request for a waiting case goes out without a move: the case already waits.
 drop trigger if exists approval_request_with_move on approval_request;
 create constraint trigger approval_request_with_move after insert on approval_request
@@ -215,8 +247,9 @@ create table if not exists approval_nudge (
   failed_at timestamptz,                  -- set once, when Graph refused it for certain
   check (sent_at is null or failed_at is null)
 );
+-- One per wait: a new request that keeps the clock (0022) shares the old rows.
 create unique index if not exists approval_nudge_once
-  on approval_nudge (request_id, kind) where failed_at is null;
+  on approval_nudge (case_id, kind, clock_from) where failed_at is null;
 create index if not exists approval_nudge_case on approval_nudge (case_id, id);
 
 create or replace function approval_nudge_guard() returns trigger language plpgsql
@@ -338,7 +371,8 @@ create or replace function audit_approval_nudge_events() returns trigger languag
 set search_path = pg_catalog, public, pg_temp as $$
 begin
   if pg_trigger_depth() = 1 and new.event_type in
-       ('approval_reminder_sent', 'approval_escalation_sent', 'approval_nudge_failed') then
+       ('approval_reminder_sent', 'approval_escalation_sent', 'approval_nudge_failed',
+        'approval_request_renewed') then
     raise exception 'event % is written by the database, not by the application', new.event_type;
   end if;
   return new;
@@ -372,7 +406,9 @@ do $$ begin
   drop trigger approval_request_with_move on approval_request;
   create constraint trigger approval_request_with_move after insert on approval_request
     deferrable initially deferred for each row execute function approval_request_with_move();
-  alter table approval_request drop column renews_id;
+  drop trigger approval_request_renewal_audit on approval_request;
+  drop function approval_request_renewal_audit();
+  alter table approval_request drop column renews_id, drop column renew_reason;
   drop function approval_request_renewal(approval_request);
 end $$;
 """

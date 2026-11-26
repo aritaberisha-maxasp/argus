@@ -226,16 +226,21 @@ _WAITING = """
     order by q.id
 """
 
+# One per wait, not per request: a new request that keeps the clock (0022) shares the rows of
+# the old one (code review of PR 212).
 _HAS_ROW = """
     select 1 from approval_nudge
-    where request_id = :request and kind = :kind and failed_at is null
+    where case_id = :case and kind = :kind and clock_from = :clock and failed_at is null
 """
 
 _STORED = """
     select n.id as nudge_id, n.case_id, n.kind, n.recipient_address, n.recipient_name,
            n.clock_from, q.recipient_name as asked_name, q.on_behalf_of_name, q.vendor_account,
            c.kind as case_kind, c.document_number, c.gross_minor, c.currency,
-           r.reading -> 'fields' -> 'issuer_name' ->> 'value' as vendor_name
+           r.reading -> 'fields' -> 'issuer_name' ->> 'value' as vendor_name,
+           exists (select 1 from approval_nudge m
+                   where m.case_id = n.case_id and m.clock_from = n.clock_from
+                     and m.kind = 'reminder' and m.sent_at is not null) as reminded
     from approval_nudge n
     join approval_request q on q.id = n.request_id
     join invoice_case c on c.id = n.case_id
@@ -268,6 +273,7 @@ def nudge_mail(row: Any, app_url: str) -> NudgeMail:
         currency=(row["currency"] or "").strip(),
         credit_note=CaseKind(row["case_kind"]) is CaseKind.INCOMING_CREDIT_NOTE,
         link=approval_link(app_url, row["case_id"]),
+        reminded=bool(row["reminded"]),
     )
 
 
@@ -328,7 +334,11 @@ def _one(
     request_id = row["request_id"]
     try:
         with unit_of_work(engine, APPROVAL_ACTOR) as db:
-            if db.execute(text(_HAS_ROW), {"request": request_id, "kind": kind}).first():
+            written = db.execute(
+                text(_HAS_ROW),
+                {"case": row["case_id"], "kind": kind, "clock": row["clock_from"]},
+            ).first()
+            if written:
                 return  # written already: sent, or its fate unknown, so never again
             nudge_id: int = db.execute(
                 text(
