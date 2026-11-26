@@ -79,6 +79,9 @@ EVENT_TEXT: dict[str, str] = {
     "approval_requested": "ARGUS sent the case for approval",
     "approval_request_sent": "ARGUS emailed the approval request",
     "approval_decided": "A person decided on the invoice",
+    "approval_amount_checked": "ARGUS compared the invoice with EUR 5,000",
+    "second_approver_set": "An admin set the second approver",
+    "second_approver_removed": "An admin removed the second approver",
 }
 
 OUTCOME_TEXT: dict[Outcome, str] = {
@@ -180,6 +183,11 @@ def _plain(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(", ", ": "))
 
 
+def _euros(cents: int) -> str:
+    whole, part = divmod(abs(cents), 100)
+    return f"{whole:,}.{part:02d}"
+
+
 def describe(event_type: str, from_status: Any, to_status: Any, details: dict[str, Any]) -> str:
     """One plain sentence for an event of the trail."""
     if event_type == "account_proposed" and details.get("gl_account"):
@@ -199,14 +207,33 @@ def describe(event_type: str, from_status: Any, to_status: Any, details: dict[st
             if details.get("on_behalf_of_name")
             else ""
         )
-        return f"{details['name']} {verb} the invoice{deputy}"
+        step = " as the second approval" if details.get("step") == "second" else ""
+        # Arita on #39: both approvals by one person must stand out at once.
+        same = (
+            ', marked "same person": they also gave the first approval'
+            if details.get("same_person")
+            else ""
+        )
+        return f"{details['name']} {verb} the invoice{step}{deputy}{same}"
     if event_type == "approval_requested" and details.get("name"):
         deputy = (
             f", as deputy of {details['on_behalf_of_name']}"
             if details.get("on_behalf_of_name")
             else ""
         )
+        if details.get("step") == "second":
+            same = ", the same person as the first approval" if details.get("same_person") else ""
+            return f"ARGUS sent the case for the second approval to {details['name']}{same}"
         return f"ARGUS sent the case for approval to {details['name']}{deputy}"
+    if event_type == "approval_amount_checked" and isinstance(details.get("eur_minor"), int):
+        eur = _euros(details["eur_minor"])
+        side = "above" if details.get("above_line") else "at or below"
+        rate = (
+            f" at the Wise rate {details.get('rate')} of {details.get('rate_time')}"
+            if details.get("source") == "wise"
+            else ""
+        )
+        return f"Gross EUR {eur}{rate}, {side} EUR 5,000"
     if event_type == "approval_request_sent" and details.get("name"):
         return f"Sent to {details['name']} for approval"
     if event_type == "status_changed" and from_status and to_status:

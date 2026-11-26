@@ -558,7 +558,9 @@ def test_the_database_refuses_approval_without_the_proposal_the_person_saw(
 ) -> None:
     """Arita on PR 190: a second check at the move to Approved, so no other path can skip it.
     Review of PR 205: the decision names the proposal it approves, and it must still be the
-    current one, also when the account changes between the decision and the move."""
+    current one, also when the account changes between the decision and the move. Since
+    #39 the account cannot change at all once the request has a decision, which stops it even
+    earlier; the check at the move stays behind it."""
     case_id = waiting_case(app, vendor)
     alice_actor = Actor.user(ALICE, "Alice Approver", ALICE_ADDRESS)
     with (
@@ -570,7 +572,10 @@ def test_the_database_refuses_approval_without_the_proposal_the_person_saw(
         shown = current_proposal(db, case_id)
     assert shown is not None
     with (
-        pytest.raises(CaseRuleBroken, match="tax key proposal the person saw"),
+        pytest.raises(
+            CaseRuleBroken,
+            match="tax key proposal the person saw|decided on already; its account cannot change",
+        ),
         unit_of_work(app, alice_actor) as db,
     ):
         insert_decision(db, case_id, "approved", None, proposal_id=shown.id)

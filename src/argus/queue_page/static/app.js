@@ -46,6 +46,8 @@
     no_account_proposal: { label: "No G/L account", one: "No G/L account", many: "No G/L accounts" },
     approver_absent: { label: "Approver away", one: "Approver away", many: "Approvers away" },
     approver_address_outside: { label: "Approver address", one: "Outside approver address", many: "Outside approver addresses" },
+    second_approver_missing: { label: "No second approver", one: "No second approver", many: "No second approver" },
+    second_approver_same_person: { label: "Same person", one: "Both approvals by one person", many: "Both approvals by one person" },
   };
 
   function reasonInfo(reason, text) {

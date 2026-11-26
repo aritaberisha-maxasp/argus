@@ -66,6 +66,13 @@ class ExceptionReason(StrEnum):
     # The person ARGUS would ask has an email address outside Max ASP's own domain, so no
     # approval request goes out. ARGUS carries on once the approver table is fixed (#191).
     APPROVER_ADDRESS_OUTSIDE = "approver_address_outside"
+    # An invoice above EUR 5,000 needs Benjamin's second approval, but no second approver is
+    # set, or he is marked away (#39, AP-09). A person carries on once he can be asked.
+    SECOND_APPROVER_MISSING = "second_approver_missing"
+    # The second approver gave the first approval himself, as the vendor's approver. Once a
+    # person lets the case carry on, he may give the second approval too, marked "same person"
+    # (Arita on #39, 23 Nov).
+    SECOND_APPROVER_SAME_PERSON = "second_approver_same_person"
 
 
 class Outcome(StrEnum):

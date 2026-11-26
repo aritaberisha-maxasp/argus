@@ -118,6 +118,13 @@ FIXED_IN_DATEV = Choice(
     "The problem is fixed in DATEV. The case goes back to where it was and carries on.",
 )
 
+SAME_PERSON_CARRY_ON = Choice(
+    Outcome.ACCEPTED_WITH_COMMENT,
+    "Benjamin gives the second approval too",
+    "The second approval request goes to Benjamin, who gave the first approval as the vendor's"
+    ' approver. His second approval is marked "same person" in the audit trail.',
+)
+
 # The endings that let the case carry on, per reason. A reason missing here gets CARRY_ON;
 # an empty tuple means none. Closing endings are added by choices_for when they are safe.
 _CARRY_ON: dict[ExceptionReason, tuple[Choice, ...]] = {
@@ -129,6 +136,8 @@ _CARRY_ON: dict[ExceptionReason, tuple[Choice, ...]] = {
     ExceptionReason.APPROVER_ABSENT: (),
     # ARGUS ends it itself once the approver table holds a Max ASP address (#191).
     ExceptionReason.APPROVER_ADDRESS_OUTSIDE: (),
+    # Once a person lets it carry on, the second request goes to the same person (#39).
+    ExceptionReason.SECOND_APPROVER_SAME_PERSON: (SAME_PERSON_CARRY_ON,),
     ExceptionReason.PAYMENT_FAILED: (),  # depends on the payment run
     ExceptionReason.CUSTOMER_QUERY: (ANSWERED,),
     ExceptionReason.BOOKING_ERROR: (FIXED_IN_DATEV,),
@@ -157,6 +166,16 @@ NOTES: dict[ExceptionReason, str] = {
         "Correct the approver's or deputy's email address in the approver table to a Max ASP"
         " address. ARGUS sees it on the next sweep and sends the invoice for approval by itself,"
         " so this page can only reject the invoice."
+    ),
+    ExceptionReason.SECOND_APPROVER_MISSING: (
+        "Set the second approver for invoices above EUR 5,000 (an admin does this in ARGUS), or"
+        ' mark him back, then pick "Checked, carry on". ARGUS then sends him the second'
+        " approval request."
+    ),
+    ExceptionReason.SECOND_APPROVER_SAME_PERSON: (
+        "Benjamin approved this invoice as the vendor's approver, and he also gives the second"
+        " approval above EUR 5,000. Arita decided he may give both. Carry on to send him the"
+        " second approval request, or reject the invoice."
     ),
     ExceptionReason.PAYMENT_FAILED: (
         "A failed payment cannot be resolved from this page yet. It depends on the payment run."

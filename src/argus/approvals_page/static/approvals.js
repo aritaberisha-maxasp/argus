@@ -212,7 +212,7 @@
     const who = row.may_decide
       ? (row.recipient_role === "deputy" ? "Waits for you, as deputy of " + row.on_behalf_of_name : "Waits for you")
       : "Waits for " + row.recipient_name + (row.recipient_role === "deputy" ? ", deputy of " + row.on_behalf_of_name : "");
-    button.append(el("span", who, "row-sender"));
+    button.append(el("span", (row.step === "second" ? "Second approval. " : "") + who, "row-sender"));
     button.addEventListener("click", () => select(row.case_id));
     return button;
   }
@@ -248,6 +248,11 @@
       fact("VAT", money(v.vat_cents, v.currency), true),
       fact("Gross", money(v.gross_cents, v.currency), true),
     );
+    // Another currency is compared with EUR 5,000 at the Wise rate of the first approval (#39).
+    if (v.amount && v.amount.from_wise) {
+      facts.append(fact("Gross in EUR", money(v.amount.eur_cents, "EUR") + " at the Wise rate " +
+        v.amount.rate + " of " + berlinTime(v.amount.rate_time), true));
+    }
     return facts;
   }
 
@@ -389,7 +394,9 @@
     block.append(el("h3", "Decision"));
     const verb = d.decision === "approved" ? "Approved" : "Rejected";
     const as = d.decided_as === "deputy" ? ", as deputy of " + d.on_behalf_of_name : "";
-    block.append(el("p", verb + " by " + d.decided_by_name + as + " on " + berlinTime(d.decided_at) + ".", "sentence"));
+    const step = v.request.step === "second" ? " (second approval)" : (v.next_step ? " (first approval)" : "");
+    block.append(el("p", verb + step + " by " + d.decided_by_name + as + " on " + berlinTime(d.decided_at) + ".", "sentence"));
+    if (d.same_person) block.append(el("p", "Same person: this second approval comes from the person who gave the first one.", "note"));
     if (d.comment) {
       const quote = el("blockquote", d.comment, "comment");
       block.append(quote);
@@ -426,7 +433,9 @@
           request_id: v.request.request_id, choice, comment: comment.value || null,
           proposal_id: v.proposal ? v.proposal.proposal_id : null,
         });
-        state.done = choice === "approve" ? "Thank you. The invoice is approved." : "The invoice is rejected and closed.";
+        state.done = choice === "approve"
+          ? (state.view.next_step ? "Thank you. Your approval is recorded. " + state.view.next_step : "Thank you. The invoice is approved.")
+          : "The invoice is rejected and closed.";
         await refreshList();
         drawDetail();
       } catch (e) {
@@ -452,17 +461,28 @@
     }
     const head = el("div", null, "detail-head");
     const title = el("div", null, "detail-title");
-    title.append(el("span", v.decision ? (v.decision.decision === "approved" ? "Approved" : "Rejected") : v.status_text,
-      "pill" + (v.may_decide ? " flag" : "")));
+    const verdict = v.decision && (v.decision.decision === "approved" ? (v.next_step ? "First approval given" : "Approved") : "Rejected");
+    title.append(el("span", verdict || v.status_text, "pill" + (v.may_decide ? " flag" : "")));
     title.append(el("h2", (v.kind === "incoming_credit_note" ? "Credit note " : "Invoice ") +
       (v.document_number || "without number") + " from " + (v.vendor_name || "an unread vendor")));
     const asked = v.request.recipient_role === "deputy"
       ? "Sent to " + v.request.recipient_name + " as deputy of " + v.request.on_behalf_of_name
       : "Sent to " + v.request.recipient_name;
     title.append(el("span", asked + (v.request.sent_at ? " on " + berlinTime(v.request.sent_at) : ""), "sub"));
+    if (v.first_approval) {
+      const f = v.first_approval;
+      const deputy = f.decided_as === "deputy" ? ", as deputy of " + f.on_behalf_of_name : "";
+      title.append(el("span", "First approval by " + f.decided_by_name + deputy + " on " + berlinTime(f.decided_at), "sub"));
+    }
     head.append(title);
     panel.append(head);
     if (state.done) panel.append(el("p", state.done, "done"));
+    if (v.request.step === "second") {
+      panel.append(el("p", v.request.same_person
+        ? "Above EUR 5,000: this is the second approval. The first one came from the same person, so it is marked \"same person\" in the audit trail."
+        : "Above EUR 5,000: this is the second approval.", "note"));
+    }
+    if (v.next_step && !state.done) panel.append(el("p", v.next_step, "note"));
     if (!v.may_decide && !v.decision && v.waiting) {
       panel.append(el("p", "You can look at this invoice, but only " + v.request.recipient_name + " can decide on it.", "note"));
     }
