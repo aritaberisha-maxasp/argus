@@ -15,6 +15,8 @@ from sqlalchemy import Engine, text
 from sqlalchemy.exc import NoResultFound
 
 from argus import __version__
+from argus.approvals_page.web import PAGE_PATHS as APPROVALS_PAGE_PATHS
+from argus.approvals_page.web import install_approvals_page
 from argus.approvers import ApproverTable
 from argus.approvers.web import install_approver_routes
 from argus.auth import (
@@ -135,7 +137,14 @@ FinanceOrAdmin = Annotated[SignedInUser, Depends(require_role(Role.FINANCE, Role
 # queue page and the invoice status page (#62) with their script and style, which are the same
 # fixed files for everyone and fetch their data with the person's token (#126). Every other
 # route needs sign in, and a test walks all routes to make sure (#23).
-PUBLIC_PATHS = frozenset({"/health", "/health/database"}) | PAGE_PATHS | INVOICES_PAGE_PATHS
+# The approval page (#38) too: the email links to /approvals/<case ID>, which is the same fixed
+# file for every case number.
+PUBLIC_PATHS = (
+    frozenset({"/health", "/health/database"})
+    | PAGE_PATHS
+    | INVOICES_PAGE_PATHS
+    | APPROVALS_PAGE_PATHS
+)
 
 
 def migrations_head() -> str | None:
@@ -184,6 +193,7 @@ def create_app(
 
     install_queue_page(app, engine, documents, chart_from_env(os.environ))
     install_invoices_page(app, engine)
+    install_approvals_page(app, engine, documents, chart_from_env(os.environ))
     install_approver_routes(app, engine)
     # The fake mailbox page exists in demo mode only; otherwise its routes answer 404 (#135).
     if connections.demo:

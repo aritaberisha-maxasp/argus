@@ -41,7 +41,7 @@ from argus.cases.store import (
     unit_of_work,
     verify_chain,
 )
-from tests.integration.approval_helpers import prepare_for_approval
+from tests.integration.approval_helpers import decide, prepare_for_approval
 from tests.integration.conftest import head, migrate
 
 S = CaseStatus
@@ -98,14 +98,18 @@ def new_case(app: Engine, kind: CaseKind = CaseKind.INCOMING_INVOICE, **fields: 
 
 
 def walk(app: Engine, case_id: int, *statuses: CaseStatus, actor: Actor = INTAKE) -> None:
-    """Move a case step by step, each step in its own transaction. Approval is given by a
-    person and booking sets a DATEV reference, as the database requires."""
+    """Move a case step by step, each step in its own transaction. Approval is given by the
+    person asked, on the approval page (#38), and booking sets a DATEV reference, as the
+    database requires."""
     for to in statuses:
-        with unit_of_work(app, APPROVER if to is S.APPROVED else actor) as db:
+        with unit_of_work(app, actor) as db:
             case = get_case(db, case_id)
             if to is S.AWAITING_APPROVAL and case.status is S.RECEIVED:
                 # Proposal, duplicate key and approval request first, as the sweep does (#191).
                 prepare_for_approval(db, case_id)
+            if to is S.APPROVED:
+                assert decide(db, case_id)
+                continue
             ref = f"DATEV-TEST-{case_id}" if to is S.BOOKED and not case.datev_booking_ref else None
             assert move_case(db, case_id, expected=case.status, to=to, datev_booking_ref=ref)
 
@@ -533,7 +537,8 @@ def test_an_approval_decision_is_logged_under_the_approver(app: Engine) -> None:
             case_id=case_id,
             details={"step": "first", "decision": "approved"},
         )
-        move_case(db, case_id, expected=S.AWAITING_APPROVAL, to=S.APPROVED)
+        # The move itself needs the decision of the person asked (#38, migration 0021).
+        assert decide(db, case_id)
         decision = next(e for e in trace(db, case_id) if e.event_type == "approval_decision")
 
     assert decision.actor == "user:approver-entra-id"
@@ -862,7 +867,10 @@ def test_the_trace_shows_the_email_and_every_step(app: Engine) -> None:
         # A case goes for approval with its proposal and approval request (#191).
         "account_proposed",
         "approval_requested",
-    ] + ["status_changed"] * 5
+        "status_changed",
+        # The person asked decides on the approval page, then the case moves on (#38).
+        "approval_decided",
+    ] + ["status_changed"] * 4
     assert events[-1].to_status is S.PAID
     assert all(e.actor and e.occurred_at for e in events)
 

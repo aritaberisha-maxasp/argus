@@ -35,7 +35,7 @@ the cases wait for the next sweep. Logs name only case IDs (NF-03).
 import logging
 from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
 from enum import StrEnum
 
 from sqlalchemy import Connection, Engine, text
@@ -50,6 +50,7 @@ from argus.cases.store import (
 )
 from argus.datev.gateway import DatevError, DatevGateway, DatevUnavailable
 from argus.datev.models import Posting
+from argus.intake.mode import trimmed_reason
 
 log = logging.getLogger("argus.intake.accounts")
 
@@ -185,6 +186,9 @@ class AccountProposal:
     from_document_number: str | None
     from_posting_date: date | None
     proposed_by_name: str | None
+    # Why a person entered it, and when it was made (#38 shows both on the approval page).
+    reason: str | None = None
+    proposed_at: datetime | None = None
 
 
 def current_proposal(connection: Connection, case_id: int) -> AccountProposal | None:
@@ -195,7 +199,7 @@ def current_proposal(connection: Connection, case_id: int) -> AccountProposal | 
                 """
                 select p.id, p.case_id, p.vendor_account, p.gl_account, p.tax_key, p.chart,
                        p.source, p.from_document_number, p.from_posting_date,
-                       p.proposed_by_name
+                       p.proposed_by_name, p.reason, p.proposed_at
                 from account_proposal p join invoice_case c on c.id = p.case_id
                 where p.case_id = :id and p.vendor_account = c.partner_account
                 order by p.id desc limit 1
@@ -219,6 +223,8 @@ def current_proposal(connection: Connection, case_id: int) -> AccountProposal | 
         from_document_number=row["from_document_number"],
         from_posting_date=row["from_posting_date"],
         proposed_by_name=row["proposed_by_name"],
+        reason=row["reason"],
+        proposed_at=row["proposed_at"],
     )
 
 
@@ -469,7 +475,8 @@ def check_entered(chart: Chart, gl_account: str, tax_key: str, reason: str) -> E
     key = tax_key.strip()
     if not (key == "" or (key.isascii() and key.isdigit() and len(key) <= 4)):
         raise BadAccount("Enter the tax key as one to four digits, or leave it empty.")
-    why = reason.strip()
+    # Trimmed like the database's correction_trim, so zero width spaces alone are no reason.
+    why = trimmed_reason(reason)
     if not 3 <= len(why) <= 500:
         raise BadAccount("Say briefly why this account is right (3 to 500 characters).")
     return EnteredAccount(gl, key, why)
@@ -479,6 +486,46 @@ def check_entered(chart: Chart, gl_account: str, tax_key: str, reason: str) -> E
 class Entered:
     case_id: int
     proposal_id: int
+
+
+def store_entered(
+    db: Connection,
+    case_id: int,
+    vendor_account: str,
+    entered: EnteredAccount,
+    by: EnteredBy,
+    chart: Chart,
+    *,
+    exception_id: int | None = None,
+) -> int:
+    """Store an account a person entered as the case's new current proposal, in the caller's
+    unit of work. Used by the queue page (#37) and by the approver on the approval page (#38).
+    The database checks who may, the name and the reason, and writes ``account_proposed``
+    (migrations 0019 and 0021)."""
+    proposal_id: int = db.execute(
+        text(
+            """
+            insert into account_proposal (case_id, exception_id, vendor_account, gl_account,
+                                          tax_key, chart, source, reason, proposed_by_name,
+                                          proposed_by_address)
+            values (:case_id, :exception_id, :vendor, :gl, :tax_key, :chart, 'person', :reason,
+                    :name, :address)
+            returning id
+            """
+        ),
+        {
+            "case_id": case_id,
+            "exception_id": exception_id,
+            "vendor": vendor_account,
+            "gl": entered.gl_account,
+            "tax_key": entered.tax_key,
+            "chart": chart.value,
+            "reason": entered.reason,
+            "name": by.name,
+            "address": by.sign_in_address,
+        },
+    ).scalar_one()
+    return proposal_id
 
 
 def enter_account(
@@ -504,29 +551,9 @@ def enter_account(
     ).one_or_none()
     if row is None or row.partner_account is None:
         raise NotEnterable(exception_id)
-    proposal_id: int = db.execute(
-        text(
-            """
-            insert into account_proposal (case_id, exception_id, vendor_account, gl_account,
-                                          tax_key, chart, source, reason, proposed_by_name,
-                                          proposed_by_address)
-            values (:case_id, :exception_id, :vendor, :gl, :tax_key, :chart, 'person', :reason,
-                    :name, :address)
-            returning id
-            """
-        ),
-        {
-            "case_id": row.case_id,
-            "exception_id": exception_id,
-            "vendor": row.partner_account,
-            "gl": entered.gl_account,
-            "tax_key": entered.tax_key,
-            "chart": chart.value,
-            "reason": entered.reason,
-            "name": by.name,
-            "address": by.sign_in_address,
-        },
-    ).scalar_one()
+    proposal_id = store_entered(
+        db, row.case_id, row.partner_account, entered, by, chart, exception_id=exception_id
+    )
     name_person(db, by.name, by.sign_in_address)  # kept with the resolution (migration 0016)
     resolve_exception(
         db,

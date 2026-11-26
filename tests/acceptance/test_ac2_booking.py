@@ -13,12 +13,12 @@ from tests.acceptance.test_ac5_exceptions import cases_of
 
 
 @pytest.mark.req("AC-2", "BK-01", "BK-03")
-@pytest.mark.waits_on(38, 41, 42)
+@pytest.mark.waits_on(41, 42)
 def test_approved_e01_is_booked_on_vendor_70001_with_its_pdf_as_voucher() -> None:
-    """Take E01 through intake, approve it as its approver, then read the DATEV stand in:
-    exactly one booking on 70001 with G/L account, tax key, net, VAT and gross as in
-    expected.json, and the original PDF (same SHA-256 as stored) attached."""
-    pytest.fail("write this scenario when #38, #41 and #42 are built")
+    """Take E01 through intake, approve it as its approver on the approval page (#38), then
+    read the DATEV stand in: exactly one booking on 70001 with G/L account, tax key, net, VAT
+    and gross as in expected.json, and the original PDF (same SHA-256 as stored) attached."""
+    pytest.fail("write this scenario when #41 and #42 are built")
 
 
 @pytest.mark.req("AC-2", "PR-04")

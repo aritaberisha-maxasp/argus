@@ -575,7 +575,8 @@ def test_the_proposal_names_the_vendor_account_of_the_case(app: Engine) -> None:
 
 
 def test_a_proposal_after_received_is_refused(app: Engine) -> None:
-    """The account is settled before approval and cannot change once the case moved on."""
+    """A job never changes the account once the case went for approval. Since #38 only the
+    person asked to approve may (tests/integration/test_approval_page.py)."""
     account = vendor()
     case_id = matched_case(app, account)
     with unit_of_work(app, INTAKE) as db:
@@ -583,7 +584,7 @@ def test_a_proposal_after_received_is_refused(app: Engine) -> None:
         assert send_for_approval(db, case_id)
 
     with (
-        pytest.raises(CaseRuleBroken, match="settled before approval"),
+        pytest.raises(CaseRuleBroken, match="only the person asked to approve"),
         unit_of_work(app, INTAKE) as db,
     ):
         insert(db, case_id, account)

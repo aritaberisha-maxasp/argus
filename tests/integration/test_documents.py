@@ -16,13 +16,12 @@ from azure.storage.blob import BlobClient, BlobServiceClient
 from sqlalchemy import Engine, text
 from sqlalchemy.exc import DBAPIError
 
-from argus.cases.model import Actor, CaseKind, CaseStatus, ClosedReason
+from argus.cases.model import Actor, CaseKind
 from argus.cases.store import (
     CaseRuleBroken,
     DuplicateRefused,
     NotAllowed,
     create_case,
-    move_case,
     record_event,
     trace,
     unit_of_work,
@@ -42,7 +41,7 @@ from argus.documents.store import (
 )
 from argus.intake.graph import InboxMessage
 from argus.intake.records import mark_stored, see_email
-from tests.integration.approval_helpers import send_for_approval
+from tests.integration.approval_helpers import decide, send_for_approval
 
 EMAILS = Path(__file__).resolve().parents[1] / "fixtures" / "emails"
 INTAKE = Actor.system("intake")
@@ -336,13 +335,8 @@ def test_a_closed_case_takes_no_new_files(app: Engine, documents: AzureDocumentS
             duplicate_key=f"vat:DE700000000|DOCTEST|{email_id}|EUR",
         )
         assert send_for_approval(db, case_id)
-        move_case(
-            db,
-            case_id,
-            expected=CaseStatus.AWAITING_APPROVAL,
-            to=CaseStatus.CLOSED,
-            closed_reason=ClosedReason.REJECTED,
-        )
+        # The person asked rejects it on the approval page (#38).
+        assert decide(db, case_id, approve=False)
     with (
         pytest.raises(CaseRuleBroken, match="is closed"),
         unit_of_work(app, INTAKE) as db,

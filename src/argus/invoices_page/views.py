@@ -19,7 +19,8 @@ Where each column comes from:
 - **G/L account and tax key**: the current proposal of an incoming invoice or credit note
   (#37, ``account_proposal``), for the vendor account the case has now.
 - **Approval**: who the newest approval request went to and when it was emailed (#191,
-  ``approval_request``), while the case waits for approval.
+  ``approval_request``), while the case waits for approval. Once the person decided (#38,
+  ``approval_decision``): approved or rejected, by whom and when.
 
 Nothing here logs. Names are personal data and stay out of the log (NF-03).
 """
@@ -92,6 +93,10 @@ class CaseRow:
     # the email has not gone out yet).
     approval_to: str | None = None
     approval_sent_at: datetime | None = None
+    # The decision on the newest request (#38): approved or rejected, by whom, when.
+    decision: str | None = None
+    decided_by_name: str | None = None
+    decided_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -126,7 +131,7 @@ _LIST_HEAD = """
            r.reading -> 'fields' -> 'due_date' -> 'value' as due_date,
            x.id as exception_id, x.reason as exception_reason,
            a.gl_account, a.tax_key, q.recipient_name as approval_to,
-           q.sent_at as approval_sent_at
+           q.sent_at as approval_sent_at, k.decision, k.decided_by_name, k.decided_at
     """
 _OPEN_EXCEPTION = """
     left join lateral (
@@ -140,10 +145,11 @@ _OPEN_EXCEPTION = """
       order by p.id desc limit 1
     ) a on true
     left join lateral (
-      select q.recipient_name, q.sent_at from approval_request q
+      select q.id, q.recipient_name, q.sent_at from approval_request q
       where q.case_id = c.id
       order by q.id desc limit 1
     ) q on true
+    left join approval_decision k on k.request_id = q.id
     """
 _LIST_TAIL = " order by d.received_at desc, c.id desc limit :limit"
 _COUNT_HEAD = "select c.status, count(*) as n "
@@ -242,6 +248,9 @@ def _row(r: Any) -> CaseRow:
         tax_key=r["tax_key"],
         approval_to=r["approval_to"],
         approval_sent_at=r["approval_sent_at"],
+        decision=r["decision"],
+        decided_by_name=r["decided_by_name"],
+        decided_at=r["decided_at"],
     )
 
 

@@ -20,7 +20,7 @@ from argus.cases.store import create_case, get_case, move_case, open_exception, 
 from argus.documents.store import MemoryDocumentStore
 from argus.intake.duplicates import flag_if_duplicate
 from standins.entra.app import FakeEntra
-from tests.integration.approval_helpers import prepare_for_approval
+from tests.integration.approval_helpers import decide, prepare_for_approval
 
 # Exceptions open only once ARGUS runs live (#72), like in the other page tests.
 pytestmark = [pytest.mark.req("EX-01", "NF-05", "NF-03"), pytest.mark.usefixtures("live")]
@@ -29,7 +29,6 @@ BENJAMIN = "33333333-3333-4333-8333-333333333333"  # finance, made up
 ARITA = "44444444-4444-4444-8444-444444444444"  # admin, made up
 ALICE = "11111111-1111-4111-8111-111111111111"  # approver, made up
 INTAKE = Actor.system("intake")
-APPROVER = Actor.user(ALICE, "Alice Test")
 COMMENT = "Rang Erika Mustermann, she confirmed it"  # made up, must stay out of log and audit
 
 
@@ -83,11 +82,14 @@ def case_in_exception(
     path = [CaseStatus.AWAITING_APPROVAL, CaseStatus.APPROVED, CaseStatus.BOOKED]
     current = CaseStatus.RECEIVED
     for step in path[: path.index(before) + 1] if before else []:
-        # Only a person approves (migration 0002); the rest is done by jobs.
-        actor = APPROVER if step is CaseStatus.APPROVED else INTAKE
-        with unit_of_work(app, actor) as db:
+        # Only the person asked approves (migrations 0002 and 0021); the rest is done by jobs.
+        with unit_of_work(app, INTAKE) as db:
             if step is CaseStatus.AWAITING_APPROVAL:
                 prepare_for_approval(db, case_id)
+            if step is CaseStatus.APPROVED:
+                assert decide(db, case_id)
+                current = step
+                continue
             move_case(
                 db,
                 case_id,

@@ -10,7 +10,7 @@ tests/integration/test_approval_requests.py. Names and numbers are made up.
 
 from sqlalchemy import Connection, text
 
-from argus.cases.model import Actor, CaseStatus
+from argus.cases.model import Actor, CaseStatus, ClosedReason
 from argus.cases.store import change_case, get_case, move_case, set_actor
 
 # A made up approver who is never marked away, for the vendors these helpers set up.
@@ -91,3 +91,67 @@ def send_for_approval(db: Connection, case_id: int) -> bool:
         return False
     prepare_for_approval(db, case_id)
     return move_case(db, case_id, expected=CaseStatus.RECEIVED, to=CaseStatus.AWAITING_APPROVAL)
+
+
+def decide(
+    db: Connection, case_id: int, *, approve: bool = True, comment: str | None = None
+) -> bool:
+    """Decide on a case in Awaiting approval as the person its newest request went to, and move
+    it to Approved or close it as rejected, the way the approval page does (#38). Since
+    migration 0021 only that person can, and only with a decision row in the same transaction.
+    The decision names the case's current account proposal, as the page sends it. Leaves the
+    actor as it was. Returns False when the case no longer waits, like move_case."""
+    before = db.execute(
+        text(
+            "select current_setting('argus.actor', true) as actor,"
+            " current_setting('argus.actor_name', true) as name,"
+            " current_setting('argus.actor_address', true) as address"
+        )
+    ).one()
+    request = db.execute(
+        text(
+            "select id, recipient_id, recipient_name, recipient_address from approval_request"
+            " where case_id = :id order by id desc limit 1"
+        ),
+        {"id": case_id},
+    ).one()
+    set_actor(
+        db, Actor.user(request.recipient_id, request.recipient_name, request.recipient_address)
+    )
+    if approve:
+        to, closed = CaseStatus.APPROVED, None
+    else:
+        to, closed = CaseStatus.CLOSED, ClosedReason.REJECTED
+        comment = comment or "Not ordered by us"
+    db.execute(
+        text(
+            "insert into approval_decision (case_id, request_id, proposal_id, decision, comment)"
+            " values (:case_id, :request_id,"
+            " (select p.id from account_proposal p join invoice_case c on c.id = p.case_id"
+            "  where p.case_id = :case_id and p.vendor_account = c.partner_account"
+            "  order by p.id desc limit 1),"
+            " :decision, :comment)"
+        ),
+        {
+            "case_id": case_id,
+            "request_id": request.id,
+            "decision": "approved" if approve else "rejected",
+            "comment": comment,
+        },
+    )
+    moved = move_case(
+        db, case_id, expected=CaseStatus.AWAITING_APPROVAL, to=to, closed_reason=closed
+    )
+    db.execute(
+        text(
+            "select set_config('argus.actor', :actor, true),"
+            " set_config('argus.actor_name', :name, true),"
+            " set_config('argus.actor_address', :address, true)"
+        ),
+        {
+            "actor": before.actor or str(SYSTEM),
+            "name": before.name or "",
+            "address": before.address or "",
+        },
+    )
+    return moved
