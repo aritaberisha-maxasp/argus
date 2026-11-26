@@ -46,7 +46,7 @@ A downgrade never loses a decision: with decisions in the database it keeps the 
 its rules, as 0019 and 0020 do.
 
 Revision ID: 0021
-Revises: 0016
+Revises: 0018
 Create Date: 2026-11-25
 """
 
@@ -55,7 +55,7 @@ from alembic import op
 from argus.db import run_script
 
 revision = "0021"
-down_revision = "0016"
+down_revision = "0018"
 branch_labels = None
 depends_on = None
 
