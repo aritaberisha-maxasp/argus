@@ -81,7 +81,7 @@ def captured(caplog: pytest.LogCaptureFixture) -> Iterator[pytest.LogCaptureFixt
 @pytest.fixture
 def vendor(app: Engine) -> str:
     """A vendor account of its own, approved by Alice with Dora as deputy."""
-    account = str(70000 + uuid.uuid4().int % 9000)
+    account = str(82000 + uuid.uuid4().int % 8000)  # clear of the fixture accounts 700xx
     for oid, name in ((ALICE, "Alice Approver"), (DORA, "Dora Deputy"), (OTTO, "Otto Other")):
         save_approver(app, ADMIN, oid, name, f"{name.split()[0].lower()}@maxasp-test.example")
         set_absent(app, ADMIN, oid, False)
@@ -475,6 +475,26 @@ def test_an_answer_needs_three_real_characters(
     assert status_of(app, case_id) is CaseStatus.EXCEPTION
 
 
+def test_the_database_wants_three_real_characters_to_reject_instead_of_answering(
+    app: Engine, client: TestClient, entra: FakeEntra, vendor: str
+) -> None:
+    case_id = waiting_case(app, vendor)
+    assert ask(client, entra, case_id).status_code == 200
+    exception_id = open_query(app, case_id)
+    with (
+        pytest.raises(CaseRuleBroken, match=r"rejecting approver question .* at least 3"),
+        unit_of_work(app, Actor.user(BENJAMIN, "Benjamin Test")) as db,
+    ):
+        db.execute(
+            text(
+                "update exception_item set outcome = 'rejected', resolution = ' \u200bno '"
+                " where id = :id"
+            ),
+            {"id": exception_id},
+        )
+    assert status_of(app, case_id) is CaseStatus.EXCEPTION
+
+
 def test_only_finance_and_admin_answer_in_the_queue(
     app: Engine, client: TestClient, entra: FakeEntra, vendor: str
 ) -> None:
@@ -587,7 +607,7 @@ def test_after_a_vendor_change_the_new_vendors_approver_is_asked(
 ) -> None:
     case_id = waiting_case(app, vendor)
     assert ask(client, entra, case_id).status_code == 200
-    other = str(60000 + uuid.uuid4().int % 9000)
+    other = str(90000 + uuid.uuid4().int % 9000)
     save_approver(app, ADMIN, OTTO, "Otto Other", "otto@maxasp-test.example")
     set_vendor_approver(app, ADMIN, other, OTTO, None, False)
     with unit_of_work(app, INTAKE) as db:
@@ -597,6 +617,43 @@ def test_after_a_vendor_change_the_new_vendors_approver_is_asked(
     new = requests_of(app, case_id)[-1]
     assert new.recipient_id == OTTO
     assert new.vendor_account == other
+
+    # The new vendor has no account proposal yet. Otto enters one on the approval page and
+    # approves (code review of PR 209): the case does not get stuck.
+    otto = as_person(entra, OTTO, name="Otto Other", address="otto@maxasp-test.example")
+    page = client.get(f"/approval-requests/{case_id}", headers=otto).json()
+    assert page["may_decide"] is True
+    assert page["proposal"] is None
+    no_proposal = client.post(
+        f"/approval-requests/{case_id}/decision",
+        json={"request_id": new.id, "proposal_id": None, "choice": "approve", "comment": None},
+        headers=otto,
+    )
+    assert no_proposal.status_code == 409
+    entered = client.post(
+        f"/approval-requests/{case_id}/account",
+        json={
+            "request_id": new.id,
+            "gl_account": "4980",
+            "tax_key": "9",
+            "reason": "New vendor, booked like its other licences",
+        },
+        headers=otto,
+    )
+    assert entered.status_code == 200, entered.text
+    proposal_id = entered.json()["proposal"]["proposal_id"]
+    approved = client.post(
+        f"/approval-requests/{case_id}/decision",
+        json={
+            "request_id": new.id,
+            "proposal_id": proposal_id,
+            "choice": "approve",
+            "comment": None,
+        },
+        headers=otto,
+    )
+    assert approved.status_code == 200, approved.text
+    assert status_of(app, case_id) is CaseStatus.APPROVED
 
 
 # ------------------------------------------------------------------------------- the log
@@ -617,3 +674,66 @@ def test_the_log_names_ids_but_never_a_question_answer_or_name(
     assert str(case_id) in logged
     for secret in ("Zebra", "Giraffe", "Alice Approver", "Benjamin Test", ALICE_ADDRESS):
         assert secret not in logged
+
+
+# ------------------------------------------------------------- answering one's own question
+
+
+@pytest.mark.req("AP-03", "AP-05", "AP-08")
+def test_answering_ones_own_question_is_marked_and_keeps_the_reminder_clock(
+    app: Engine, client: TestClient, entra: FakeEntra, vendor: str
+) -> None:
+    """Compliance review of PR 209: an approver who also has the finance role may answer their
+    own question (Arita on #39, 23 Nov: allowed, but marked "same person"). It never restarts
+    the 3 and 5 working day clock of #40, however often it is done."""
+    case_id = waiting_case(app, vendor)
+    first = requests_of(app, case_id)[0]
+    alice_finance = as_person(entra, ALICE, Role.FINANCE)
+    for _ in range(2):
+        assert ask(client, entra, case_id, headers=alice_finance).status_code == 200
+        answered = reply(client, entra, open_query(app, case_id), headers=alice_finance)
+        assert answered.status_code == 200, answered.text
+        assert answered.json()["sent_to"] == "Alice Approver"
+
+    with app.connect() as db:
+        rows = list(
+            db.execute(
+                text(
+                    "select id, query_id, answered_by_asker, clock_from from approval_request"
+                    " where case_id = :id order by id"
+                ),
+                {"id": case_id},
+            )
+        )
+    assert [r.answered_by_asker for r in rows] == [False, True, True]
+    assert rows[0].clock_from is None and rows[0].query_id is None
+    assert all(r.query_id is not None for r in rows[1:])
+    # Both later requests count from the first one (never sent here, so its request time).
+    assert rows[1].clock_from == first.requested_at
+    assert rows[2].clock_from == first.requested_at
+
+    answers = events(app, case_id, "approval_query_answered")
+    assert [a.get("same_person") for a in answers] == [True, True]
+    page = client.get(f"/approval-requests/{case_id}", headers=alice(entra)).json()
+    assert all(q["same_person"] for q in page["queries"])
+
+
+def test_an_answer_by_someone_else_starts_a_new_reminder_clock(
+    app: Engine, client: TestClient, entra: FakeEntra, vendor: str
+) -> None:
+    case_id = waiting_case(app, vendor)
+    assert ask(client, entra, case_id).status_code == 200
+    assert reply(client, entra, open_query(app, case_id)).status_code == 200
+    with app.connect() as db:
+        new = db.execute(
+            text(
+                "select answered_by_asker, clock_from, query_id from approval_request"
+                " where case_id = :id order by id desc limit 1"
+            ),
+            {"id": case_id},
+        ).one()
+    assert new.answered_by_asker is False
+    assert new.clock_from is None  # #40 counts from this request's own sent time
+    assert new.query_id is not None
+    [answer_event] = events(app, case_id, "approval_query_answered")
+    assert "same_person" not in answer_event

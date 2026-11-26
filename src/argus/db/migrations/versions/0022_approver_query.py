@@ -10,8 +10,8 @@ This migration adds:
 
 - A new exception reason ``approver_query``. Only the person the newest approval request went
   to opens it, only while the case waits for approval, and only together with their question.
-  It ends only as ``answered``, by a person with an answer of at least three characters other
-  than spaces (``correction_trim``), or as ``rejected`` by a person. A job can do neither.
+  It ends only as ``answered`` or ``rejected``, by a person, with an answer or reason of at
+  least three characters other than spaces (``correction_trim``). A job can do neither.
   It is answered only when it is the case's only open exception, so the case goes straight
   back to the approver.
 - ``approval_query``: one row per question, never changed or removed. ARGUS names the case, the
@@ -32,6 +32,12 @@ This migration adds:
   otherwise the vendor's approver, or the deputy while the approver is away. If the vendor
   account changed while the question was open, the new vendor's approver is asked. A case
   whose question was answered goes back to Awaiting approval only with that new request.
+- When the person who asked answers their own question (an approver who also has the finance
+  or admin role), the answer is allowed, as Arita decided for #39 on 23 Nov, but marked: the
+  audit event says ``same_person``, and the new request is marked ``answered_by_asker`` and
+  keeps the reminder clock of the request the question was asked on (``clock_from``), so it
+  never restarts the 3 and 5 working day clock (compliance review of PR 209). #40 counts from
+  ``coalesce(clock_from, sent_at)``.
 - The audit events ``approval_queried`` and ``approval_query_answered``, written by the
   database only. They hold who and when, the request and exception, and a SHA 256 of the
   question or answer. The texts stay in ``approval_query`` and on the exception, out of the
@@ -78,6 +84,16 @@ create table if not exists approval_query (
 create unique index if not exists approval_query_once on approval_query (request_id);
 create unique index if not exists approval_query_exception on approval_query (exception_id);
 create index if not exists approval_query_case on approval_query (case_id, id);
+
+-- A request written after an answer names the question it answers. When the person who asked
+-- answered it themselves (an approver who also has the finance or admin role), it is marked
+-- answered_by_asker and keeps the reminder clock of the request the question was asked on, so
+-- asking and answering oneself never restarts the 3 and 5 working day clock of #40. #40 counts
+-- from coalesce(clock_from, sent_at). Set by the database only.
+alter table approval_request
+  add column if not exists query_id bigint references approval_query(id),
+  add column if not exists answered_by_asker boolean not null default false,
+  add column if not exists clock_from timestamptz;
 
 create or replace function approval_query_guard() returns trigger language plpgsql
 set search_path = pg_catalog, public, pg_temp as $$
@@ -239,10 +255,12 @@ begin
   if a[1] <> 'user' then
     raise exception 'only a person can answer or reject approver question %', old.id;
   end if;
+  -- An answer, and the reason for rejecting instead, both need 3 real characters.
+  if coalesce(length(correction_trim(new.resolution)), 0) < 3 then
+    raise exception '% approver question % needs at least 3 characters',
+      case new.outcome when 'answered' then 'answering' else 'rejecting' end, old.id;
+  end if;
   if new.outcome = 'answered' then
-    if coalesce(length(correction_trim(new.resolution)), 0) < 3 then
-      raise exception 'answering approver question % needs at least 3 characters', old.id;
-    end if;
     if exists (select 1 from exception_item
                where case_id = old.case_id and resolved_at is null and id <> old.id) then
       raise exception 'case % has another open exception; resolve it before answering '
@@ -278,7 +296,7 @@ begin
      or old.outcome is not null then
     return null;
   end if;
-  select id, request_id into q from approval_query where exception_id = new.id;
+  select id, request_id, asked_by into q from approval_query where exception_id = new.id;
   insert into audit_event (case_id, exception_id, event_type, details)
   values (new.case_id, new.id, 'approval_query_answered',
           jsonb_strip_nulls(jsonb_build_object(
@@ -286,7 +304,10 @@ begin
             'request_id', q.request_id,
             'name', new.resolved_by_name,
             'sign_in_address', new.resolved_by_address,
-            'answer_sha256', encode(sha256(convert_to(new.resolution, 'UTF8')), 'hex'))));
+            'answer_sha256', encode(sha256(convert_to(new.resolution, 'UTF8')), 'hex'),
+            -- The person who asked answered it themselves (Arita on #39, 23 Nov: allowed,
+            -- but marked).
+            'same_person', case when lower(q.asked_by) = lower(new.resolved_by) then true end)));
   return null;
 end $$;
 create or replace trigger exception_approver_query_audit after update on exception_item
@@ -301,6 +322,7 @@ declare
   c record;
   v record;
   x record;
+  qq record;
   prefer text;
 begin
   if tg_op = 'UPDATE' then
@@ -350,8 +372,10 @@ begin
                where case_id = new.case_id and requested_at >= x.resolved_at) then
       raise exception 'case % went back to its approver already', new.case_id;
     end if;
-    select split_part(q.asked_by, ':', 2) into prefer
-    from approval_query q where q.exception_id = x.id;
+    select q.id, q.asked_by, r.sent_at, r.requested_at, r.clock_from into qq
+    from approval_query q join approval_request r on r.id = q.request_id
+    where q.exception_id = x.id;
+    prefer := split_part(qq.asked_by, ':', 2);
   end if;
   if c.partner_account is null then
     raise exception 'case % has no vendor account yet', new.case_id;
@@ -396,6 +420,16 @@ begin
   new.requested_at := clock_timestamp();
   new.txid := txid_current();
   new.sent_at := null;
+  if a[1] = 'user' then
+    new.query_id := qq.id;
+    new.answered_by_asker := lower(qq.asked_by) = lower(a[1] || ':' || a[2]);
+    new.clock_from := case when new.answered_by_asker
+                           then coalesce(qq.clock_from, qq.sent_at, qq.requested_at) end;
+  else
+    new.query_id := null;
+    new.answered_by_asker := false;
+    new.clock_from := null;
+  end if;
   return new;
 end $$;
 
@@ -614,6 +648,8 @@ do $$ begin
   drop function exception_approver_query_asked();
   drop trigger exception_approver_query_guard on exception_item;
   drop function exception_approver_query_guard();
+  alter table approval_request
+    drop column query_id, drop column answered_by_asker, drop column clock_from;
   drop table approval_query;
   drop function approval_query_with_move();
   drop function approval_query_audit();

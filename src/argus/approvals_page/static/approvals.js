@@ -258,7 +258,12 @@
     block.append(el("h3", "G/L account and tax key"));
     const p = v.proposal;
     if (!p) {
-      block.append(el("p", "ARGUS has no account proposal for this invoice, so it cannot be approved yet.", "problem"));
+      // For example after the vendor changed while a question was open (#192): the person
+      // asked enters the account and tax key, then approves.
+      block.append(el("p", v.may_decide
+        ? "ARGUS has no account proposal for this vendor. Enter the G/L account and tax key, then approve."
+        : "ARGUS has no account proposal for this invoice, so it cannot be approved yet.", "problem"));
+      if (v.may_decide) block.append(changeForm(v));
       return block;
     }
     const facts = el("dl", null, "facts");
@@ -293,18 +298,18 @@
 
   function changeForm(v) {
     const wrap = el("div", null, "change");
-    const open = el("button", "Change account", "button");
+    const open = el("button", v.proposal ? "Change account" : "Enter account", "button");
     open.type = "button";
     const form = el("form", null, "correction");
     form.hidden = true;
     const gl = el("input");
     gl.inputMode = "numeric";
     gl.autocomplete = "off";
-    gl.value = v.proposal.gl_account;
+    gl.value = v.proposal ? v.proposal.gl_account : "";
     const key = el("input");
     key.inputMode = "numeric";
     key.autocomplete = "off";
-    key.value = v.proposal.tax_key;
+    key.value = v.proposal ? v.proposal.tax_key : "";
     const reason = el("textarea", null, "reason");
     reason.maxLength = 500;
     reason.placeholder = "Why is this account right? For example: software licence, not office supplies";
@@ -399,7 +404,8 @@
       block.append(el("p", "Question from " + who + " on " + berlinTime(q.asked_at) + ":", "sub"));
       block.append(el("blockquote", q.question, "comment"));
       if (q.outcome === "answered") {
-        block.append(el("p", "Answer from " + q.answered_by_name + " on " + berlinTime(q.answered_at) + ":", "sub"));
+        block.append(el("p", "Answer from " + q.answered_by_name + (q.same_person ? " (the same person who asked)" : "") +
+          " on " + berlinTime(q.answered_at) + ":", "sub"));
         block.append(el("blockquote", q.answer, "comment answer"));
       } else if (q.outcome === "rejected") {
         block.append(el("p", "Rejected by " + q.answered_by_name + " on " + berlinTime(q.answered_at) + " instead of answering:", "sub"));

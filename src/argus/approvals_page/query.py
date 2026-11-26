@@ -190,6 +190,8 @@ class Query:
     answer: str | None  # the answer, or the reason for rejecting
     answered_by_name: str | None
     answered_at: datetime | None
+    # The person who asked answered it themselves (allowed, but marked, as for #39).
+    same_person: bool = False
 
 
 def queries_of(db: Connection, case_id: int) -> list[Query]:
@@ -199,7 +201,8 @@ def queries_of(db: Connection, case_id: int) -> list[Query]:
             """
             select q.id, q.request_id, q.exception_id, q.question, q.asked_by, q.asked_by_name,
                    q.asked_as, q.on_behalf_of_name, q.asked_at, e.outcome, e.resolution,
-                   e.resolved_by_name, e.resolved_at
+                   e.resolved_by_name, e.resolved_at,
+                   coalesce(lower(q.asked_by) = lower(e.resolved_by), false) as same_person
             from approval_query q join exception_item e on e.id = q.exception_id
             where q.case_id = :id
             order by q.id
@@ -222,6 +225,7 @@ def queries_of(db: Connection, case_id: int) -> list[Query]:
             answer=r["resolution"],
             answered_by_name=r["resolved_by_name"],
             answered_at=r["resolved_at"],
+            same_person=bool(r["same_person"]),
         )
         for r in rows
     ]
