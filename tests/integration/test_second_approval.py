@@ -12,7 +12,7 @@ addresses, amounts and rates are made up.
 import itertools
 import uuid
 from collections.abc import Mapping
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 import pytest
@@ -34,8 +34,15 @@ from argus.approvers.table import (
 )
 from argus.auth import Role
 from argus.cases.model import Actor, CaseKind, CaseStatus, ExceptionReason, Outcome
-from argus.cases.store import CaseRuleBroken, create_case, get_case, move_case, unit_of_work
-from argus.intake.approvals import Approvals, request_approvals, stored_requests
+from argus.cases.store import (
+    CaseRuleBroken,
+    correct_case,
+    create_case,
+    get_case,
+    move_case,
+    unit_of_work,
+)
+from argus.intake.approvals import Approvals, request_approvals, stored_requests, wise_time
 from argus.intake.graph import GraphCall, GraphClient
 from argus.invoices_page.resolve import resolve_from_page
 from argus.invoices_page.trail import case_trail
@@ -56,22 +63,33 @@ _numbers = itertools.count(860_000_000 + uuid.uuid4().int % 1_000_000 * 100)
 
 
 class Rates:
-    """A made up Wise: EUR for one unit of each currency, or a failure."""
+    """A made up Wise: EUR for one unit of each currency, at the time asked (as Wise answers
+    with the rate of that minute), or a failure. ``time`` and ``pair`` make it answer wrong."""
 
-    def __init__(self, per_unit: Mapping[str, str], *, fail: bool = False) -> None:
+    def __init__(
+        self,
+        per_unit: Mapping[str, str],
+        *,
+        fail: bool = False,
+        time: str | None = None,
+        pair: tuple[str, str] | None = None,
+    ) -> None:
         self.per_unit = dict(per_unit)
         self.fail = fail
+        self.time = time
+        self.pair = pair
         self.asked: list[tuple[str, str, str | None]] = []
 
     def get_rate(self, source: str, target: str, at: str | None = None) -> Mapping[str, Any]:
         self.asked.append((source, target, at))
         if self.fail:
             raise RuntimeError("Wise is down")
+        answer_source, answer_target = self.pair or (source, target)
         return {
             "rate": float(self.per_unit[source]),
-            "source": source,
-            "target": target,
-            "time": "2026-11-26T10:00:00+0000",
+            "source": answer_source,
+            "target": answer_target,
+            "time": self.time or f"{at}+0000",
         }
 
 
@@ -124,14 +142,19 @@ def vendor(app: Engine, approver: str | None = None) -> tuple[str, str]:
 
 
 def waiting_case(
-    app: Engine, approvals: Approvals, account: str, cents: int, currency: str = "EUR"
+    app: Engine,
+    approvals: Approvals,
+    account: str,
+    cents: int,
+    currency: str = "EUR",
+    kind: CaseKind = CaseKind.INCOMING_INVOICE,
 ) -> int:
     """A checked case, sent to its approver by the pass."""
     number = f"SA-{uuid.uuid4().hex[:8]}"
     with unit_of_work(app, INTAKE) as db:
         case_id = create_case(
             db,
-            _kind(),
+            kind,
             partner_account=account,
             document_number=number,
             gross_cents=cents,
@@ -151,10 +174,6 @@ def waiting_case(
     request_approvals(app, approvals, cases=[case_id])
     assert status_of(app, case_id) is CaseStatus.AWAITING_APPROVAL
     return case_id
-
-
-def _kind() -> CaseKind:
-    return CaseKind.INCOMING_INVOICE
 
 
 def newest(app: Engine, case_id: int) -> dict[str, Any]:
@@ -260,7 +279,7 @@ def test_eur_5000_00_needs_one_approval_and_5000_01_needs_two(
 def test_a_credit_note_counts_without_its_sign(app: Engine, fake: FastAPI) -> None:
     approvals = approvals_with(app, fake)
     account, _ = vendor(app)
-    case_id = waiting_case(app, approvals, account, -500_001)
+    case_id = waiting_case(app, approvals, account, -500_001, kind=CaseKind.INCOMING_CREDIT_NOTE)
 
     assert page_decides(app, case_id) is CaseStatus.AWAITING_APPROVAL
     amount = amount_of(app, case_id)
@@ -294,11 +313,12 @@ def test_another_currency_is_compared_at_the_wise_rate_of_the_first_approval(
         decided_at: datetime = db.execute(
             text("select decided_at from approval_decision where case_id = :id"), {"id": case_id}
         ).scalar_one()
-    assert rates.asked == [("USD", "EUR", decided_at.isoformat())]
+    assert rates.asked == [("USD", "EUR", wise_time(decided_at))]
+    assert "." not in str(rates.asked[0][2])  # to the second, as Wise's examples write it
     amount = amount_of(app, case_id)
     assert amount is not None
     assert (amount["source"], str(amount["rate"]), amount["eur_minor"]) == ("wise", rate, eur)
-    assert amount["rate_time"].isoformat().startswith("2026-11-26T10:00:00")
+    assert abs(amount["rate_time"] - decided_at) < timedelta(seconds=1)
     assert amount["written_by"] == "system:approval-request"
     (checked,) = events_of(app, case_id, "approval_amount_checked")
     assert checked["details"]["eur_minor"] == eur
@@ -672,3 +692,116 @@ def test_only_an_admin_sets_the_second_approver_by_entra_id(app: Engine) -> None
     finally:
         if before:
             set_second_approver(app, ADMIN, before)
+
+
+# ----------------------------------------------- review fixes on PR 210 (code and compliance)
+
+
+@pytest.mark.usefixtures("live", "benjamin")
+@pytest.mark.parametrize(
+    "wrong",
+    [
+        Rates({"USD": "0.5"}, time="2020-01-01T00:00:00+0000"),  # an old or cached rate
+        Rates({"USD": "0.5"}, pair=("GBP", "EUR")),  # a rate for other currencies
+    ],
+)
+def test_a_wise_rate_from_another_time_or_pair_is_not_used(
+    app: Engine, fake: FastAPI, wrong: Rates
+) -> None:
+    """Code review of PR 210: a stale rate of 0.5 made USD 9,000 pass as EUR 4,500, and the job
+    approved it after one person. Now the case waits, as for any unreadable rate."""
+    account, _ = vendor(app)
+    case_id = waiting_case(app, approvals_with(app, fake), account, 900_000, "USD")
+    page_decides(app, case_id)
+
+    result = request_approvals(app, approvals_with(app, fake, wrong), cases=[case_id])
+
+    assert (result.rate_waiting, result.completed) == (1, 0)
+    assert amount_of(app, case_id) is None
+    assert status_of(app, case_id) is CaseStatus.AWAITING_APPROVAL
+
+
+@pytest.mark.usefixtures("live", "benjamin")
+def test_the_database_refuses_a_rate_time_away_from_the_first_approval(
+    app: Engine, fake: FastAPI
+) -> None:
+    account, _ = vendor(app)
+    case_id = waiting_case(app, approvals_with(app, fake), account, 900_000, "USD")
+    page_decides(app, case_id)
+    decision = newest_decision(app, case_id)
+    for shift in ("-2 hours", "10 minutes"):
+        with (
+            pytest.raises(CaseRuleBroken, match="not from the time of the first approval"),
+            unit_of_work(app, JOB) as db,
+        ):
+            db.execute(
+                text(
+                    "insert into approval_amount (decision_id, rate, rate_time)"
+                    " select id, 0.5, decided_at + cast(:shift as interval)"
+                    " from approval_decision where id = :d"
+                ),
+                {"d": decision, "shift": shift},
+            )
+    assert amount_of(app, case_id) is None
+
+
+@pytest.mark.req("AP-09", "AP-08")
+@pytest.mark.usefixtures("live", "benjamin")
+@pytest.mark.parametrize(("cents", "currency"), [(2_000_000, "USD"), (900_000, "EUR")])
+def test_number_amount_and_currency_are_locked_once_the_first_approval_is_in(
+    app: Engine, fake: FastAPI, cents: int, currency: str
+) -> None:
+    """Compliance review of PR 210: a correction from USD 20,000 to USD 100 after the approval
+    let the job approve USD 100, and EUR 9,000 could reach Benjamin as EUR 90,000."""
+    approvals = approvals_with(app, fake)
+    account, _ = vendor(app)
+    case_id = waiting_case(app, approvals, account, cents, currency)
+    page_decides(app, case_id)
+    with (
+        pytest.raises(CaseRuleBroken, match="number, amount and currency cannot change"),
+        unit_of_work(app, Actor.user(ARITA, "Arita Test")) as db,
+    ):
+        case = get_case(db, case_id)
+        correct_case(
+            db,
+            case_id,
+            document_number=str(case.document_number),
+            gross_cents=cents // 200 if currency == "USD" else cents * 10,
+            currency=currency,
+            reason="Typo in the amount",
+            name="Arita Test",
+        )
+    with app.connect() as db:
+        assert get_case(db, case_id).gross_cents == cents
+
+
+def test_nobody_sets_themselves_as_second_approver(app: Engine) -> None:
+    """Compliance review of PR 210: Arita's same person exception is for Benjamin, not for the
+    person who holds the admin role."""
+    admin_id, _ = person(app, "Ada Admin")
+    with pytest.raises(CaseRuleBroken, match="themselves"):
+        set_second_approver(
+            app, ChangedBy(Actor.user(admin_id, "Ada Admin"), "Ada Admin"), admin_id
+        )
+
+
+@pytest.mark.usefixtures("live")
+def test_benjamin_as_deputy_gets_the_right_words_in_the_queue(
+    app: Engine, fake: FastAPI, benjamin: str
+) -> None:
+    approvals = approvals_with(app, fake)
+    account = str(next(_numbers))
+    alice, _ = person(app, "Alice Approver")
+    set_vendor_approver(app, ADMIN, account, alice, benjamin, False)
+    set_absent(app, ADMIN, alice, True)
+    case_id = waiting_case(app, approvals, account, 800_000)
+    page_decides(app, case_id)
+
+    request_approvals(app, approvals, cases=[case_id])
+
+    with app.connect() as db:
+        detail: str = db.execute(
+            text("select detail from exception_item where case_id = :id and resolved_at is null"),
+            {"id": case_id},
+        ).scalar_one()
+    assert "Benjamin Second gave the first approval as deputy of Alice Approver" in detail

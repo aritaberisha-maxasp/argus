@@ -58,7 +58,7 @@ moves and sends nothing: it reads the mode at the start and again before each em
 import logging
 from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any, Protocol
 
@@ -350,16 +350,37 @@ class RateUnreadable(ValueError):
     """Wise answered, but not with a rate above 0 and its time."""
 
 
-def _rate_of(answer: Mapping[str, Any]) -> tuple[Decimal, str]:
-    """The rate and its time from a Wise answer, or RateUnreadable. The time stays as Wise wrote
-    it; the database reads it."""
+# How far the time of a Wise rate may lie from the first approval: Wise answers with the rate
+# of the minute (at most the hour) at or before the time asked, and clocks differ a little. The
+# database holds the same window (migration 0023).
+RATE_BEFORE = timedelta(hours=1)
+RATE_AFTER = timedelta(minutes=5)
+
+
+def wise_time(moment: datetime) -> str:
+    """A time as Wise's rate examples write it: UTC, to the second, no offset."""
+    return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def _rate_of(
+    answer: Mapping[str, Any], currency: str, decided_at: datetime
+) -> tuple[Decimal, datetime]:
+    """The rate and its time from a Wise answer, or RateUnreadable. Only a rate from the
+    currency to EUR, from the time of the first approval, counts (code review of PR 210)."""
     try:
         rate = Decimal(str(answer["rate"]))
-        at = str(answer["time"]).strip()
-    except (KeyError, TypeError, InvalidOperation):
-        raise RateUnreadable("Wise gave no rate and time") from None
-    if not rate.is_finite() or rate <= 0 or not at:
+        at = datetime.fromisoformat(str(answer["time"]).strip())
+        pair = (str(answer["source"]).upper(), str(answer["target"]).upper())
+    except (KeyError, TypeError, ValueError, InvalidOperation):
+        raise RateUnreadable("Wise gave no rate, time and currencies") from None
+    if at.tzinfo is None:
+        at = at.replace(tzinfo=UTC)  # Wise writes UTC
+    if not rate.is_finite() or rate <= 0:
         raise RateUnreadable("Wise gave no rate above 0")
+    if pair != (currency, "EUR"):
+        raise RateUnreadable("Wise gave a rate for other currencies")
+    if not decided_at - RATE_BEFORE <= at <= decided_at + RATE_AFTER:
+        raise RateUnreadable("Wise gave a rate from another time than the first approval")
     return rate, at
 
 
@@ -379,9 +400,8 @@ def _read_rates(
             result.rate_waiting += 1
             continue
         try:
-            rate, at = _rate_of(
-                approvals.rates.get_rate(row.currency, "EUR", at=decided_at.isoformat())
-            )
+            answer = approvals.rates.get_rate(row.currency, "EUR", at=wise_time(decided_at))
+            rate, at = _rate_of(answer, row.currency, decided_at)
         except Exception:
             # Never below the line by default: the case waits and the next sweep tries again.
             log.exception("Wise rate for case %s not read, next sweep retries", case_id)
@@ -398,7 +418,12 @@ def _read_rates(
 
 
 def _store_rate(
-    db: Connection, case_id: int, decision_id: int, rate: Decimal, at: str, result: ApprovalPass
+    db: Connection,
+    case_id: int,
+    decision_id: int,
+    rate: Decimal,
+    at: datetime,
+    result: ApprovalPass,
 ) -> None:
     db.execute(text("select id from invoice_case where id = :id for update"), {"id": case_id})
     if get_case(db, case_id).status is not CaseStatus.AWAITING_APPROVAL:
@@ -406,7 +431,7 @@ def _store_rate(
     above: bool = db.execute(
         text(
             "insert into approval_amount (decision_id, rate, rate_time)"
-            " values (:decision, :rate, cast(:at as timestamptz)) returning above_line"
+            " values (:decision, :rate, :at) returning above_line"
         ),
         {"decision": decision_id, "rate": rate, "at": at},
     ).scalar_one()
@@ -445,6 +470,7 @@ class _Second:
     absent: bool
     gave_first: bool  # he gave the first approval of this case too
     may_give_both: bool  # a person let the same person exception carry on since then
+    deputy_for: str | None = None  # he gave the first approval as deputy of this approver
 
 
 def _second_for(db: Connection, case_id: int, decision_id: int) -> _Second | None:
@@ -455,7 +481,8 @@ def _second_for(db: Connection, case_id: int, decision_id: int) -> _Second | Non
             " exists (select 1 from exception_item e where e.case_id = :case"
             "   and e.reason::text = 'second_approver_same_person'"
             "   and e.outcome = 'accepted_with_comment' and e.resolved_at > d.decided_at)"
-            "   as may_give_both"
+            "   as may_give_both,"
+            " case when d.decided_as = 'deputy' then d.on_behalf_of_name end as deputy_for"
             " from second_approver s join approver a on a.object_id = s.approver_id"
             " cross join approval_decision d where d.id = :decision"
         ),
@@ -464,7 +491,13 @@ def _second_for(db: Connection, case_id: int, decision_id: int) -> _Second | Non
     if row is None:
         return None
     return _Second(
-        row.object_id, row.name, row.email, row.absent, row.gave_first, row.may_give_both
+        row.object_id,
+        row.name,
+        row.email,
+        row.absent,
+        row.gave_first,
+        row.may_give_both,
+        row.deputy_for,
     )
 
 
@@ -520,8 +553,9 @@ def _second_one(
             db,
             ExceptionReason.SECOND_APPROVER_SAME_PERSON,
             (
-                f"{_ABOVE} {second.name} is the approver of this vendor and also the second"
-                " approver, and gave the first approval. Arita decided he may give the second"
+                f"{_ABOVE} {second.name} gave the first approval"
+                + (f" as deputy of {second.deputy_for}" if second.deputy_for else "")
+                + " and is also the second approver. Arita decided he may give the second"
                 " approval too. Carry on to send him the second request; his second approval"
                 ' is then marked "same person" in the audit trail. Or reject the invoice.'
             ),

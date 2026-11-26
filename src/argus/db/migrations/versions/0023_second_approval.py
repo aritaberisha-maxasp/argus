@@ -65,9 +65,6 @@ down_revision = "0021"
 branch_labels = None
 depends_on = None
 
-# Above this many euro cents, an invoice needs the second approval (AP-09).
-LINE_CENTS = 500_000
-
 
 def _earlier(prefix: str) -> ModuleType:
     """An earlier migration of this folder, to reuse its SQL instead of copying it."""
@@ -123,6 +120,11 @@ begin
   end if;
   new.only_one := true;
   new.approver_id := lower(btrim(new.approver_id));
+  -- Arita's same person exception is for Benjamin, not for whoever holds the admin role
+  -- (compliance review of PR 210): nobody names themselves.
+  if lower((current_actor())[2]) = new.approver_id then
+    raise exception 'nobody can set themselves as the second approver';
+  end if;
   if not exists (select 1 from approver where object_id = new.approver_id) then
     raise exception 'add the second approver to the approver table first';
   end if;
@@ -243,9 +245,17 @@ begin
     if a[1] <> 'system' or a[2] <> 'approval-request' then
       raise exception 'only ARGUS stores the Wise rate of case %', d.case_id;
     end if;
-    if new.rate is null or new.rate <= 0 or new.rate_time is null
-       or new.rate_time > clock_timestamp() + interval '5 minutes' then
+    if new.rate is null or new.rate <= 0 or new.rate_time is null then
       raise exception 'the Wise rate for case % needs a rate above 0 and its time', d.case_id;
+    end if;
+    -- The rate at the time of the first approval (#18 question 9), not a cached or old one
+    -- (code review of PR 210). Wise answers a question for a past time with the rate of the
+    -- minute (at most the hour) at or before it, so the rate may be up to an hour older than
+    -- the decision and a few minutes younger, for clocks that differ. Anything else is refused.
+    if new.rate_time < d.decided_at - interval '1 hour'
+       or new.rate_time > d.decided_at + interval '5 minutes' then
+      raise exception 'the Wise rate for case % is not from the time of the first approval',
+        d.case_id;
     end if;
     new.source := 'wise';
   end if;
@@ -585,6 +595,27 @@ end $$;
 create or replace trigger account_proposal_after_decision before insert on account_proposal
   for each row execute function account_proposal_after_decision();
 
+-- Once the newest request has a decision, the invoice number, amount and currency the person
+-- approved stay as they were while the case waits (compliance review of PR 210): otherwise a
+-- correction could change what the job or the second approver settles. A correction goes
+-- through this update too (0013), so it is refused the same way. The way out is a rejection.
+create or replace function case_amount_after_decision() returns trigger language plpgsql
+set search_path = pg_catalog, public, pg_temp as $$
+begin
+  if old.status = 'awaiting_approval'
+     and (new.document_number, new.gross_minor, new.currency)
+         is distinct from (old.document_number, old.gross_minor, old.currency)
+     and exists (
+       select 1 from approval_decision d
+       where d.request_id = (select max(id) from approval_request where case_id = old.id)) then
+    raise exception 'case % was decided on already; its number, amount and currency cannot '
+      'change now', old.id;
+  end if;
+  return new;
+end $$;
+create or replace trigger case_amount_after_decision before update on invoice_case
+  for each row execute function case_amount_after_decision();
+
 -- ------------------------------------------------------------------------ the case rules
 
 -- Whether ARGUS may complete the approval a person gave: the newest request is a first one, a
@@ -730,6 +761,8 @@ do $$ begin
   drop function audit_second_approval_events();
   drop trigger second_approver_exception_guard on exception_item;
   drop function second_approver_exception_guard();
+  drop trigger case_amount_after_decision on invoice_case;
+  drop function case_amount_after_decision();
   drop trigger account_proposal_after_decision on account_proposal;
   drop function account_proposal_after_decision();
   drop trigger approval_decision_step on approval_decision;
