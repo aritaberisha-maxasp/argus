@@ -587,7 +587,9 @@ begin
        join lateral (select id from approval_request where case_id = c.id
                      order by id desc limit 1) q on true
        join approval_decision d on d.request_id = q.id
-       where c.id = new.case_id and c.status = 'awaiting_approval') then
+       where c.id = new.case_id
+         and (c.status = 'awaiting_approval'
+              or (c.status = 'exception' and c.resume_status = 'awaiting_approval'))) then
     raise exception 'case % was decided on already; its account cannot change now', new.case_id;
   end if;
   return new;
@@ -602,7 +604,9 @@ create or replace trigger account_proposal_after_decision before insert on accou
 create or replace function case_amount_after_decision() returns trigger language plpgsql
 set search_path = pg_catalog, public, pg_temp as $$
 begin
-  if old.status = 'awaiting_approval'
+  -- Also while it sits in the exception queue on the way (compliance re-check of PR 210).
+  if (old.status = 'awaiting_approval'
+      or (old.status = 'exception' and old.resume_status = 'awaiting_approval'))
      and (new.document_number, new.gross_minor, new.currency)
          is distinct from (old.document_number, old.gross_minor, old.currency)
      and exists (

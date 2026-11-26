@@ -805,3 +805,50 @@ def test_benjamin_as_deputy_gets_the_right_words_in_the_queue(
             {"id": case_id},
         ).scalar_one()
     assert "Benjamin Second gave the first approval as deputy of Alice Approver" in detail
+
+
+@pytest.mark.req("AP-09", "AP-08")
+@pytest.mark.usefixtures("live")
+def test_the_lock_holds_while_the_case_is_in_the_exception_queue(
+    app: Engine, fake: FastAPI, benjamin: str
+) -> None:
+    """Compliance re-check of PR 210: EUR 9,000 approved, the case waits in the queue for a
+    second approver, a correction to EUR 90,000 there must be refused, and so must a new
+    account."""
+    approvals = approvals_with(app, fake)
+    account, _ = vendor(app)
+    case_id = waiting_case(app, approvals, account, 900_000)
+    page_decides(app, case_id)
+    set_absent(app, ADMIN, benjamin, True)
+    request_approvals(app, approvals, cases=[case_id])
+    found = open_exception_of(app, case_id)
+    assert found is not None and status_of(app, case_id) is CaseStatus.EXCEPTION
+    finance = Actor.user(ARITA, "Arita Test")
+    with (
+        pytest.raises(CaseRuleBroken, match="number, amount and currency cannot change"),
+        unit_of_work(app, finance) as db,
+    ):
+        correct_case(
+            db,
+            case_id,
+            document_number=str(get_case(db, case_id).document_number),
+            gross_cents=9_000_000,
+            currency="EUR",
+            reason="Typo in the amount",
+            name="Arita Test",
+            exception_id=found[0],
+        )
+    with (
+        pytest.raises(CaseRuleBroken, match="decided on already"),
+        unit_of_work(app, finance) as db,
+    ):
+        db.execute(
+            text(
+                "insert into account_proposal (case_id, vendor_account, gl_account, tax_key,"
+                " chart, source, proposed_by_name, reason)"
+                " values (:c, :v, '4980', '', 'SKR03', 'person', 'Arita Test', 'Other account')"
+            ),
+            {"c": case_id, "v": account},
+        )
+    with app.connect() as db:
+        assert get_case(db, case_id).gross_cents == 900_000
