@@ -22,7 +22,7 @@ import re
 import time
 from collections.abc import Callable, Generator, Iterator
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from enum import StrEnum
 from typing import Any, Protocol
 from urllib.parse import quote, unquote, urlsplit
@@ -378,10 +378,113 @@ def approval_body(mail: ApprovalMail) -> dict[str, Any]:
     }
 
 
-def approval_body_problem(content: bytes, expected: ApprovalMail | None) -> str | None:
+@dataclass(frozen=True)
+class NudgeMail:
+    """One reminder or escalation as the email shows it (#40). Built from the stored row, so a
+    reminder only goes to the person on the request and an escalation only to the escalation
+    address. It holds the same invoice fields as the approval request and nothing more (NF-03).
+    """
+
+    nudge_id: int
+    case_id: int
+    kind: str  # "reminder" or "escalation"
+    recipient_address: str
+    recipient_name: str | None  # the person asked, for a reminder; None for an escalation
+    asked_name: str  # who the invoice waits on
+    on_behalf_of_name: str | None  # the approver who is away, when a deputy was asked
+    asked_on: date  # the Berlin day the clock started
+    vendor_name: str
+    document_number: str
+    gross_cents: int
+    currency: str
+    credit_note: bool
+    link: str
+    reminded: bool = False  # for an escalation: a reminder for this wait went out for sure
+
+
+REMINDER_DAYS = 3
+ESCALATION_DAYS = 5
+
+
+def render_nudge(mail: NudgeMail) -> tuple[str, str]:
+    """The subject and plain text of a reminder or an escalation. Only these words, the fields
+    of :class:`NudgeMail` and the link. The Graph client refuses anything else."""
+    what = "credit note" if mail.credit_note else "invoice"
+    vendor = _one_line(mail.vendor_name)
+    number = _one_line(mail.document_number)
+    asked = _one_line(mail.asked_name)
+    since = mail.asked_on.strftime("%d.%m.%Y")
+    facts = (
+        f"Vendor: {vendor}\n"
+        f"{what.capitalize()} number: {number}\n"
+        f"Gross amount: {approval_amount(mail.gross_cents, mail.currency)}\n\n"
+    )
+    if mail.kind == "reminder":
+        deputy = (
+            f"You got it as the deputy of {_one_line(mail.on_behalf_of_name)}, who is away.\n\n"
+            if mail.on_behalf_of_name
+            else ""
+        )
+        subject = f"ARGUS reminder: please approve {what} {number} from {vendor}"
+        text_body = (
+            f"Hello {_one_line(mail.recipient_name or asked)},\n\n"
+            f"This {what} has waited for your approval since {since}, "
+            f"{REMINDER_DAYS} working days now.\n\n"
+            f"{deputy}{facts}"
+            f"Open it here to approve or reject it: {mail.link}\n\n"
+            f"If it is still waiting after {ESCALATION_DAYS} working days, ARGUS lets the finance"
+            " team know. ARGUS does not read replies to this email.\n"
+        )
+        return subject, text_body
+    deputy = (
+        f" {asked} was asked as the deputy of {_one_line(mail.on_behalf_of_name)}, who is away."
+        if mail.on_behalf_of_name
+        else ""
+    )
+    reminded = f" ARGUS reminded them after {REMINDER_DAYS} working days." if mail.reminded else ""
+    subject = (
+        f"ARGUS: {what} {number} from {vendor} has waited {ESCALATION_DAYS} working days"
+        " for approval"
+    )
+    text_body = (
+        "Hello,\n\n"
+        f"{asked} was asked on {since} to approve this {what} and has not decided after"
+        f" {ESCALATION_DAYS} working days.{reminded}{deputy}\n\n"
+        f"{facts}"
+        f"See it here: {mail.link}\n\n"
+        f"Only {asked} can approve or reject it. To move it on, ask them. Or, in the approver"
+        " table, give this vendor another approver, or mark the approver away so the deputy"
+        " gets it. ARGUS then sends the invoice to the new person. ARGUS does not read replies"
+        " to this email.\n"
+    )
+    return subject, text_body
+
+
+def nudge_body(mail: NudgeMail) -> dict[str, Any]:
+    """The sendMail body of a reminder or an escalation."""
+    subject, text_body = render_nudge(mail)
+    return {
+        "message": {
+            "subject": subject,
+            "body": {"contentType": "Text", "content": text_body},
+            "toRecipients": [{"emailAddress": {"address": mail.recipient_address}}],
+        },
+        "saveToSentItems": True,
+    }
+
+
+def stored_body(mail: "ApprovalMail | NudgeMail") -> dict[str, Any]:
+    """The sendMail body of a stored approval request, reminder or escalation."""
+    return nudge_body(mail) if isinstance(mail, NudgeMail) else approval_body(mail)
+
+
+def approval_body_problem(
+    content: bytes, expected: "ApprovalMail | NudgeMail | None"
+) -> str | None:
     """Why a sendMail body of the approval client is refused, or None when it is fine. It must
     be exactly the email of the stored request: the one person on the request, the subject and
-    text built from its fields, and nothing else (#191)."""
+    text built from its fields, and nothing else (#191). A reminder or escalation (#40) is
+    checked the same way against its stored row."""
     if expected is None:
         return "no stored approval request is being sent"
     try:
@@ -401,7 +504,7 @@ def approval_body_problem(content: bytes, expected: ApprovalMail | None) -> str 
         or to[0].lower() != expected.recipient_address.lower()
     ):
         return "the approval request goes to someone who is not the person on the request"
-    wanted = approval_body(expected)["message"]
+    wanted = stored_body(expected)["message"]
     if message["subject"] != wanted["subject"] or message["body"] != wanted["body"]:
         return "the approval request holds more or other text than the stored request"
     return None
@@ -514,7 +617,7 @@ class _GuardedTransport(httpx.BaseTransport):
         self._approvals = GraphCall.SEND_APPROVAL_REQUEST in calls
         # The stored request being sent right now, as read from the database by the client's
         # lookup, set by GraphClient.send_approval_request.
-        self.expected_approval: ApprovalMail | None = None
+        self.expected_approval: ApprovalMail | NudgeMail | None = None
         self._folder_messages = re.compile(
             re.escape(f"{base_path.rstrip('/')}/users/{quote(mailbox, safe='@')}/mailFolders/")
             + f"(?P<folder>{_MESSAGE_ID})/messages"
@@ -596,6 +699,7 @@ class GraphClient:
         calls: frozenset[GraphCall] = ALL_CALLS,
         approval_lookup: Callable[[int], ApprovalMail | None] | None = None,
         approval_domain: str | None = None,
+        nudge_lookup: Callable[[int], NudgeMail | None] | None = None,
     ) -> None:
         """``standin=True`` allows plain http, for the fake Graph only, never for Graph.
 
@@ -614,7 +718,11 @@ class GraphClient:
         sent already or its case no longer waits for approval. The approval client checks every
         email against it, never against what the caller hands it (#191). ``approval_domain`` is
         Max ASP's own email domain (``ARGUS_OWN_DOMAIN``): an approval request goes only to an
-        address there, whatever the approver table holds (compliance review of PR 200)."""
+        address there, whatever the approver table holds (compliance review of PR 200).
+
+        ``nudge_lookup`` does the same for reminders and escalations (#40,
+        :func:`argus.intake.approval_reminders.stored_nudges`). They go out through the same
+        call, so only the approval client can send them."""
         if urlsplit(base_url).scheme != "https" and not standin:
             raise ValueError("the Graph base URL must use https unless it is the stand in")
         if GraphCall.SEND_APPROVAL_REQUEST in calls and (
@@ -635,6 +743,7 @@ class GraphClient:
         self.calls = frozenset(calls)
         self._approval_lookup = approval_lookup
         self._approval_domain = approval_domain.strip().lower() if approval_domain else None
+        self._nudge_lookup = nudge_lookup
         self._transport = _GuardedTransport(
             transport or httpx.HTTPTransport(),
             url,
@@ -881,6 +990,35 @@ class GraphClient:
         self._transport.expected_approval = stored
         try:
             self._post(f"{self._user}/sendMail", approval_body(mail))
+        finally:
+            self._transport.expected_approval = None
+
+    def send_approval_nudge(self, mail: NudgeMail) -> None:
+        """Send one stored reminder or escalation (#40), checked like an approval request:
+        against the row as the database holds it now, only while it is neither sent nor
+        failed and its request still waits, and only to an address at Max ASP's own domain.
+        Sent once, without retries."""
+        if (
+            GraphCall.SEND_APPROVAL_REQUEST not in self.calls
+            or self._nudge_lookup is None
+            or self._approval_domain is None
+        ):
+            raise GraphCallRefused("refused Graph approval reminder: not the approval client")
+        stored = self._nudge_lookup(mail.nudge_id)
+        if stored is None:
+            log.warning("Refused Graph approval reminder %s: not stored or not due", mail.nudge_id)
+            raise GraphCallRefused(
+                "refused Graph approval reminder: no unsent stored reminder with that ID whose"
+                " request still waits"
+            )
+        if stored.recipient_address.rpartition("@")[2].lower() != self._approval_domain:
+            log.warning("Refused Graph approval reminder %s: address outside", mail.nudge_id)
+            raise GraphCallRefused(
+                f"refused Graph approval reminder: the address is not at {self._approval_domain}"
+            )
+        self._transport.expected_approval = stored
+        try:
+            self._post(f"{self._user}/sendMail", nudge_body(mail))
         finally:
             self._transport.expected_approval = None
 

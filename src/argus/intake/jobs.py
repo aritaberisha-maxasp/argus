@@ -61,6 +61,7 @@ from argus.db.mode import DatabaseModeError
 from argus.db.mode import check_database_for_mode as _check_database_for_mode
 from argus.documents.store import AzureDocumentStore
 from argus.intake.accounts import chart_from_env
+from argus.intake.approval_reminders import stored_nudges
 from argus.intake.approvals import Approvals, stored_requests
 from argus.intake.digest import (
     APP_URL_ENV,
@@ -398,8 +399,8 @@ def _approvals(
     own_domain: str,
 ) -> Approvals | None:
     """The approval request client and the app's address for the link (#191), or None while
-    ``ARGUS_APP_URL`` is not set: checked invoices then wait in Received. Requests go only to
-    addresses at ``own_domain``."""
+    ``ARGUS_APP_URL`` is not set: checked invoices then wait in Received. Requests, reminders
+    and escalations (#40) go only to addresses at ``own_domain``."""
     if not environ.get(APP_URL_ENV, "").strip():
         log.info("ARGUS_APP_URL is not set, so checked invoices wait in Received")
         return None
@@ -408,9 +409,14 @@ def _approvals(
         calls=APPROVAL_REQUEST_CALLS,
         approval_lookup=stored_requests(engine, app_url),
         approval_domain=own_domain,
+        nudge_lookup=stored_nudges(engine, app_url),
     )
     resources.callback(client.close)
-    return Approvals(client, app_url, own_domain)
+    # Reminders go through the same client; escalations go to Benjamin at the digest address
+    # (#40). Without ARGUS_DIGEST_TO only reminders go out.
+    if not connections.digest_to:
+        log.info("ARGUS_DIGEST_TO is not set, so waiting invoices are not escalated")
+    return Approvals(client, app_url, own_domain, nudges=client, escalate_to=connections.digest_to)
 
 
 def _datev_gateway(connections: Connections) -> tuple[DatevConnectGateway, httpx.Client] | None:

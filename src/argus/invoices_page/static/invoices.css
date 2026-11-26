@@ -96,6 +96,7 @@
 .strong { color: var(--text); font-weight: 600; }
 .sub { font-size: 12px; color: var(--muted); }
 a.sub { color: var(--signal); }
+.sub.escalated { color: var(--flag); font-weight: 600; }
 a.sub:hover { color: var(--signal-hover); }
 
 .pill.status { white-space: nowrap; }

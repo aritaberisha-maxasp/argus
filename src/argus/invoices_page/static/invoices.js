@@ -577,6 +577,10 @@
       status.append(el("span", c.approval_sent_at
         ? "Sent to " + c.approval_to + " for approval, " + berlinTime(new Date(c.approval_sent_at))
         : "Waiting to email " + c.approval_to, "sub"));
+      // Escalated to finance after 5 working days without a decision (#40).
+      if (c.escalated_at) {
+        status.append(el("span", "Escalated, " + berlinTime(new Date(c.escalated_at)), "sub escalated"));
+      }
       const page = el("a", "Approval page", "sub");
       page.href = "/approvals/" + encodeURIComponent(c.case_id);
       status.append(page);

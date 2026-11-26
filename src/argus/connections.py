@@ -33,7 +33,14 @@ import httpx
 from pydantic import SecretStr
 
 from argus.datev.datevconnect import DatevConnectGateway
-from argus.intake.graph import ALL_CALLS, ApprovalMail, GraphCall, GraphClient, TokenProvider
+from argus.intake.graph import (
+    ALL_CALLS,
+    ApprovalMail,
+    GraphCall,
+    GraphClient,
+    NudgeMail,
+    TokenProvider,
+)
 from argus.wise.client import TOKEN_SECRET as WISE_TOKEN_SECRET
 from argus.wise.client import WiseClient
 
@@ -134,6 +141,7 @@ class Connections:
         calls: frozenset[GraphCall] = ALL_CALLS,
         approval_lookup: Callable[[int], ApprovalMail | None] | None = None,
         approval_domain: str | None = None,
+        nudge_lookup: Callable[[int], NudgeMail | None] | None = None,
     ) -> GraphClient:
         """The Graph client for the accounts mailbox. In demo mode it signs in to the fake
         Graph with the stand in token. Live, ``tokens`` signs in to Microsoft 365.
@@ -165,6 +173,7 @@ class Connections:
             calls=calls,
             approval_lookup=approval_lookup if approvals else None,
             approval_domain=approval_domain if approvals else None,
+            nudge_lookup=nudge_lookup if approvals else None,
         )
 
     def datev_gateway(self) -> DatevConnectGateway:
