@@ -199,7 +199,7 @@ def decide(
         _restore(db, before)
         return moved
     first = _decide_newest(db, case_id, "approved", comment)
-    above = db.execute(
+    above: bool | None = db.execute(
         text("select above_line from approval_amount where decision_id = :id"), {"id": first}
     ).scalar_one_or_none()
     if above is False:

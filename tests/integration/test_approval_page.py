@@ -574,7 +574,7 @@ def test_the_database_refuses_approval_without_the_proposal_the_person_saw(
     with (
         pytest.raises(
             CaseRuleBroken,
-            match="tax key proposal the person saw|decided on already; its account cannot change",
+            match=r"tax key proposal the person saw|decided on already; its account cannot change",
         ),
         unit_of_work(app, alice_actor) as db,
     ):

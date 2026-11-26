@@ -51,7 +51,9 @@ REASON_TEXT: dict[ExceptionReason, str] = {
     ExceptionReason.NO_ACCOUNT_PROPOSAL: "ARGUS cannot propose a G/L account and tax key",
     ExceptionReason.APPROVER_ABSENT: "The approver is away and the vendor has no deputy",
     ExceptionReason.APPROVER_ADDRESS_OUTSIDE: "The approver has an email address outside Max ASP",
-    ExceptionReason.SECOND_APPROVER_MISSING: "Above EUR 5,000, but nobody can give the second approval",
+    ExceptionReason.SECOND_APPROVER_MISSING: (
+        "Above EUR 5,000, but nobody can give the second approval"
+    ),
     ExceptionReason.SECOND_APPROVER_SAME_PERSON: (
         "The second approver also gave the first approval, as approver of the vendor"
     ),

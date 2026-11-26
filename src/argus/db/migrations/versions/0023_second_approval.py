@@ -73,7 +73,8 @@ def _earlier(prefix: str) -> ModuleType:
     """An earlier migration of this folder, to reuse its SQL instead of copying it."""
     (path,) = Path(__file__).parent.glob(f"{prefix}_*.py")
     spec = importlib.util.spec_from_file_location(f"argus_migration_{prefix}", path)
-    assert spec is not None and spec.loader is not None
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"migration {prefix} cannot be read")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
