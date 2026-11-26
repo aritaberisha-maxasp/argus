@@ -20,6 +20,9 @@ Like the exception queue page (#126), there are two kinds of routes:
   AP-08). The same two roles read every step of one case, from its email to its last status,
   and download it as a file. Both only read, in a read only transaction; there is no route that
   changes the trail. See ``argus.invoices_page.trail``.
+- **The straight through rate** (``GET /cases/straight-through``, NF-07). The same two roles see
+  how many invoices from known vendors needed no manual step, for the current and the last
+  month. See ``argus.invoices_page.rate``.
 
 Logs name only the person's ID, case and exception IDs, counts and outcome codes, never a
 vendor, customer, search word or comment (NF-03).
@@ -43,6 +46,7 @@ from argus.auth import Role, SignedInUser, require_role
 from argus.auth.tokens import TokenVerifier
 from argus.cases.model import CaseKind, CaseStatus, Outcome
 from argus.cases.store import CaseRuleBroken, unit_of_work, verify_chain
+from argus.invoices_page.rate import TARGET_PERCENT, MonthRate, straight_through
 from argus.invoices_page.resolve import (
     MAX_COMMENT,
     AlreadyResolved,
@@ -72,6 +76,7 @@ PAGE_PATH = "/invoices"
 # A POST with the filters in the body, so a search word (often a vendor's or a person's name)
 # never appears in an address and so never in an access log (NF-03).
 DATA_PATH = "/cases/search"
+RATE_PATH = "/cases/straight-through"
 _ASSETS = {
     "/invoices/app.js": ("invoices.js", "text/javascript; charset=utf-8"),
     "/invoices/app.css": ("invoices.css", "text/css; charset=utf-8"),
@@ -135,6 +140,17 @@ def list_json(found: CaseList) -> dict[str, Any]:
         "total": found.total,
         "truncated": found.truncated,
         "limit": MAX_ROWS,
+    }
+
+
+def rate_json(rate: MonthRate) -> dict[str, Any]:
+    return {
+        "month": rate.month,
+        "label": rate.label,
+        "straight": rate.straight,
+        "total": rate.total,
+        "percent": rate.percent,
+        "below_target": rate.below_target,
     }
 
 
@@ -240,6 +256,16 @@ def install_invoices_page(app: FastAPI, engine: Callable[[], Engine]) -> None:
             "yes" if filters != CaseFilter() else "no",
         )
         return _json(list_json(found))
+
+    @app.get(RATE_PATH)
+    def rate(user: CaseReader) -> Response:
+        """The share of invoices from known vendors with no manual step, for the current and
+        the last Berlin month (NF-07). Not narrowed by the list's filters."""
+        with engine().connect() as connection:
+            _read_only(connection)
+            months = straight_through(connection)
+        log.info("user %s read the straight through rate", user.object_id)
+        return _json({"months": [rate_json(m) for m in months], "target": TARGET_PERCENT})
 
     @app.get("/exceptions/{exception_id}/choices")
     def exception_choices(exception_id: int, user: CaseReader) -> Response:

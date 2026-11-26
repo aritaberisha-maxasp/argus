@@ -11,6 +11,10 @@
 // from its email to its last status, with time and actor, and downloads the same as a file.
 // The trail panel only reads: it has no field and no button that changes anything.
 //
+// Above the list, finance and admin see how many invoices from known vendors went through
+// without manual work in the current and the last month (#64, NF-07), in the warning color
+// below the 90 % target. The figure does not follow the filters.
+//
 // Sign in goes through the exception queue page, the one address registered in Entra
 // (docs/operations/sign-in.md), like the mailbox page (#135). Everything from the server is put
 // on the page as text (textContent), never as HTML, so nothing read from an invoice can run here.
@@ -265,7 +269,7 @@
   }
 
   const state = { token: null, filters: filtersFromAddress(), ticket: 0, data: null, open: null, done: "" };
-  const view = { heading: null, figures: null, tabs: null, list: null, note: null, form: null };
+  const view = { heading: null, figures: null, rate: null, tabs: null, list: null, note: null, form: null };
 
   function field(labelText, input) {
     const label = el("label", null, "filter");
@@ -379,7 +383,50 @@
     view.note.setAttribute("aria-live", "polite");
     view.list = el("div", null, "cases-body");
     panel.append(view.tabs, filterForm(), view.note, view.list);
-    show(intro, panel);
+
+    view.rate = el("section", null, "rate");
+    view.rate.setAttribute("aria-label", "Invoices without manual work");
+    show(intro, view.rate, panel);
+  }
+
+  // --- invoices without manual work (#64, NF-07) ------------------------------------------
+
+  async function loadRate() {
+    try {
+      const response = await fetch("/cases/straight-through", {
+        method: "GET",
+        headers: { Authorization: "Bearer " + (await state.token()) },
+        cache: "no-store",
+      });
+      // Only finance and admin may see the figure. Anyone else sees no box at all, so a missing
+      // role does not read like a fault (QA on PR 202).
+      if (response.status === 401 || response.status === 403) {
+        view.rate.remove();
+        return;
+      }
+      if (!response.ok) throw new Error(String(response.status));
+      renderRate(await response.json());
+    } catch (e) {
+      // The list still works; only this figure is missing.
+      view.rate.replaceChildren(el("p", "ARGUS could not work out the share of invoices without manual work right now.",
+        "rate-note"));
+    }
+  }
+
+  function renderRate(data) {
+    const title = el("h2", "Invoices from known vendors without manual work", "rate-title");
+    const goal = el("p", "Target: at least " + data.target + " %. Approval does not count as manual work.", "rate-note");
+    const list = el("dl", null, "rate-months");
+    for (const m of data.months) {
+      const box = el("div", null, "rate-month" + (m.below_target ? " below" : ""));
+      const value = m.total
+        ? m.straight + " of " + m.total + (m.total === 1 ? " invoice, " : " invoices, ") + m.percent + " %"
+        : "No invoices from known vendors yet";
+      box.append(el("dt", m.label, "rate-label"), el("dd", value, "rate-value" + (m.total ? "" : " muted")));
+      if (m.below_target) box.append(el("dd", "Below the target", "rate-flag"));
+      list.append(box);
+    }
+    view.rate.replaceChildren(title, goal, list);
   }
 
   async function refresh() {
@@ -775,6 +822,7 @@
       state.token = token;
       showMailboxLink();
       build();
+      loadRate();
       await refresh();
     } catch (e) {
       message(e && e.message ? e.message : "Something went wrong. Reload the page.", "problem");
