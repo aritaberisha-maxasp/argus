@@ -113,7 +113,12 @@ def decide(
 ) -> Decided:
     """Record the decision and move the case, in the caller's unit of work (whose actor is the
     person). Approve moves it to Approved, reject closes it as rejected (AP-07). The decision
-    names the proposal the page showed; an approval needs it, and it must still be current."""
+    names the proposal the page showed; an approval needs it, and it must still be current.
+
+    A first approval above EUR 5,000, or in another currency than EUR, leaves the case in
+    Awaiting approval (#39, AP-09): the database checked the EUR amount with the decision, and
+    the sweep reads the Wise rate or sends the second approval request. A second approval
+    moves it to Approved."""
     stored = checked_comment(choice, comment)
     _still_waits(db, case_id, request_id, proposal_id)
     if choice is Choice.APPROVE and proposal_id is None:
@@ -134,6 +139,8 @@ def decide(
             "comment": stored,
         },
     ).scalar_one()
+    if choice is Choice.APPROVE and not _settles(db, request_id, decision_id):
+        return Decided(case_id, decision_id, CaseStatus.AWAITING_APPROVAL)
     if choice is Choice.APPROVE:
         to, closed = CaseStatus.APPROVED, None
     else:
@@ -143,6 +150,21 @@ def decide(
     ):
         raise NotWaiting(case_id)
     return Decided(case_id, decision_id, to)
+
+
+def _settles(db: Connection, request_id: int, decision_id: int) -> bool:
+    """Whether this approval settles the case: a second approval does, and a first one whose
+    amount in EUR is known and at or below the line (migration 0023)."""
+    settles: bool = db.execute(
+        text(
+            "select q.step = 'second' or exists ("
+            "  select 1 from approval_amount m where m.decision_id = :decision"
+            "  and not m.above_line)"
+            " from approval_request q where q.id = :request"
+        ),
+        {"request": request_id, "decision": decision_id},
+    ).scalar_one()
+    return settles
 
 
 def change_account(

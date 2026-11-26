@@ -321,6 +321,10 @@ class ApprovalMail:
     currency: str
     credit_note: bool
     link: str
+    # A second approval above EUR 5,000 (#39): who gave the first one, and whether that was the
+    # same person, which Arita allowed for Benjamin on 23 Nov.
+    first_approval_by: str | None = None
+    same_person: bool = False
 
 
 MAX_APPROVAL_FIELD = 120
@@ -351,10 +355,24 @@ def render_approval(mail: ApprovalMail) -> tuple[str, str]:
         if mail.on_behalf_of_name
         else ""
     )
+    second = ""
+    if mail.first_approval_by and mail.same_person:
+        second = (
+            f"This {what} is above EUR 5,000, so it needs a second approval. You gave the first"
+            ' one as the vendor\'s approver. Your second approval will be marked "same person"'
+            " in the audit trail.\n\n"
+        )
+    elif mail.first_approval_by:
+        second = (
+            f"This {what} is above EUR 5,000, so it needs your second approval."
+            f" {_one_line(mail.first_approval_by)} gave the first approval.\n\n"
+        )
+    if second:
+        subject = f"ARGUS: second approval for {what} {number} from {vendor}"
     text_body = (
         f"Hello {_one_line(mail.recipient_name)},\n\n"
         f"A checked {what} is waiting for your approval in ARGUS.\n\n"
-        f"{deputy}"
+        f"{deputy}{second}"
         f"Vendor: {vendor}\n"
         f"{what.capitalize()} number: {number}\n"
         f"Gross amount: {approval_amount(mail.gross_cents, mail.currency)}\n\n"

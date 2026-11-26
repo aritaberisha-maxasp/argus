@@ -870,6 +870,11 @@ def test_the_trace_shows_the_email_and_every_step(app: Engine) -> None:
         "status_changed",
         # The person asked decides on the approval page, then the case moves on (#38).
         "approval_decided",
+        # The approval in EUR is checked against EUR 5,000 right away. This case is above
+        # it, so it goes to the second approver, who approves too (#39).
+        "approval_amount_checked",
+        "approval_requested",
+        "approval_decided",
     ] + ["status_changed"] * 4
     assert events[-1].to_status is S.PAID
     assert all(e.actor and e.occurred_at for e in events)

@@ -84,6 +84,7 @@ from argus.secrets import EnvironmentSecretStore
 from argus.sorting import SortingConfig
 from argus.sorting.config import Thresholds
 from argus.sorting.language_model import AzureOpenAIModel
+from argus.wise.client import WiseClient
 
 log = logging.getLogger("argus.intake.jobs")
 
@@ -410,7 +411,20 @@ def _approvals(
         approval_domain=own_domain,
     )
     resources.callback(client.close)
-    return Approvals(client, app_url, own_domain)
+    return Approvals(client, app_url, own_domain, _wise_rates(connections, resources))
+
+
+def _wise_rates(connections: Connections, resources: ExitStack) -> WiseClient | None:
+    """The Wise client that reads the rate for a first approval in another currency (#39), or
+    None while Wise is not set: such invoices then wait after the first approval. It only reads
+    rates here; the Wise allowlist holds the rest (NF-04)."""
+    try:
+        client = connections.wise_client()
+    except (NotConnected, ConnectionSettingsError):
+        log.info("Wise is not set, so invoices in another currency wait after the first approval")
+        return None
+    resources.callback(client.close)
+    return client
 
 
 def _datev_gateway(connections: Connections) -> tuple[DatevConnectGateway, httpx.Client] | None:

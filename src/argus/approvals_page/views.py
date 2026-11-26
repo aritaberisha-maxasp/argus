@@ -16,6 +16,10 @@ These functions only read; nothing here changes a case.
   entered after the request went out was changed at approval.
 - **The decision**, once there is one: approved or rejected, by whom (name as it was then),
   when, and the comment.
+- **The second approval above EUR 5,000** (#39, AP-09): on a second request, who gave the first
+  approval and when; the amount in EUR the line was checked with (and the Wise rate for another
+  currency); and, after a first approval that does not settle the case, what it waits for.
+  A second approval given by the same person is marked "same person".
 
 Nothing here logs. Names and comments are personal data and stay out of the log (NF-03).
 """
@@ -49,6 +53,31 @@ class Request:
     on_behalf_of_name: str | None
     requested_at: datetime
     sent_at: datetime | None
+    step: str = "first"  # first, or second for the second approval above EUR 5,000 (#39)
+    same_person: bool = False  # the second approver also gave the first approval
+
+
+@dataclass(frozen=True)
+class FirstApproval:
+    """Who gave the first approval, shown on the second request (#39)."""
+
+    decided_by_name: str
+    decided_as: str
+    on_behalf_of_name: str | None
+    decided_at: datetime
+
+
+@dataclass(frozen=True)
+class AmountCheck:
+    """The gross amount in EUR a first approval was checked with against EUR 5,000 (#39)."""
+
+    currency: str
+    gross_cents: int
+    rate: str  # EUR for one unit of the currency, as text so no digit is lost
+    rate_time: datetime
+    eur_cents: int
+    above_line: bool
+    from_wise: bool
 
 
 @dataclass(frozen=True)
@@ -62,6 +91,7 @@ class Decision:
     decided_as: str
     on_behalf_of_name: str | None
     decided_at: datetime
+    same_person: bool = False
 
 
 @dataclass(frozen=True)
@@ -103,6 +133,7 @@ class ApprovalRow:
     on_behalf_of_name: str | None
     requested_at: datetime
     sent_at: datetime | None
+    step: str = "first"
 
 
 @dataclass(frozen=True)
@@ -126,6 +157,9 @@ class ApprovalView:
     decision: Decision | None
     file: InvoiceFile | None
     in_email_text: bool  # the invoice was in the email text, so there is no file to show
+    first_approval: FirstApproval | None = None  # on a second request (#39)
+    amount: AmountCheck | None = None  # the first approval's amount against EUR 5,000
+    next_step: str | None = None  # what a first approval that did not settle the case waits for
 
     @property
     def waiting(self) -> bool:
@@ -154,7 +188,7 @@ def newest_request(connection: Connection, case_id: int) -> Request | None:
             text(
                 """
                 select id, recipient_id, recipient_name, recipient_role, on_behalf_of_name,
-                       requested_at, sent_at
+                       requested_at, sent_at, step, same_person
                 from approval_request where case_id = :id order by id desc limit 1
                 """
             ),
@@ -173,6 +207,8 @@ def newest_request(connection: Connection, case_id: int) -> Request | None:
         on_behalf_of_name=row["on_behalf_of_name"],
         requested_at=row["requested_at"],
         sent_at=row["sent_at"],
+        step=row["step"],
+        same_person=row["same_person"],
     )
 
 
@@ -182,7 +218,7 @@ def decision_of(connection: Connection, request_id: int) -> Decision | None:
             text(
                 """
                 select id, request_id, decision, comment, decided_by, decided_by_name,
-                       decided_as, on_behalf_of_name, decided_at
+                       decided_as, on_behalf_of_name, decided_at, same_person
                 from approval_decision where request_id = :id
                 """
             ),
@@ -203,7 +239,79 @@ def decision_of(connection: Connection, request_id: int) -> Decision | None:
         decided_as=row["decided_as"],
         on_behalf_of_name=row["on_behalf_of_name"],
         decided_at=row["decided_at"],
+        same_person=row["same_person"],
     )
+
+
+def first_approval_of(connection: Connection, request_id: int) -> FirstApproval | None:
+    """The first approval a second request follows, or None for a first request (#39)."""
+    row = connection.execute(
+        text(
+            "select d.decided_by_name, d.decided_as, d.on_behalf_of_name, d.decided_at"
+            " from approval_request q join approval_decision d on d.id = q.after_decision_id"
+            " where q.id = :id"
+        ),
+        {"id": request_id},
+    ).one_or_none()
+    if row is None:
+        return None
+    return FirstApproval(row.decided_by_name, row.decided_as, row.on_behalf_of_name, row.decided_at)
+
+
+def amount_check(connection: Connection, case_id: int) -> AmountCheck | None:
+    """The newest first approval's amount against EUR 5,000, or None while it has none (#39)."""
+    row = connection.execute(
+        text(
+            "select m.currency, m.gross_minor, m.rate, m.rate_time, m.eur_minor, m.above_line,"
+            " m.source from approval_amount m where m.case_id = :id"
+            " order by m.decision_id desc limit 1"
+        ),
+        {"id": case_id},
+    ).one_or_none()
+    if row is None:
+        return None
+    return AmountCheck(
+        currency=row.currency,
+        gross_cents=row.gross_minor,
+        rate=format(row.rate.normalize(), "f"),
+        rate_time=row.rate_time,
+        eur_cents=row.eur_minor,
+        above_line=row.above_line,
+        from_wise=row.source == "wise",
+    )
+
+
+def _second_approver_name(connection: Connection) -> str | None:
+    name: str | None = connection.execute(
+        text("select a.name from second_approver s join approver a on a.object_id = s.approver_id")
+    ).scalar_one_or_none()
+    return name
+
+
+def _next_step(
+    connection: Connection,
+    status: CaseStatus,
+    request: Request,
+    decision: "Decision | None",
+    amount: AmountCheck | None,
+) -> str | None:
+    """What a first approval that did not settle the case waits for (#39), in a sentence."""
+    if (
+        status is not CaseStatus.AWAITING_APPROVAL
+        or request.step != "first"
+        or decision is None
+        or decision.decision != "approved"
+    ):
+        return None
+    if amount is None:
+        return (
+            "ARGUS reads the Wise rate at the time of the approval to compare the invoice with"
+            " EUR 5,000. The invoice waits until then."
+        )
+    if amount.above_line:
+        who = _second_approver_name(connection) or "the second approver"
+        return f"The invoice is above EUR 5,000, so it waits for the second approval by {who}."
+    return None
 
 
 def is_asked(request: Request | None, object_id: str) -> bool:
@@ -312,6 +420,8 @@ def approval_view(connection: Connection, case_id: int) -> ApprovalView | None:
     fields: dict[str, Any] = row["fields"] or {}
     found, in_text = invoice_file(connection, case_id)
     status = CaseStatus(row["status"])
+    decision = decision_of(connection, request.request_id)
+    amount = amount_check(connection, case_id)
     return ApprovalView(
         case_id=row["id"],
         kind=CaseKind(row["kind"]),
@@ -329,9 +439,12 @@ def approval_view(connection: Connection, case_id: int) -> ApprovalView | None:
         currency=row["currency"],
         request=request,
         proposal=_proposal(connection, case_id, request),
-        decision=decision_of(connection, request.request_id),
+        decision=decision,
         file=found,
         in_email_text=in_text,
+        first_approval=first_approval_of(connection, request.request_id),
+        amount=amount,
+        next_step=_next_step(connection, status, request, decision, amount),
     )
 
 
@@ -344,7 +457,7 @@ def waiting_rows(connection: Connection, only_for: str | None) -> list[ApprovalR
             """
             select c.id, c.kind, c.partner_account, c.document_number, c.gross_minor,
                    c.currency, q.recipient_id, q.recipient_name, q.recipient_role,
-                   q.on_behalf_of_name, q.requested_at, q.sent_at,
+                   q.on_behalf_of_name, q.requested_at, q.sent_at, q.step,
                    r.reading -> 'fields' -> 'issuer_name' ->> 'value' as vendor_name,
                    r.reading -> 'fields' -> 'due_date' ->> 'value' as due_date
             from invoice_case c
@@ -377,6 +490,7 @@ def waiting_rows(connection: Connection, only_for: str | None) -> list[ApprovalR
             on_behalf_of_name=r["on_behalf_of_name"],
             requested_at=r["requested_at"],
             sent_at=r["sent_at"],
+            step=r["step"],
         )
         for r in rows
     ]

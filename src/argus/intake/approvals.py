@@ -32,14 +32,34 @@ the person on it with exactly the text built from it. A request is marked sent, 
 ``approval_request_sent`` in the audit log, only after Graph accepted it. If sending fails, the
 next sweep tries again. A request marked sent is never sent again.
 
+**Second approval above EUR 5,000 (#39, AP-09).** After the vendor's approver approved on the
+approval page, the pass checks the gross amount against EUR 5,000.00:
+
+- An invoice in EUR is checked by the database with the decision; at or below the line the
+  page already moved it to Approved.
+- An invoice in another currency is converted at the Wise rate at the time of the first
+  approval (#18 question 9), read with the Wise client's ``get_rate``. The rate, its time and
+  the EUR amount are stored with the decision (``approval_amount``). At or below the line the
+  pass completes the move to Approved the person decided; the database allows this job, and
+  only this one, to do that. If the rate cannot be read, the case waits in Awaiting approval and
+  the next sweep tries again. It never counts as below the line.
+- Above the line the pass writes a second approval request to the second approver (Benjamin,
+  the ``second_approver`` setting an admin keeps) and the same email and page as the first one
+  go out. When nobody is set or he is away, the case goes to the exception queue as
+  ``second_approver_missing``. When he gave the first approval himself, as the vendor's
+  approver, it goes there as ``second_approver_same_person``; once a person lets it carry on,
+  the second request goes to him and is marked "same person" (Arita on #39, 23 Nov).
+
 The pass runs at the end of every live sweep, after the account proposal. In shadow mode it
 moves and sends nothing: it reads the mode at the start and again before each email
 (``docs/design/shadow-mode.md``). Logs name only case and request IDs (NF-03).
 """
 
 import logging
-from collections.abc import Callable, Collection
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal, InvalidOperation
 from typing import Any, Protocol
 
 import httpx
@@ -64,14 +84,24 @@ class ApprovalMailbox(Protocol):
     def send_approval_request(self, mail: ApprovalMail) -> None: ...
 
 
+class RateSource(Protocol):
+    """The one Wise call the pass needs (#39): the rate from one currency to another at a time.
+    :class:`argus.wise.client.WiseClient` is the real one."""
+
+    def get_rate(self, source: str, target: str, at: str | None = None) -> Mapping[str, Any]: ...
+
+
 @dataclass(frozen=True)
 class Approvals:
     """What the pass needs: the approval client, the address of the ARGUS app and Max ASP's
-    own email domain (``ARGUS_OWN_DOMAIN``), the only one approval requests go to."""
+    own email domain (``ARGUS_OWN_DOMAIN``), the only one approval requests go to. ``rates``
+    reads the Wise rate for invoices in another currency than EUR (#39); without it they wait
+    after the first approval."""
 
     mailbox: ApprovalMailbox
     app_url: str
     own_domain: str
+    rates: RateSource | None = None
 
     def inside(self, address: str) -> bool:
         return is_own_address(address, self.own_domain)
@@ -102,6 +132,12 @@ class ApprovalPass:
     sent: int = 0
     failed: int = 0
     not_sent: list[int] = field(default_factory=list)  # request IDs still waiting to be sent
+    # The second approval above EUR 5,000 (#39).
+    rates_read: int = 0  # Wise rates stored for a first approval in another currency
+    rate_waiting: int = 0  # first approvals whose Wise rate could not be read yet
+    completed: int = 0  # cases at or below the line moved to Approved after the rate
+    second_requested: int = 0  # second requests written
+    second_queued: int = 0  # cases sent to the queue: no second approver, or the same person
 
 
 @dataclass(frozen=True)
@@ -150,6 +186,8 @@ def request_approvals(
     only = _only(cases)
     _look_again(engine, approvals, only, result)
     _move_checked(engine, approvals, only, result)
+    _read_rates(engine, approvals, only, result)
+    _second_requests(engine, approvals, only, result)
     _send_unsent(engine, approvals, only, result)
     return result
 
@@ -291,15 +329,263 @@ def _move_one(db: Connection, approvals: Approvals, case_id: int, result: Approv
     result.requested += 1
 
 
+# ------------------------------------------------------- the line at EUR 5,000 (#39, AP-09)
+
+# First approvals of cases that still wait, in another currency than EUR, with no amount yet.
+_NO_AMOUNT = """
+    select d.id as decision_id, d.case_id, d.decided_at, upper(btrim(c.currency)) as currency
+    from invoice_case c
+    join lateral (
+      select * from approval_request where case_id = c.id order by id desc limit 1
+    ) q on true
+    join approval_decision d on d.request_id = q.id and d.decision = 'approved'
+    where c.status = 'awaiting_approval' and q.step = 'first'
+      and not exists (select 1 from approval_amount m where m.decision_id = d.id)
+      and (cast(:only as bigint[]) is null or c.id = any(cast(:only as bigint[])))
+    order by d.id
+"""
+
+
+class RateUnreadable(ValueError):
+    """Wise answered, but not with a rate above 0 and its time."""
+
+
+# How far the time of a Wise rate may lie from the first approval: Wise answers with the rate
+# of the minute (at most the hour) at or before the time asked, and clocks differ a little. The
+# database holds the same window (migration 0023).
+RATE_BEFORE = timedelta(hours=1)
+RATE_AFTER = timedelta(minutes=5)
+
+
+def wise_time(moment: datetime) -> str:
+    """A time as Wise's rate examples write it: UTC, to the second, no offset."""
+    return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def _rate_of(
+    answer: Mapping[str, Any], currency: str, decided_at: datetime
+) -> tuple[Decimal, datetime]:
+    """The rate and its time from a Wise answer, or RateUnreadable. Only a rate from the
+    currency to EUR, from the time of the first approval, counts (code review of PR 210)."""
+    try:
+        rate = Decimal(str(answer["rate"]))
+        at = datetime.fromisoformat(str(answer["time"]).strip())
+        pair = (str(answer["source"]).upper(), str(answer["target"]).upper())
+    except (KeyError, TypeError, ValueError, InvalidOperation):
+        raise RateUnreadable("Wise gave no rate, time and currencies") from None
+    if at.tzinfo is None:
+        at = at.replace(tzinfo=UTC)  # Wise writes UTC
+    if not rate.is_finite() or rate <= 0:
+        raise RateUnreadable("Wise gave no rate above 0")
+    if pair != (currency, "EUR"):
+        raise RateUnreadable("Wise gave a rate for other currencies")
+    if not decided_at - RATE_BEFORE <= at <= decided_at + RATE_AFTER:
+        raise RateUnreadable("Wise gave a rate from another time than the first approval")
+    return rate, at
+
+
+def _read_rates(
+    engine: Engine, approvals: Approvals, only: list[int] | None, result: ApprovalPass
+) -> None:
+    with engine.connect() as connection:
+        rows = connection.execute(text(_NO_AMOUNT), {"only": only}).all()
+    for row in rows:
+        decision_id: int = row.decision_id
+        case_id: int = row.case_id
+        decided_at: datetime = row.decided_at
+        if row.currency == "EUR":
+            continue  # the database checks EUR with the decision; nothing to read
+        if approvals.rates is None:
+            log.info("Case %s waits for the Wise rate, Wise is not set", case_id)
+            result.rate_waiting += 1
+            continue
+        try:
+            answer = approvals.rates.get_rate(row.currency, "EUR", at=wise_time(decided_at))
+            rate, at = _rate_of(answer, row.currency, decided_at)
+        except Exception:
+            # Never below the line by default: the case waits and the next sweep tries again.
+            log.exception("Wise rate for case %s not read, next sweep retries", case_id)
+            result.rate_waiting += 1
+            result.failed += 1
+            continue
+        try:
+            with unit_of_work(engine, APPROVAL_ACTOR) as db:
+                _store_rate(db, case_id, decision_id, rate, at, result)
+        except Exception:
+            log.exception("Wise rate for case %s not stored, next sweep retries", case_id)
+            result.rate_waiting += 1
+            result.failed += 1
+
+
+def _store_rate(
+    db: Connection,
+    case_id: int,
+    decision_id: int,
+    rate: Decimal,
+    at: datetime,
+    result: ApprovalPass,
+) -> None:
+    db.execute(text("select id from invoice_case where id = :id for update"), {"id": case_id})
+    if get_case(db, case_id).status is not CaseStatus.AWAITING_APPROVAL:
+        return  # moved on since the work was listed
+    above: bool = db.execute(
+        text(
+            "insert into approval_amount (decision_id, rate, rate_time)"
+            " values (:decision, :rate, :at) returning above_line"
+        ),
+        {"decision": decision_id, "rate": rate, "at": at},
+    ).scalar_one()
+    result.rates_read += 1
+    if not above:
+        # The person approved; at or below the line that settles it (AP-09). The database lets
+        # this job, and no other, complete the move (migration 0023).
+        move_case(db, case_id, expected=CaseStatus.AWAITING_APPROVAL, to=CaseStatus.APPROVED)
+        result.completed += 1
+
+
+# First approvals above the line whose case waits with no second request and no open exception.
+_SECOND_DUE = """
+    select c.id as case_id, d.id as decision_id
+    from invoice_case c
+    join lateral (
+      select * from approval_request where case_id = c.id order by id desc limit 1
+    ) q on true
+    join approval_decision d on d.request_id = q.id and d.decision = 'approved'
+    join approval_amount m on m.decision_id = d.id and m.above_line
+    where c.status = 'awaiting_approval' and q.step = 'first'
+      and not exists (select 1 from exception_item e
+                      where e.case_id = c.id and e.resolved_at is null)
+      and (cast(:only as bigint[]) is null or c.id = any(cast(:only as bigint[])))
+    order by c.id
+"""
+
+
+@dataclass(frozen=True)
+class _Second:
+    """The second approver and what the pass needs to know about this case."""
+
+    object_id: str
+    name: str
+    address: str
+    absent: bool
+    gave_first: bool  # he gave the first approval of this case too
+    may_give_both: bool  # a person let the same person exception carry on since then
+    deputy_for: str | None = None  # he gave the first approval as deputy of this approver
+
+
+def _second_for(db: Connection, case_id: int, decision_id: int) -> _Second | None:
+    row = db.execute(
+        text(
+            "select a.object_id, a.name, a.email, a.absent,"
+            " lower(d.decided_by) = lower('user:' || a.object_id) as gave_first,"
+            " exists (select 1 from exception_item e where e.case_id = :case"
+            "   and e.reason::text = 'second_approver_same_person'"
+            "   and e.outcome = 'accepted_with_comment' and e.resolved_at > d.decided_at)"
+            "   as may_give_both,"
+            " case when d.decided_as = 'deputy' then d.on_behalf_of_name end as deputy_for"
+            " from second_approver s join approver a on a.object_id = s.approver_id"
+            " cross join approval_decision d where d.id = :decision"
+        ),
+        {"case": case_id, "decision": decision_id},
+    ).first()
+    if row is None:
+        return None
+    return _Second(
+        row.object_id,
+        row.name,
+        row.email,
+        row.absent,
+        row.gave_first,
+        row.may_give_both,
+        row.deputy_for,
+    )
+
+
+def _second_requests(
+    engine: Engine, approvals: Approvals, only: list[int] | None, result: ApprovalPass
+) -> None:
+    with engine.connect() as connection:
+        work = connection.execute(text(_SECOND_DUE), {"only": only}).all()
+    for row in work:
+        case_id: int = row.case_id
+        try:
+            with unit_of_work(engine, APPROVAL_ACTOR) as db:
+                _second_one(db, approvals, case_id, row.decision_id, result)
+        except Exception:
+            log.exception("Second approval request failed on case %s, next sweep retries", case_id)
+            result.failed += 1
+
+
+_ABOVE = "The invoice is above EUR 5,000 gross, so it needs a second approval after the first."
+
+
+def _second_one(
+    db: Connection, approvals: Approvals, case_id: int, decision_id: int, result: ApprovalPass
+) -> None:
+    db.execute(text("select id from invoice_case where id = :id for update"), {"id": case_id})
+    if get_case(db, case_id).status is not CaseStatus.AWAITING_APPROVAL:
+        return  # moved on since the work was listed
+    second = _second_for(db, case_id, decision_id)
+    if second is None or second.absent or not approvals.inside(second.address):
+        if second is None:
+            why = "No second approver is set in ARGUS."
+        elif second.absent:
+            why = f"The second approver, {second.name}, is marked away."
+        else:
+            why = (
+                f"The second approver, {second.name}, has the email address {second.address},"
+                f" which is not at {approvals.own_domain}."
+            )
+        open_exception(
+            db,
+            ExceptionReason.SECOND_APPROVER_MISSING,
+            (
+                f"{_ABOVE} {why} An admin sets the second approver, or marks him back, or"
+                ' corrects his address in the approver table. Then pick "Checked, carry on"'
+                " and ARGUS sends him the request. Or reject the invoice."
+            ),
+            case_id=case_id,
+        )
+        result.second_queued += 1
+        return
+    if second.gave_first and not second.may_give_both:
+        open_exception(
+            db,
+            ExceptionReason.SECOND_APPROVER_SAME_PERSON,
+            (
+                f"{_ABOVE} {second.name} gave the first approval"
+                + (f" as deputy of {second.deputy_for}" if second.deputy_for else "")
+                + " and is also the second approver. Arita decided he may give the second"
+                " approval too. Carry on to send him the second request; his second approval"
+                ' is then marked "same person" in the audit trail. Or reject the invoice.'
+            ),
+            case_id=case_id,
+        )
+        result.second_queued += 1
+        return
+    stored: str = db.execute(
+        text(
+            "insert into approval_request (case_id, step) values (:id, 'second')"
+            " returning recipient_address"
+        ),
+        {"id": case_id},
+    ).scalar_one()
+    if not approvals.inside(stored):
+        raise RuntimeError(f"the second approver of case {case_id} changed")
+    result.second_requested += 1
+
+
 # ----------------------------------------------------------------------------- the email
 
 _UNSENT = """
     select q.id as request_id, q.case_id, q.vendor_account, q.recipient_address,
            q.recipient_name, q.on_behalf_of_name, c.kind, c.document_number, c.gross_minor,
-           c.currency, r.reading -> 'fields' -> 'issuer_name' ->> 'value' as vendor_name
+           c.currency, r.reading -> 'fields' -> 'issuer_name' ->> 'value' as vendor_name,
+           f.decided_by_name as first_approval_by, q.same_person
     from approval_request q
     join invoice_case c on c.id = q.case_id
     left join invoice_reading r on r.case_id = c.id and r.role = 'invoice'
+    left join approval_decision f on f.id = q.after_decision_id
     where q.sent_at is null and c.status = 'awaiting_approval'
       and (cast(:only as bigint[]) is null or q.case_id = any(cast(:only as bigint[])))
     order by q.id
@@ -324,16 +610,20 @@ def mail_for(row: Any, app_url: str) -> ApprovalMail:
         currency=(row["currency"] or "").strip(),
         credit_note=CaseKind(row["kind"]) is CaseKind.INCOMING_CREDIT_NOTE,
         link=approval_link(app_url, row["case_id"]),
+        first_approval_by=row["first_approval_by"],
+        same_person=bool(row["same_person"]),
     )
 
 
 _STORED = """
     select q.id as request_id, q.case_id, q.vendor_account, q.recipient_address,
            q.recipient_name, q.on_behalf_of_name, c.kind, c.document_number, c.gross_minor,
-           c.currency, r.reading -> 'fields' -> 'issuer_name' ->> 'value' as vendor_name
+           c.currency, r.reading -> 'fields' -> 'issuer_name' ->> 'value' as vendor_name,
+           f.decided_by_name as first_approval_by, q.same_person
     from approval_request q
     join invoice_case c on c.id = q.case_id
     left join invoice_reading r on r.case_id = c.id and r.role = 'invoice'
+    left join approval_decision f on f.id = q.after_decision_id
     where q.id = :id and q.sent_at is null and c.status = 'awaiting_approval'
       and c.gross_minor is not null and c.currency is not null
 """

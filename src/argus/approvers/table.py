@@ -287,6 +287,44 @@ def remove_vendor_approver(engine: Engine, by: ChangedBy, vendor_account: str) -
     return removed is not None
 
 
+# ---------------------------------------------------------------- the second approver (#39)
+
+
+def second_approver(connection: Connection) -> str | None:
+    """The Entra object ID of the person who gives second approvals above EUR 5,000 (AP-09),
+    or None while nobody is set."""
+    found: str | None = connection.execute(
+        text("select approver_id from second_approver")
+    ).scalar_one_or_none()
+    return found
+
+
+def set_second_approver(engine: Engine, by: ChangedBy, object_id: str) -> bool:
+    """Make this person, already in the approver table, the second approver (Benjamin). Taken by
+    Entra object ID, never by email address. Returns False when they already were."""
+    with _changing(engine, by) as db:
+        _name_the_person(db, by)
+        changed = db.execute(
+            text(
+                "insert into second_approver (approver_id) values (:id)"
+                " on conflict (only_one) do update set approver_id = excluded.approver_id"
+                " where second_approver.approver_id is distinct from excluded.approver_id"
+                " returning approver_id"
+            ),
+            {"id": object_id},
+        ).first()
+    return changed is not None
+
+
+def remove_second_approver(engine: Engine, by: ChangedBy) -> bool:
+    """Set nobody as second approver. Invoices above EUR 5,000 then go to the exception queue
+    after the first approval. Returns False when nobody was set."""
+    with _changing(engine, by) as db:
+        _name_the_person(db, by)
+        removed = db.execute(text("delete from second_approver returning approver_id")).first()
+    return removed is not None
+
+
 # ------------------------------------------------------------------------------- tests
 
 

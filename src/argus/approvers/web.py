@@ -1,4 +1,5 @@
-"""Routes to keep the approver table (#34, AP-01, AP-06, PY-13, VM-02).
+"""Routes to keep the approver table (#34, AP-01, AP-06, PY-13, VM-02) and the second approver
+for invoices above EUR 5,000 (#39, AP-09).
 
 Only the admin role (Arita) changes the table. Finance (Benjamin) and admin may read it. An
 approver gets 403, someone without a token 401. There is no page yet; these routes are what a
@@ -23,9 +24,12 @@ from argus.approvers.table import (
     list_approvers,
     list_vendor_approvers,
     remove_approver,
+    remove_second_approver,
     remove_vendor_approver,
     save_approver,
+    second_approver,
     set_absent,
+    set_second_approver,
     set_vendor_approver,
 )
 from argus.auth import Role, SignedInUser, require_role
@@ -90,9 +94,20 @@ class VendorApproverOut(BaseModel):
     direct_debit: bool
 
 
+class SecondApproverIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    approver: str
+
+    @field_validator("approver")
+    @classmethod
+    def entra_object_id(cls, value: str) -> str:
+        return _object_id(value) or ""
+
+
 class ApproverTableOut(BaseModel):
     approvers: list[ApproverOut]
     vendors: list[VendorApproverOut]
+    second_approver: str | None = None  # gives the second approval above EUR 5,000 (#39)
 
 
 class Changed(BaseModel):
@@ -115,6 +130,7 @@ def install_approver_routes(app: FastAPI, engine: Callable[[], Engine]) -> None:
         with engine().connect() as connection:
             people = list_approvers(connection)
             vendors = list_vendor_approvers(connection)
+            second = second_approver(connection)
         return ApproverTableOut(
             approvers=[
                 ApproverOut(object_id=p.object_id, name=p.name, email=p.email, absent=p.absent)
@@ -129,6 +145,7 @@ def install_approver_routes(app: FastAPI, engine: Callable[[], Engine]) -> None:
                 )
                 for v in vendors
             ],
+            second_approver=second,
         )
 
     @app.put("/approvers/{object_id}")
@@ -190,4 +207,28 @@ def install_approver_routes(app: FastAPI, engine: Callable[[], Engine]) -> None:
         if not removed:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "this vendor has no approver")
         log.info("approver row of vendor %s removed", vendor_account)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    @app.put("/second-approver")
+    def put_second_approver(body: SecondApproverIn, user: Admin) -> Changed:
+        """Set who gives the second approval above EUR 5,000 (AP-09): Benjamin's Entra account,
+        which must be in the approver table first. Never taken from an email address."""
+        try:
+            changed = set_second_approver(engine(), _by(user), body.approver)
+        except CaseRuleBroken as error:
+            raise _refused(error) from None
+        if changed:
+            log.info("second approver set")
+        return Changed(changed=changed)
+
+    @app.delete("/second-approver", status_code=status.HTTP_204_NO_CONTENT)
+    def delete_second_approver(user: Admin) -> Response:
+        """Set nobody. Invoices above EUR 5,000 then wait in the exception queue."""
+        try:
+            removed = remove_second_approver(engine(), _by(user))
+        except CaseRuleBroken as error:
+            raise _refused(error) from None
+        if not removed:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "no second approver is set")
+        log.info("second approver removed")
         return Response(status_code=status.HTTP_204_NO_CONTENT)
