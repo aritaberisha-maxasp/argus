@@ -32,6 +32,11 @@ the person on it with exactly the text built from it. A request is marked sent, 
 ``approval_request_sent`` in the audit log, only after Graph accepted it. If sending fails, the
 next sweep tries again. A request marked sent is never sent again.
 
+Waiting invoices are followed up in :mod:`argus.intake.approval_reminders` (#40): a new request
+when the person asked can no longer decide (away, replaced in the approver table, or the vendor
+changed), a reminder after 3 working days and an escalation to finance after 5. Only the
+newest request of a case is ever emailed.
+
 The pass runs at the end of every live sweep, after the account proposal. In shadow mode it
 moves and sends nothing: it reads the mode at the start and again before each email
 (``docs/design/shadow-mode.md``). Logs name only case and request IDs (NF-03).
@@ -40,6 +45,7 @@ moves and sends nothing: it reads the mode at the start and again before each em
 import logging
 from collections.abc import Callable, Collection
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Protocol
 
 import httpx
@@ -47,7 +53,7 @@ from sqlalchemy import Connection, Engine, text
 
 from argus.cases.model import Actor, CaseKind, CaseStatus, ExceptionReason, Outcome
 from argus.cases.store import get_case, move_case, open_exception, resolve_exception, unit_of_work
-from argus.intake.graph import ApprovalMail, GraphApiError, GraphCallRefused
+from argus.intake.graph import ApprovalMail, GraphApiError, GraphCallRefused, NudgeMail
 from argus.intake.mode import is_live
 
 log = logging.getLogger("argus.intake.approvals")
@@ -64,14 +70,27 @@ class ApprovalMailbox(Protocol):
     def send_approval_request(self, mail: ApprovalMail) -> None: ...
 
 
+class NudgeMailbox(Protocol):
+    """The approval client's call for reminders and escalations (#40). The same
+    :class:`argus.intake.graph.GraphClient`, built with a ``nudge_lookup`` too."""
+
+    def send_approval_nudge(self, mail: NudgeMail) -> None: ...
+
+
 @dataclass(frozen=True)
 class Approvals:
     """What the pass needs: the approval client, the address of the ARGUS app and Max ASP's
-    own email domain (``ARGUS_OWN_DOMAIN``), the only one approval requests go to."""
+    own email domain (``ARGUS_OWN_DOMAIN``), the only one approval requests go to.
+
+    ``nudges`` sends reminders and escalations (#40), usually the same client as ``mailbox``;
+    without it none go out. ``escalate_to`` is where escalations go (``ARGUS_DIGEST_TO``,
+    Benjamin); without it only reminders go out."""
 
     mailbox: ApprovalMailbox
     app_url: str
     own_domain: str
+    nudges: NudgeMailbox | None = None
+    escalate_to: str | None = None
 
     def inside(self, address: str) -> bool:
         return is_own_address(address, self.own_domain)
@@ -102,6 +121,9 @@ class ApprovalPass:
     sent: int = 0
     failed: int = 0
     not_sent: list[int] = field(default_factory=list)  # request IDs still waiting to be sent
+    renewed: int = 0  # waiting cases sent to someone else, who can decide now (#40)
+    reminded: int = 0  # reminders sent after 3 working days (#40)
+    escalated: int = 0  # escalations sent after 5 working days (#40)
 
 
 @dataclass(frozen=True)
@@ -137,20 +159,32 @@ def _only(cases: Collection[int] | None) -> list[int] | None:
 
 
 def request_approvals(
-    engine: Engine, approvals: Approvals, *, cases: Collection[int] | None = None
+    engine: Engine,
+    approvals: Approvals,
+    *,
+    cases: Collection[int] | None = None,
+    now: Callable[[], datetime] | None = None,
 ) -> ApprovalPass:
-    """One pass: carry on with absent approver exceptions that can go on, move every fully
-    checked case to Awaiting approval, then send every request not sent yet. ``cases`` limits
-    the pass to these case IDs (tests share one database). Each case and each email is its own
-    step, so one failure leaves the others alone."""
+    """One pass: carry on with absent approver exceptions that can go on, send waiting cases
+    to someone else when their person can no longer decide (#40), move every fully checked
+    case to Awaiting approval, send every request not sent yet, then the reminders and
+    escalations that are due (#40). ``cases`` limits the pass to these case IDs (tests share
+    one database), ``now`` is the clock for the working days (tests). Each case and each email
+    is its own step, so one failure leaves the others alone."""
+    from argus.intake import approval_reminders
+
     result = ApprovalPass()
     if not is_live(engine):
         log.info("Approval requests wait, ARGUS runs in shadow mode")
         return result
     only = _only(cases)
     _look_again(engine, approvals, only, result)
+    approval_reminders.renew_waiting(engine, approvals, only, result)
     _move_checked(engine, approvals, only, result)
     _send_unsent(engine, approvals, only, result)
+    approval_reminders.send_nudges(
+        engine, approvals, only, result, now or approval_reminders.utc_now
+    )
     return result
 
 
@@ -200,6 +234,10 @@ def _look_again(
                 )
                 resolve_exception(db, exception_id, Outcome.RETRIED, resolution=resolution)
                 result.resumed += 1
+                # A waiting case goes back to whoever can decide now, with a new clock (#40).
+                from argus.intake.approval_reminders import renew_after_exception
+
+                renew_after_exception(db, approvals, case_id, result)
         except Exception:
             log.exception("Approver check failed on case %s, next sweep retries", case_id)
             result.failed += 1
@@ -301,6 +339,7 @@ _UNSENT = """
     join invoice_case c on c.id = q.case_id
     left join invoice_reading r on r.case_id = c.id and r.role = 'invoice'
     where q.sent_at is null and c.status = 'awaiting_approval'
+      and q.id = (select max(id) from approval_request where case_id = q.case_id)
       and (cast(:only as bigint[]) is null or q.case_id = any(cast(:only as bigint[])))
     order by q.id
 """
@@ -335,6 +374,7 @@ _STORED = """
     join invoice_case c on c.id = q.case_id
     left join invoice_reading r on r.case_id = c.id and r.role = 'invoice'
     where q.id = :id and q.sent_at is null and c.status = 'awaiting_approval'
+      and q.id = (select max(id) from approval_request where case_id = q.case_id)
       and c.gross_minor is not null and c.currency is not null
 """
 

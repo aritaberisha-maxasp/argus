@@ -97,6 +97,8 @@ class CaseRow:
     decision: str | None = None
     decided_by_name: str | None = None
     decided_at: datetime | None = None
+    # When the newest request was escalated to finance after 5 working days (#40), or None.
+    escalated_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -131,7 +133,8 @@ _LIST_HEAD = """
            r.reading -> 'fields' -> 'due_date' -> 'value' as due_date,
            x.id as exception_id, x.reason as exception_reason,
            a.gl_account, a.tax_key, q.recipient_name as approval_to,
-           q.sent_at as approval_sent_at, k.decision, k.decided_by_name, k.decided_at
+           q.sent_at as approval_sent_at, k.decision, k.decided_by_name, k.decided_at,
+           n.sent_at as escalated_at
     """
 _OPEN_EXCEPTION = """
     left join lateral (
@@ -150,6 +153,8 @@ _OPEN_EXCEPTION = """
       order by q.id desc limit 1
     ) q on true
     left join approval_decision k on k.request_id = q.id
+    left join approval_nudge n
+      on n.request_id = q.id and n.kind = 'escalation' and n.sent_at is not null
     """
 _LIST_TAIL = " order by d.received_at desc, c.id desc limit :limit"
 _COUNT_HEAD = "select c.status, count(*) as n "
@@ -251,6 +256,7 @@ def _row(r: Any) -> CaseRow:
         decision=r["decision"],
         decided_by_name=r["decided_by_name"],
         decided_at=r["decided_at"],
+        escalated_at=r["escalated_at"],
     )
 
 

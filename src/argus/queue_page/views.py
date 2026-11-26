@@ -79,6 +79,8 @@ class CaseSummary:
     document_number: str | None
     gross_cents: int | None
     currency: str | None
+    # When the case's newest approval request was escalated to finance (#40), or None.
+    escalated_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -191,7 +193,12 @@ def open_exception_detail(connection: Connection, exception_id: int) -> Exceptio
                 select e.id, e.reason, e.detail, e.facts, e.opened_at,
                        clock_timestamp() as now, e.case_id, e.email_id, e.statement_id,
                        c.kind, c.status, c.resume_status, c.document_number, c.gross_minor,
-                       c.currency, c.source_email_id
+                       c.currency, c.source_email_id,
+                       (select n.sent_at from approval_nudge n
+                        where n.case_id = c.id and n.kind = 'escalation'
+                          and n.sent_at is not null
+                          and n.request_id = (select max(q.id) from approval_request q
+                                              where q.case_id = c.id)) as escalated_at
                 from exception_item e left join invoice_case c on c.id = e.case_id
                 where e.id = :id and e.resolved_at is null
                 """
@@ -213,6 +220,7 @@ def open_exception_detail(connection: Connection, exception_id: int) -> Exceptio
             document_number=row["document_number"],
             gross_cents=row["gross_minor"],
             currency=row["currency"],
+            escalated_at=row["escalated_at"],
         )
     email_id: int | None = row["email_id"] if case is None else row["source_email_id"]
     received_at, sender = None, None

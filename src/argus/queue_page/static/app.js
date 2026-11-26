@@ -96,6 +96,12 @@
     return { day: out.day + "." + out.month + "." + out.year, time: out.hour + ":" + out.minute };
   }
 
+  // When a waiting invoice went to finance after 5 working days (#40).
+  function escalatedOn(iso) {
+    const at = berlin(new Date(iso));
+    return at.day + ", " + at.time;
+  }
+
   function money(cents, currency) {
     if (cents === null || cents === undefined || !currency) return "";
     try {
@@ -649,6 +655,8 @@
         ["Kind", words(c.kind)],
         ["Status", words(c.status)],
         ["Goes back to", words(c.resume_status)],
+        // Waited 5 working days for a decision and went to finance (#40).
+        ["Escalated", c.escalated_at ? escalatedOn(c.escalated_at) : null],
         ["Document number", c.document_number],
         ["Amount", money(c.gross_cents, c.currency)],
       ])));

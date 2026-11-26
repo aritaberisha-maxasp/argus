@@ -219,6 +219,8 @@ def detail_json(detail: ExceptionDetail) -> dict[str, Any]:
     out = asdict(detail)
     out["opened_at"] = _iso(detail.opened_at)
     out["received_at"] = _iso(detail.received_at)
+    if out["case"] is not None:
+        out["case"]["escalated_at"] = _iso(detail.case.escalated_at if detail.case else None)
     for f in out["files"]:
         f["fingerprint"] = f.pop("sha256")
     return out
