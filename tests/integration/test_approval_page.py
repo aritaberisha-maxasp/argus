@@ -88,7 +88,7 @@ def captured(caplog: pytest.LogCaptureFixture) -> Iterator[pytest.LogCaptureFixt
 @pytest.fixture
 def vendor(app: Engine) -> str:
     """A vendor account of its own, approved by Alice with Dora as deputy."""
-    account = str(70000 + uuid.uuid4().int % 9000)
+    account = str(80000 + uuid.uuid4().int % 2000)  # clear of the fixture accounts 700xx
     for oid, name in ((ALICE, "Alice Approver"), (DORA, "Dora Deputy"), (OTTO, "Otto Other")):
         save_approver(app, ADMIN, oid, name, f"{name.split()[0].lower()}@maxasp-test.example")
         set_absent(app, ADMIN, oid, False)

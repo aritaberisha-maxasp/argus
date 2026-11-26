@@ -35,6 +35,8 @@ What each exception can end as here:
   case carries on, the comment says why), or reject the invoice.
 - **Values to check**: reject the invoice. Correcting the values stays on the exception queue
   page, which has the form for it (#112).
+- **Approver question**: reject the invoice. The answer is given on the exception queue page,
+  which also sends the invoice back to the approver with a new request (#192).
 - **IBAN mismatch**: reject the invoice. "Fixed in DATEV" is never offered here: ARGUS checks
   the IBAN against DATEV again on every sweep and ends the block by itself once DATEV holds the
   invoice's IBAN (#36, PR-05, VM-04). A click cannot stand in for that check.
@@ -129,6 +131,8 @@ _CARRY_ON: dict[ExceptionReason, tuple[Choice, ...]] = {
     ExceptionReason.APPROVER_ABSENT: (),
     # ARGUS ends it itself once the approver table holds a Max ASP address (#191).
     ExceptionReason.APPROVER_ADDRESS_OUTSIDE: (),
+    # Answered on the queue page, which sends the invoice back to the approver (#192).
+    ExceptionReason.APPROVER_QUERY: (),
     ExceptionReason.PAYMENT_FAILED: (),  # depends on the payment run
     ExceptionReason.CUSTOMER_QUERY: (ANSWERED,),
     ExceptionReason.BOOKING_ERROR: (FIXED_IN_DATEV,),
@@ -157,6 +161,10 @@ NOTES: dict[ExceptionReason, str] = {
         "Correct the approver's or deputy's email address in the approver table to a Max ASP"
         " address. ARGUS sees it on the next sweep and sends the invoice for approval by itself,"
         " so this page can only reject the invoice."
+    ),
+    ExceptionReason.APPROVER_QUERY: (
+        "To answer the approver's question, open it in the exception queue. The answer sends the"
+        " invoice back to the approver, so this page can only reject the invoice."
     ),
     ExceptionReason.PAYMENT_FAILED: (
         "A failed payment cannot be resolved from this page yet. It depends on the payment run."

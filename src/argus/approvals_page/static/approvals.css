@@ -69,3 +69,8 @@
   .invoice-file iframe { height: 60vh; min-height: 320px; }
   .actions .button { flex: 1 1 auto; }
 }
+
+/* Questions sent back and their answers (#192), above the invoice. */
+.queries .sub { margin: 0; }
+.queries .comment { border-left-color: var(--flag); color: var(--text); }
+.queries .comment.answer { border-left-color: var(--signal); }

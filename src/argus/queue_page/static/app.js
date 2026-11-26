@@ -46,6 +46,7 @@
     no_account_proposal: { label: "No G/L account", one: "No G/L account", many: "No G/L accounts" },
     approver_absent: { label: "Approver away", one: "Approver away", many: "Approvers away" },
     approver_address_outside: { label: "Approver address", one: "Outside approver address", many: "Outside approver addresses" },
+    approver_query: { label: "Approver question", one: "Approver question", many: "Approver questions", flag: true },
   };
 
   function reasonInfo(reason, text) {
@@ -655,6 +656,7 @@
 
     if (x.correctable) parts.push(correction(x));
     if (x.account_enterable) parts.push(accountEntry(x));
+    if (x.approver_query) parts.push(approverQuestion(x));
 
     if (x.email_id !== null) {
       const email = x.email
@@ -834,6 +836,78 @@
       el("p", "Open the invoice under \u201cFiles as stored\u201d to see what it is for. " +
         "The approver sees this account and tax key when they decide.", "muted"),
       form);
+  }
+
+  // --- answering an approver's question (#192) --------------------------------------------
+
+  // The approver sent the invoice back instead of deciding. The person answers, and the invoice
+  // goes back to the approver with the answer, or rejects the invoice.
+  function approverQuestion(x) {
+    const q = x.approver_query;
+    const asked = berlin(new Date(q.asked_at));
+    const who = q.asked_by_name + (q.asked_as === "deputy" ? ", as deputy of " + q.on_behalf_of_name : "");
+    const quote = el("blockquote", q.question, "comment");
+    const intro = el("p", "Asked by " + who + " on " + asked.day + ", " + asked.time + ".", "muted");
+    if (q.others_open) {
+      return block("The approver's question", intro, quote,
+        el("p", "This case has another open exception. Resolve that one first, then answer here.", "problem"));
+    }
+    const form = el("form", null, "correction");
+    const reply = el("textarea");
+    reply.id = "answer-text";
+    reply.required = true;
+    reply.maxLength = 500;
+    reply.className = "reason";
+    const label = el("label", "Your answer, or why you reject the invoice (the approver sees it; kept for ten years, so no personal details)");
+    label.htmlFor = reply.id;
+    const row = el("p", null, "field");
+    row.append(label, reply);
+    const sendButton = el("button", "Send answer to the approver", "button primary");
+    sendButton.type = "submit";
+    const reject = el("button", "Reject the invoice", "button");
+    reject.type = "button";
+    const result = el("p");
+    result.setAttribute("role", "status");
+    const actions = el("div", null, "actions");
+    actions.append(sendButton, reject);
+    form.append(row, actions, result);
+    async function go(choice) {
+      if (trimReason(reply.value).length < 3) {
+        result.className = "problem";
+        result.textContent = choice === "answer"
+          ? "Write an answer of at least 3 characters."
+          : "Say briefly why you reject the invoice (at least 3 characters).";
+        reply.focus();
+        return;
+      }
+      sendButton.disabled = true;
+      reject.disabled = true;
+      result.className = "muted";
+      result.textContent = "Saving…";
+      try {
+        const answer = await (await post(choice)).json();
+        const back = el("a", "Back to all open exceptions");
+        back.href = "/queue";
+        const done = answer.outcome === "answered"
+          ? el("p", "Sent. Case " + answer.case_id + " goes back to " + answer.sent_to +
+            " with your answer. The approval email goes out with the next sweep. ")
+          : el("p", "Case " + answer.case_id + " is rejected and closed. ");
+        done.append(back);
+        form.replaceWith(done);
+      } catch (e) {
+        result.className = "problem";
+        result.textContent = e.message;
+        sendButton.disabled = false;
+        reject.disabled = false;
+      }
+    }
+    function post(choice) {
+      return send(state.token, "/exceptions/" + encodeURIComponent(x.exception_id) + "/answer",
+        { choice, text: reply.value });
+    }
+    form.addEventListener("submit", (event) => { event.preventDefault(); go("answer"); });
+    reject.addEventListener("click", () => go("reject"));
+    return block("The approver's question", intro, quote, form);
   }
 
   function sourceLink() {

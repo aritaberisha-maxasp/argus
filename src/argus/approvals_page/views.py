@@ -16,6 +16,8 @@ These functions only read; nothing here changes a case.
   entered after the request went out was changed at approval.
 - **The decision**, once there is one: approved or rejected, by whom (name as it was then),
   when, and the comment.
+- **Questions** the approver sent back (#192), with the answer from the exception queue once
+  there is one, shown above the invoice.
 
 Nothing here logs. Names and comments are personal data and stay out of the log (NF-03).
 """
@@ -27,6 +29,7 @@ from typing import Any
 
 from sqlalchemy import Connection, text
 
+from argus.approvals_page.query import Query, queries_of
 from argus.cases.model import CaseKind, CaseStatus
 from argus.cases.money import to_cents
 from argus.intake.accounts import ProposalSource, current_proposal
@@ -126,10 +129,16 @@ class ApprovalView:
     decision: Decision | None
     file: InvoiceFile | None
     in_email_text: bool  # the invoice was in the email text, so there is no file to show
+    queries: list[Query]  # questions sent back and their answers, oldest first (#192)
 
     @property
     def waiting(self) -> bool:
         return self.status is CaseStatus.AWAITING_APPROVAL and self.decision is None
+
+    @property
+    def waiting_for_answer(self) -> bool:
+        """Sent back with a question that is not answered yet."""
+        return self.status is CaseStatus.EXCEPTION and any(q.outcome is None for q in self.queries)
 
 
 def _value(fields: dict[str, Any], name: str) -> str | None:
@@ -332,6 +341,7 @@ def approval_view(connection: Connection, case_id: int) -> ApprovalView | None:
         decision=decision_of(connection, request.request_id),
         file=found,
         in_email_text=in_text,
+        queries=queries_of(connection, case_id),
     )
 
 
